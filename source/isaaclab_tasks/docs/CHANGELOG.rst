@@ -1,6 +1,15 @@
 Changelog
 ---------
 
+1.5.18 (2026-04-02)
+~~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added ``Isaac-Deploy-Reach-Rizon4s-ROS`` environments.
+
+
 1.5.17 (2026-03-30)
 ~~~~~~~~~~~~~~~~~~~
 
