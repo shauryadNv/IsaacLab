@@ -412,7 +412,16 @@ class FrameTransformer(BaseFrameTransformer):
         # Resolve mask
         env_mask = self._resolve_indices_and_mask(None, env_mask)
         # Get raw transforms from PhysX view and reinterpret as transformf
-        raw_transforms = self._frame_physx_view.get_transforms().view(wp.transformf)
+        # raw_transforms = self._frame_physx_view.get_transforms().view(wp.transformf)
+        raw_transforms_flat = self._frame_physx_view.get_transforms()
+        raw_transforms_flat = wp.clone(raw_transforms_flat, device=self.device)
+
+        import numpy as np
+        transforms_np = raw_transforms_flat.numpy()
+        # Flatten to 1D: (N, 7) -> (N*7,)
+        transforms_flat = transforms_np.reshape(-1)
+        # Create new array with transformf dtype
+        raw_transforms = wp.array(transforms_flat, dtype=wp.transformf, device=self.device)
 
         wp.launch(
             frame_transformer_update_kernel,
