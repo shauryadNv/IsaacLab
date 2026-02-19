@@ -9,7 +9,6 @@ import warnings
 import weakref
 from typing import TYPE_CHECKING
 
-import numpy as np
 import torch
 import warp as wp
 
@@ -655,7 +654,7 @@ class ArticulationData(BaseArticulationData):
             self._physics_sim_view.update_articulations_kinematic()
             # set the buffer data and timestamp
             link_transforms = self._root_view.get_link_transforms()
-            
+
             # Handle shape mismatch: PhysX may return (num_envs, num_bodies, 7) float32
             # but we need (num_instances, num_bodies) transformf
             if len(link_transforms.shape) == 3 and link_transforms.dtype != wp.transformf:
@@ -674,7 +673,7 @@ class ArticulationData(BaseArticulationData):
                     transforms_flat = transforms_np.reshape(-1, 7)
                     link_transforms = wp.array(transforms_flat, dtype=wp.transformf, device=self.device)
                     link_transforms = link_transforms.reshape((transforms_np.shape[0], 1))
-            
+
             self._body_link_pose_w.data = wp.clone(link_transforms, device=self.device)
             self._body_link_pose_w.timestamp = self._sim_timestamp
 
@@ -1361,7 +1360,7 @@ class ArticulationData(BaseArticulationData):
                 transform = transform.reshape((num_envs, num_bodies))
             else:
                 raise ValueError(f"Unexpected transform shape/dtype: {transform.shape}, {transform.dtype}")
-        
+
         # Use pointer arithmetic to reinterpret as vec3f (keeps same shape)
         return wp.array(
             ptr=transform.ptr,
@@ -1392,7 +1391,7 @@ class ArticulationData(BaseArticulationData):
                 transform = transform.reshape((num_envs, num_bodies))
             else:
                 raise ValueError(f"Unexpected transform shape/dtype: {transform.shape}, {transform.dtype}")
-        
+
         # Use pointer arithmetic to reinterpret as quatf (keeps same shape)
         # Offset by 3*4 bytes to skip position (3 floats) and get quaternion (4 floats)
         return wp.array(
