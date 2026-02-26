@@ -27,8 +27,6 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 
 FLEXIV_RIZON4S_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        # usd_path="/home/shauryad/workspaces/rl_policy/isaac_sim_ws/exts/isaacsim.robot.manipulators.examples/data/flexiv/Rizon4s.usd",
-        # usd_path="https://github.com/flexivrobotics/isaac_sim_ws/blob/main/exts/isaacsim.robot.manipulators.examples/data/flexiv/Rizon4s.usd",
         usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/Flexiv/Rizon4s/rizon4s.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -90,8 +88,6 @@ This config is used for the reach task.
 
 FLEXIV_RIZON4S_GRAV_GRIPPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        # usd_path="/home/shauryad/workspaces/rl_policy/isaac_sim_ws/exts/isaacsim.robot.manipulators.examples/data/flexiv/Rizon4s_with_Grav.usd",
-        # usd_path="https://github.com/flexivrobotics/isaac_sim_ws/blob/main/exts/isaacsim.robot.manipulators.examples/data/flexiv/Rizon4s.usd",
         usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/Flexiv/Rizon4s/rizon4s_with_grav.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
