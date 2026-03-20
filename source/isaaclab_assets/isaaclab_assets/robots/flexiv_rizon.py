@@ -17,6 +17,7 @@ Reference: https://www.flexiv.com/product/rizon
 import math
 
 import isaaclab.sim as sim_utils
+from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
@@ -54,33 +55,34 @@ FLEXIV_RIZON4S_CFG = ArticulationCfg(
     ),
     actuators={
         # Joints 1-2: Higher torque (123 Nm), lower speed (120°/s = 2.094 rad/s)
-        "shoulder": IdealPDActuatorCfg(
+        "shoulder": ImplicitActuatorCfg(
             joint_names_expr=["joint[1-2]"],
-            effort_limit=123.0,
-            velocity_limit=2.094,
-            stiffness=1320.0,
-            damping=72.0,
+            effort_limit_sim=123.0,
+            velocity_limit_sim=2.094,
+            stiffness=None,
+            damping=None,
         ),
         # Joints 3-4: Medium torque (64 Nm), medium speed (140°/s = 2.443 rad/s)
-        "elbow": IdealPDActuatorCfg(
+        "elbow": ImplicitActuatorCfg(
             joint_names_expr=["joint[3-4]"],
-            effort_limit=64.0,
-            velocity_limit=2.443,
-            stiffness=600.0,
-            damping=35.0,
+            effort_limit_sim=64.0,
+            velocity_limit_sim=2.443,
+            stiffness=None,
+            damping=None,
         ),
         # Joints 5-7: Lower torque (39 Nm), higher speed (280°/s = 4.887 rad/s)
-        "wrist": IdealPDActuatorCfg(
+        "wrist": ImplicitActuatorCfg(
             joint_names_expr=["joint[5-7]"],
-            effort_limit=39.0,
-            velocity_limit=4.887,
-            stiffness=216.0,
-            damping=29.0,
+            effort_limit_sim=39.0,
+            velocity_limit_sim=4.887,
+            stiffness=None,
+            damping=None,
         ),
     },
 )
-"""Configuration of Flexiv Rizon 4s arm using explicit ideal PD actuator models.
+"""Configuration of Flexiv Rizon 4s arm using implicit actuator models.
 
+Note: stiffness and damping are set to None to use USD defaults.
 This config is used for the reach task.
 """
 
@@ -123,8 +125,8 @@ FLEXIV_RIZON4S_GRAV_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["joint[1-2]"],
             effort_limit=123.0,
             velocity_limit=2.094,
-            stiffness=1320.0,
-            damping=72.0,
+            stiffness=6000.0,
+            damping=108.4,
             friction=0.0,
             armature=0.0,
         ),
@@ -133,8 +135,8 @@ FLEXIV_RIZON4S_GRAV_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["joint[3-4]"],
             effort_limit=64.0,
             velocity_limit=2.443,
-            stiffness=600.0,
-            damping=35.0,
+            stiffness=4200.0,
+            damping=90.7,
             friction=0.0,
             armature=0.0,
         ),
@@ -143,8 +145,8 @@ FLEXIV_RIZON4S_GRAV_GRIPPER_CFG = ArticulationCfg(
             joint_names_expr=["joint[5-7]"],
             effort_limit=39.0,
             velocity_limit=4.887,
-            stiffness=216.0,
-            damping=29.0,
+            stiffness=1500.0,
+            damping=54.2,
             friction=0.0,
             armature=0.0,
         ),
