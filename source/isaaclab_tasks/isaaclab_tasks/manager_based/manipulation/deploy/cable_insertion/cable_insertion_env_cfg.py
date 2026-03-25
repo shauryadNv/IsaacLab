@@ -27,7 +27,7 @@ import isaaclab_tasks.manager_based.manipulation.deploy.mdp as mdp
 from isaaclab_tasks.manager_based.manipulation.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
 
 CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSETS_DIR = os.path.join(CONFIG_DIR, "assets")
+ASSETS_DIR = os.path.join(CONFIG_DIR, "cable_insertion_assets")
 
 ##
 # Asset Configurations
