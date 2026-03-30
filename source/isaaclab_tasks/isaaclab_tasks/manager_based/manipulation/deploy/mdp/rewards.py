@@ -12,13 +12,11 @@ from typing import TYPE_CHECKING
 import torch
 import warp as wp
 
-import carb
-
-from isaaclab.assets import Articulation
 from isaaclab.managers import ManagerTermBase, RewardTermCfg, SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms, quat_apply, quat_mul
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation
     from isaaclab.envs import ManagerBasedRLEnv
     from isaaclab.sensors.frame_transformer.frame_transformer import FrameTransformer
 
@@ -535,6 +533,8 @@ class keypoint_ee_gear_error(ManagerTermBase):
         env.extras["log"]["ee_gear_kp_error/weight_scale"] = weight_scale
 
         self._step_count += 1
+        import carb
+
         carb.log_info(
             f"[ee_gear_kp_error] step={self._step_count}"
             f" | mean_kp_error={mean_error_scalar:.5f}"
@@ -697,6 +697,8 @@ class keypoint_ee_gear_error_exp(ManagerTermBase):
         env.extras["log"]["ee_gear_kp_error_exp/weight_scale"] = weight_scale
 
         self._step_count += 1
+        import carb
+
         carb.log_info(
             f"[ee_gear_kp_error_exp] step={self._step_count}"
             f" | mean_kp_error={mean_error_scalar:.5f}"
