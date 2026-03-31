@@ -200,7 +200,7 @@ class RewardsCfg:
 
     plug_socket_keypoint_tracking_exp = RewTerm(
         func=mdp.keypoint_two_body_error_exp,
-        weight=2.0,
+        weight=3.0,
         params={
             "asset_cfg_1": SceneEntityCfg("gb300_socket"),
             "asset_cfg_2": SceneEntityCfg("gb300_plug"),
