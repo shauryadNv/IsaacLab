@@ -42,6 +42,7 @@ class GB300Plug(RigidObjectCfg):
     spawn = sim_utils.UsdFileCfg(
         usd_path=os.path.join(ASSETS_DIR, "plug_A_no_snapfit_latch_transformed.usd"),
         activate_contact_sensors=False,
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.3, 0.8)),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             kinematic_enabled=False,
@@ -58,7 +59,7 @@ class GB300Plug(RigidObjectCfg):
         mass_props=sim_utils.MassPropertiesCfg(mass=0.019),
         collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.02, rest_offset=0.0),
     )
-    init_state = RigidObjectCfg.InitialStateCfg(pos=(-0.6, -0.4, 0.1), rot=(0.0, 0.0, 0.0, 1.0))
+    init_state = RigidObjectCfg.InitialStateCfg(pos=(0.5, 0.0, 0.1), rot=(0.0, 0.0, 0.0, 1.0))
 
 
 @configclass
@@ -69,6 +70,7 @@ class GB300Socket(RigidObjectCfg):
     spawn = sim_utils.UsdFileCfg(
         usd_path=os.path.join(ASSETS_DIR, "socket_A_simplified_minimal_transformed.usd"),
         activate_contact_sensors=False,
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.6, 0.6)),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             kinematic_enabled=True,
@@ -85,7 +87,7 @@ class GB300Socket(RigidObjectCfg):
         mass_props=sim_utils.MassPropertiesCfg(mass=None),
         collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.02, rest_offset=0.0),
     )
-    init_state = RigidObjectCfg.InitialStateCfg(pos=(-0.6, -0.4, 0.1), rot=(0.0, 0.0, 0.0, 1.0))
+    init_state = RigidObjectCfg.InitialStateCfg(pos=(0.45, 0.0, 0.1), rot=(0.0, 0.0, 0.0, 1.0))
 
 
 ##
