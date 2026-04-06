@@ -178,7 +178,7 @@ class TerminationsCfg:
 
 
 @configclass
-class Rizon4sCableInsertionEnvCfg(CableInsertionEnvCfg):
+class Rizon4sGravCableInsertionEnvCfg(CableInsertionEnvCfg):
     """Configuration for Flexiv Rizon 4s with Grav Gripper Cable Insertion Environment."""
 
     def __post_init__(self):
@@ -289,7 +289,7 @@ class Rizon4sCableInsertionEnvCfg(CableInsertionEnvCfg):
 
 
 @configclass
-class Rizon4sCableInsertionEnvCfg_PLAY(Rizon4sCableInsertionEnvCfg):
+class Rizon4sGravCableInsertionEnvCfg_PLAY(Rizon4sGravCableInsertionEnvCfg):
     """Play configuration for Flexiv Rizon 4s cable insertion."""
 
     def __post_init__(self):

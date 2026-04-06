@@ -9,7 +9,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticRecurr
 
 
 @configclass
-class Rizon4sCableInsertionRNNPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+class Rizon4sGravCableInsertionRNNPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 512
     max_iterations = 1500
     save_interval = 50

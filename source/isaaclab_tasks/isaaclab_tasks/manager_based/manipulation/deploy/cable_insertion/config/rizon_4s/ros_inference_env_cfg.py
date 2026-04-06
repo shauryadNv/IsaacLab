@@ -8,11 +8,11 @@ import math
 from isaaclab.assets import RigidObjectCfg
 from isaaclab.utils import configclass
 
-from .joint_pos_env_cfg import Rizon4sCableInsertionEnvCfg
+from .joint_pos_env_cfg import Rizon4sGravCableInsertionEnvCfg
 
 
 @configclass
-class Rizon4sCableInsertionROSInferenceEnvCfg(Rizon4sCableInsertionEnvCfg):
+class Rizon4sGravCableInsertionROSInferenceEnvCfg(Rizon4sGravCableInsertionEnvCfg):
     """Configuration for ROS inference with Flexiv Rizon 4s for cable insertion.
 
     This configuration:
