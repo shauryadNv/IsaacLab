@@ -42,7 +42,7 @@ class GB300Plug(RigidObjectCfg):
     spawn = sim_utils.UsdFileCfg(
         usd_path=os.path.join(ASSETS_DIR, "plug_A_no_snapfit_latch_transformed.usd"),
         activate_contact_sensors=False,
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.3, 0.8)),
+        # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.3, 0.8)),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             kinematic_enabled=False,
@@ -70,7 +70,7 @@ class GB300Socket(RigidObjectCfg):
     spawn = sim_utils.UsdFileCfg(
         usd_path=os.path.join(ASSETS_DIR, "socket_A_simplified_minimal_transformed.usd"),
         activate_contact_sensors=False,
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.6, 0.6)),
+        # visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.6, 0.6)),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             kinematic_enabled=True,
@@ -242,6 +242,6 @@ class CableInsertionEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         self.episode_length_s = 6.66
         self.viewer.eye = (3.5, 3.5, 3.5)
-        self.decimation = 4
+        self.decimation = 33
         self.sim.render_interval = self.decimation
-        self.sim.dt = 1.0 / 120.0
+        self.sim.dt = 1.0 / 1000.0

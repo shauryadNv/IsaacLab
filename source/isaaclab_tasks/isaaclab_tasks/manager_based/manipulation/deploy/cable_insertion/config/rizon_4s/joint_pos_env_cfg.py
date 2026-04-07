@@ -83,8 +83,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("gb300_plug", body_names=".*"),
-            "static_friction_range": (3.0, 3.0),
-            "dynamic_friction_range": (3.0, 3.0),
+            "static_friction_range": (0.75, 0.75),
+            "dynamic_friction_range": (0.75, 0.75),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 16,
         },
@@ -95,8 +95,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("gb300_socket", body_names=".*"),
-            "static_friction_range": (0.75, 0.75),
-            "dynamic_friction_range": (0.75, 0.75),
+            "static_friction_range": (0.0, 0.0),
+            "dynamic_friction_range": (0.0, 0.0),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 16,
         },
@@ -123,7 +123,7 @@ class EventCfg:
             "pose_range": {
                 "x": [0.0, 0.0],
                 "y": [0.0, 0.0],
-                "z": [-0.1, -0.05],
+                "z": [0.0, 0.0],
                 "roll": [0.0, 0.0],
                 "pitch": [0.0, 0.0],
                 "yaw": [0.0, 0.0],
@@ -138,7 +138,7 @@ class EventCfg:
         mode="reset",
         params={
             "robot_asset_cfg": SceneEntityCfg("robot"),
-            "pos_randomization_range": {"x": [0.0, 0.0], "y": [0.0, 0.0], "z": [0.0, 0.0]},
+            "pos_randomization_range": {"x": [-0.0, 0.0], "y": [-0.00, 0.00], "z": [-0.00, 0.00]},
             "target_object_name": "gb300_plug",
             "grasp_offset": [0.0, 0.0, 0.0],
         },
@@ -156,9 +156,9 @@ class TerminationsCfg:
         params={
             "robot_asset_cfg": SceneEntityCfg("robot"),
             "plug_asset_cfg": SceneEntityCfg("gb300_plug"),
-            "distance_threshold": 0.1,
+            "distance_threshold": 0.15,
             "end_effector_body_name": "link7",
-            "grasp_offset": [-0.531, -0.025, -0.383],
+            "grasp_offset": [0.0, 0.0, -0.35],
             "grasp_rot_offset": [-0.70711, 0.70711, 0.0, 0.0],
         },
     )
@@ -168,8 +168,8 @@ class TerminationsCfg:
         params={
             "robot_asset_cfg": SceneEntityCfg("robot"),
             "plug_asset_cfg": SceneEntityCfg("gb300_plug"),
-            "roll_threshold_deg": 30.0,
-            "pitch_threshold_deg": 30.0,
+            "roll_threshold_deg": 15.0,
+            "pitch_threshold_deg": 15.0,
             "yaw_threshold_deg": 180.0,
             "end_effector_body_name": "link7",
             "grasp_rot_offset": [-0.70711, 0.70711, 0.0, 0.0],
@@ -186,9 +186,13 @@ class Rizon4sGravCableInsertionEnvCfg(CableInsertionEnvCfg):
 
         self.end_effector_body_name = "link7"
         self.num_arm_joints = 7
-        self.grasp_offset = [-0.531, -0.025, -0.39]
+        self.grasp_offset = [0.0, 0.0, -0.35]
         self.grasp_rot_offset = [-0.70711, 0.70711, 0.0, 0.0]
         self.gripper_joint_setter_func = set_finger_joint_pos_grav
+
+        self.plug_orientation_roll_threshold_deg = 15.0
+        self.plug_orientation_pitch_threshold_deg = 15.0
+        self.plug_orientation_yaw_threshold_deg = 180.0
 
         # Observation configuration for Rizon 4s arm joints only
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = [
@@ -204,13 +208,16 @@ class Rizon4sGravCableInsertionEnvCfg(CableInsertionEnvCfg):
         # Override terminations
         self.terminations = TerminationsCfg()
 
-        # Populate termination parameters
-        self.terminations.plug_dropped.params["end_effector_body_name"] = self.end_effector_body_name
-        self.terminations.plug_dropped.params["grasp_offset"] = self.grasp_offset
-        self.terminations.plug_dropped.params["grasp_rot_offset"] = self.grasp_rot_offset
-
-        self.terminations.plug_orientation_exceeded.params["end_effector_body_name"] = self.end_effector_body_name
-        self.terminations.plug_orientation_exceeded.params["grasp_rot_offset"] = self.grasp_rot_offset
+        # Update termination thresholds from config
+        self.terminations.plug_orientation_exceeded.params["roll_threshold_deg"] = (
+            self.plug_orientation_roll_threshold_deg
+        )
+        self.terminations.plug_orientation_exceeded.params["pitch_threshold_deg"] = (
+            self.plug_orientation_pitch_threshold_deg
+        )
+        self.terminations.plug_orientation_exceeded.params["yaw_threshold_deg"] = (
+            self.plug_orientation_yaw_threshold_deg
+        )
 
         # Action configuration
         self.joint_action_scale = 0.025
@@ -276,9 +283,22 @@ class Rizon4sGravCableInsertionEnvCfg(CableInsertionEnvCfg):
             damping=0.0,
         )
 
+        # Override plug/socket positions to match the gear assembly Flexiv workspace layout.
+        # Socket = gear_base (fixed target), Plug = gear (held object, offset above socket).
+        self.scene.gb300_socket.init_state = RigidObjectCfg.InitialStateCfg(
+            pos=(0.481, -0.073, 0.071),
+            rot=(0.0, 0.0, 0.70711, -0.70711),
+        )
+        self.scene.gb300_plug.init_state = RigidObjectCfg.InitialStateCfg(
+            pos=(0.481, -0.073, 0.139),
+            rot=(0.0, 0.0, 0.70711, -0.70711),
+        )
+
         # Grasp widths for Grav gripper holding the plug
-        self.hand_grasp_width = -0.065
-        self.hand_close_width = -0.15
+        # Positive values open the gripper; grasp_width creates a gap for the plug,
+        # close_width squeezes fingers to hold it (similar to gear_small in gear assembly).
+        self.hand_grasp_width = 0.05
+        self.hand_close_width = 0.0
 
         # Populate event term parameters
         self.events.set_robot_to_grasp_pose.params["end_effector_body_name"] = self.end_effector_body_name
@@ -286,6 +306,14 @@ class Rizon4sGravCableInsertionEnvCfg(CableInsertionEnvCfg):
         self.events.set_robot_to_grasp_pose.params["grasp_rot_offset"] = self.grasp_rot_offset
         self.events.set_robot_to_grasp_pose.params["grasp_offset"] = self.grasp_offset
         self.events.set_robot_to_grasp_pose.params["gripper_joint_setter_func"] = self.gripper_joint_setter_func
+
+        # Populate termination term parameters
+        self.terminations.plug_dropped.params["end_effector_body_name"] = self.end_effector_body_name
+        self.terminations.plug_dropped.params["grasp_offset"] = self.grasp_offset
+        self.terminations.plug_dropped.params["grasp_rot_offset"] = self.grasp_rot_offset
+
+        self.terminations.plug_orientation_exceeded.params["end_effector_body_name"] = self.end_effector_body_name
+        self.terminations.plug_orientation_exceeded.params["grasp_rot_offset"] = self.grasp_rot_offset
 
 
 @configclass

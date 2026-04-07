@@ -578,6 +578,16 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         grasp_offsets = self.grasp_offsets_buffer[:num_reset_envs]
         grasp_rot_offset_tensor = self.grasp_rot_offset_tensor[env_ids]
 
+        _debug_first_call = not hasattr(self, "_debug_printed")
+        if _debug_first_call:
+            self._debug_printed = True
+            print(f"[GRASP-DBG] num_reset_envs={num_reset_envs}, env_ids[:4]={env_ids[:4].tolist()}")
+            print(f"[GRASP-DBG] eef_idx={self.eef_idx}, jacobi_body_idx={self.jacobi_body_idx}")
+            print(f"[GRASP-DBG] num_arm_joints={self.num_arm_joints}, num_finger_joints={len(self.finger_joints)}")
+            print(f"[GRASP-DBG] grasp_offset_tensor={self.grasp_offset_tensor.tolist()}")
+            print(f"[GRASP-DBG] grasp_rot_offset_tensor[0]={grasp_rot_offset_tensor[0].tolist()}")
+            print(f"[GRASP-DBG] hand_grasp_width={self.hand_grasp_width}, hand_close_width={self.hand_close_width}")
+
         for i in range(max_iterations):
             joint_pos = wp.to_torch(self.robot_asset.data.joint_pos)[env_ids].clone()
             joint_vel = wp.to_torch(self.robot_asset.data.joint_vel)[env_ids].clone()
@@ -585,6 +595,11 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             target_object: RigidObject = env.scene[self.target_object_name]
             grasp_object_pos_world = wp.to_torch(target_object.data.root_link_pos_w)[env_ids]
             grasp_object_quat = wp.to_torch(target_object.data.root_link_quat_w)[env_ids]
+
+            if _debug_first_call and i == 0:
+                print(f"[GRASP-DBG] iter0 plug_pos_world[0]={grasp_object_pos_world[0].tolist()}")
+                print(f"[GRASP-DBG] iter0 plug_quat_world[0]={grasp_object_quat[0].tolist()}")
+                print(f"[GRASP-DBG] iter0 joint_pos[0]={joint_pos[0].tolist()}")
 
             grasp_object_quat = math_utils.quat_mul(grasp_object_quat, grasp_rot_offset_tensor)
 
@@ -606,6 +621,12 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             eef_pos = wp.to_torch(self.robot_asset.data.body_pos_w)[env_ids, self.eef_idx]
             eef_quat = wp.to_torch(self.robot_asset.data.body_quat_w)[env_ids, self.eef_idx]
 
+            if _debug_first_call and i == 0:
+                print(f"[GRASP-DBG] iter0 ik_target_pos[0]={grasp_object_pos_world[0].tolist()}")
+                print(f"[GRASP-DBG] iter0 ik_target_quat[0]={grasp_object_quat[0].tolist()}")
+                print(f"[GRASP-DBG] iter0 eef_pos[0]={eef_pos[0].tolist()}")
+                print(f"[GRASP-DBG] iter0 eef_quat[0]={eef_quat[0].tolist()}")
+
             pos_error, axis_angle_error = fc.get_pose_error(
                 fingertip_midpoint_pos=eef_pos,
                 fingertip_midpoint_quat=eef_quat,
@@ -619,11 +640,24 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             pos_error_norm = torch.linalg.norm(pos_error, dim=-1)
             rot_error_norm = torch.linalg.norm(axis_angle_error, dim=-1)
 
+            if _debug_first_call and (i == 0 or i == max_iterations - 1):
+                print(f"[GRASP-DBG] iter{i} pos_err_norm[0]={pos_error_norm[0].item():.6f}, rot_err_norm[0]={rot_error_norm[0].item():.6f}")
+                has_nan = torch.isnan(joint_pos).any().item() or torch.isnan(pos_error).any().item()
+                has_inf = torch.isinf(joint_pos).any().item() or torch.isinf(pos_error).any().item()
+                print(f"[GRASP-DBG] iter{i} has_nan={has_nan}, has_inf={has_inf}")
+
             if torch.all(pos_error_norm < pos_threshold) and torch.all(rot_error_norm < rot_threshold):
+                if _debug_first_call:
+                    print(f"[GRASP-DBG] IK converged at iter {i}")
                 break
 
             jacobians = wp.to_torch(self.robot_asset.root_view.get_jacobians()).clone()
             jacobian = jacobians[env_ids, self.jacobi_body_idx, :, :]
+
+            if _debug_first_call and i == 0:
+                print(f"[GRASP-DBG] jacobian shape={jacobian.shape}")
+                jac_has_nan = torch.isnan(jacobian).any().item()
+                print(f"[GRASP-DBG] jacobian has_nan={jac_has_nan}")
 
             delta_dof_pos = fc._get_delta_dof_pos(
                 delta_pose=delta_hand_pose,
@@ -631,6 +665,12 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
                 jacobian=jacobian,
                 device=env.device,
             )
+
+            if _debug_first_call and i == 0:
+                print(f"[GRASP-DBG] iter0 delta_dof_pos shape={delta_dof_pos.shape}")
+                print(f"[GRASP-DBG] iter0 delta_dof_pos[0]={delta_dof_pos[0].tolist()}")
+                ddp_nan = torch.isnan(delta_dof_pos).any().item()
+                print(f"[GRASP-DBG] iter0 delta_dof_pos has_nan={ddp_nan}")
 
             joint_pos = joint_pos + delta_dof_pos
 
@@ -653,6 +693,15 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             self.robot_asset.set_joint_velocity_target_index(target=joint_vel, env_ids=env_ids)
             self.robot_asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
             self.robot_asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
+
+        if _debug_first_call:
+            final_jp = wp.to_torch(self.robot_asset.data.joint_pos)[env_ids].clone()
+            print(f"[GRASP-DBG] final joint_pos[0]={final_jp[0].tolist()}")
+            jp_nan = torch.isnan(final_jp).any().item()
+            jp_inf = torch.isinf(final_jp).any().item()
+            print(f"[GRASP-DBG] final joint_pos has_nan={jp_nan}, has_inf={jp_inf}")
+            final_eef = wp.to_torch(self.robot_asset.data.body_pos_w)[env_ids, self.eef_idx]
+            print(f"[GRASP-DBG] final eef_pos[0]={final_eef[0].tolist()}")
 
         joint_vel = torch.zeros_like(wp.to_torch(self.robot_asset.data.joint_vel)[env_ids])
         joint_pos = wp.to_torch(self.robot_asset.data.joint_pos)[env_ids].clone()
