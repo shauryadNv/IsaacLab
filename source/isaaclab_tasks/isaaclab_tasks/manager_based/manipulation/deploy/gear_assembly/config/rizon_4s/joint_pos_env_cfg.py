@@ -169,7 +169,7 @@ class EventCfg:
         func=gear_assembly_events.randomize_gear_type,
         mode="reset",
         params={"gear_types": ["gear_small", "gear_medium", "gear_large"]},
-        # params={"gear_types": ["gear_small", "gear_medium"]},
+        # params={"gear_types": ["gear_large"]},
     )
 
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
@@ -407,15 +407,13 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         self.events.set_robot_to_grasp_pose.params["gripper_joint_setter_func"] = self.gripper_joint_setter_func
 
         # Populate reward term parameters for EE-gear keypoint tracking
-        self.rewards.end_effector_base_keypoint_tracking.params["end_effector_body_name"] = self.end_effector_body_name
-        self.rewards.end_effector_base_keypoint_tracking.params["grasp_rot_offset"] = self.grasp_rot_offset
-        self.rewards.end_effector_base_keypoint_tracking.params["gear_offsets_grasp"] = self.gear_offsets_grasp
+        self.rewards.ee_gear_keypoint_tracking.params["end_effector_body_name"] = self.end_effector_body_name
+        self.rewards.ee_gear_keypoint_tracking.params["grasp_rot_offset"] = self.grasp_rot_offset
+        self.rewards.ee_gear_keypoint_tracking.params["gear_offsets_grasp"] = self.gear_offsets_grasp
 
-        self.rewards.end_effector_base_keypoint_tracking_exp.params["end_effector_body_name"] = (
-            self.end_effector_body_name
-        )
-        self.rewards.end_effector_base_keypoint_tracking_exp.params["grasp_rot_offset"] = self.grasp_rot_offset
-        self.rewards.end_effector_base_keypoint_tracking_exp.params["gear_offsets_grasp"] = self.gear_offsets_grasp
+        self.rewards.ee_gear_keypoint_tracking_exp.params["end_effector_body_name"] = self.end_effector_body_name
+        self.rewards.ee_gear_keypoint_tracking_exp.params["grasp_rot_offset"] = self.grasp_rot_offset
+        self.rewards.ee_gear_keypoint_tracking_exp.params["gear_offsets_grasp"] = self.gear_offsets_grasp
 
         # Populate termination term parameters
         self.terminations.gear_dropped.params["gear_offsets_grasp"] = self.gear_offsets_grasp
