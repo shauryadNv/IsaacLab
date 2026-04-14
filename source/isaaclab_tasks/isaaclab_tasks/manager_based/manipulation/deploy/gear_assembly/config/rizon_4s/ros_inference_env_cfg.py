@@ -23,7 +23,7 @@ class Rizon4sGearAssemblyROSInferenceEnvCfg(Rizon4sGearAssemblyEnvCfg):
 
     # Single source for base + all gear rigid bodies (Rizon: closer to robot, centered)
     ros_inference_factory_gears_init_state: RigidObjectCfg.InitialStateCfg = RigidObjectCfg.InitialStateCfg(
-        pos=(0.75, 0.0, -0.2),
+        pos=(0.927, 0.046, -0.109),
         rot=(0.0, 0.0, 0.70711, -0.70711),
     )
 
