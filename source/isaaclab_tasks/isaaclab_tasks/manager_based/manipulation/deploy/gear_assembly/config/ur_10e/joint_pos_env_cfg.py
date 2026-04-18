@@ -16,7 +16,10 @@ from isaaclab.utils import configclass
 
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp as mdp
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp.events as gear_assembly_events
-from isaaclab_tasks.manager_based.manipulation.deploy.gear_assembly.gear_assembly_env_cfg import GearAssemblyEnvCfg
+from isaaclab_tasks.manager_based.manipulation.deploy.gear_assembly.gear_assembly_env_cfg import (
+    GearAssemblyEnvCfg,
+    transform_init_poses_by_robot_base,
+)
 
 ##
 # Pre-defined configs
@@ -393,6 +396,9 @@ class UR10e2F140GearAssemblyEnvCfg(UR10eGearAssemblyEnvCfg):
         self.terminations.gear_orientation_exceeded.params["end_effector_body_name"] = self.end_effector_body_name
         self.terminations.gear_orientation_exceeded.params["grasp_rot_offset"] = self.grasp_rot_offset
 
+        # Transform gear init_state poses for non-origin robot base placement
+        transform_init_poses_by_robot_base(self.scene)
+
 
 @configclass
 class UR10e2F85GearAssemblyEnvCfg(UR10eGearAssemblyEnvCfg):
@@ -490,6 +496,9 @@ class UR10e2F85GearAssemblyEnvCfg(UR10eGearAssemblyEnvCfg):
 
         self.terminations.gear_orientation_exceeded.params["end_effector_body_name"] = self.end_effector_body_name
         self.terminations.gear_orientation_exceeded.params["grasp_rot_offset"] = self.grasp_rot_offset
+
+        # Transform gear init_state poses for non-origin robot base placement
+        transform_init_poses_by_robot_base(self.scene)
 
 
 @configclass

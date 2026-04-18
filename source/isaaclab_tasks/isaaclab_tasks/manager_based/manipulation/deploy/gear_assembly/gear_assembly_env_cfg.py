@@ -6,6 +6,8 @@
 import os
 from dataclasses import MISSING
 
+import torch
+
 from isaaclab_physx.physics import PhysxCfg
 
 import isaaclab.sim as sim_utils
@@ -31,6 +33,37 @@ from isaaclab_tasks.manager_based.manipulation.deploy.mdp.noise_models import Re
 # Get the directory where this configuration file is located
 CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(CONFIG_DIR, "assets")
+
+
+def transform_init_poses_by_robot_base(scene_cfg: "GearAssemblySceneCfg"):
+    """Transform gear object init_state poses based on the robot's base pose.
+
+    The gear and gear-base init_state positions and rotations are authored assuming the robot
+    base_link sits at the env origin with identity rotation. When the robot is mounted at a
+    different pose (e.g. on a table with an offset and/or rotation), call this function
+    **after** setting :attr:`scene_cfg.robot` to transform all gear-related asset init_states
+    so they maintain the correct spatial relationship to the robot.
+
+    This is a no-op when the robot base is at ``pos=(0, 0, 0)`` with ``rot=(0, 0, 0, 1)``.
+
+    Args:
+        scene_cfg: The scene configuration with :attr:`robot` already set.
+    """
+    from isaaclab.utils.math import combine_frame_transforms
+
+    robot_pos = torch.tensor([scene_cfg.robot.init_state.pos], dtype=torch.float32)
+    robot_rot = torch.tensor([scene_cfg.robot.init_state.rot], dtype=torch.float32)
+
+    for attr_name in ("factory_gear_base", "factory_gear_small", "factory_gear_medium", "factory_gear_large"):
+        obj_cfg = getattr(scene_cfg, attr_name)
+        obj_pos = torch.tensor([obj_cfg.init_state.pos], dtype=torch.float32)
+        obj_rot = torch.tensor([obj_cfg.init_state.rot], dtype=torch.float32)
+
+        new_pos, new_rot = combine_frame_transforms(robot_pos, robot_rot, obj_pos, obj_rot)
+
+        obj_cfg.init_state.pos = tuple(new_pos[0].tolist())
+        obj_cfg.init_state.rot = tuple(new_rot[0].tolist())
+
 
 ##
 # Environment configuration

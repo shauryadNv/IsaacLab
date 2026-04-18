@@ -13,30 +13,32 @@ import torch
 import warp as wp
 
 from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
-from isaaclab.utils.math import combine_frame_transforms
+from isaaclab.utils.math import combine_frame_transforms, subtract_frame_transforms
 
 if TYPE_CHECKING:
-    from isaaclab.assets import RigidObject
+    from isaaclab.assets import Articulation, RigidObject
     from isaaclab.envs import ManagerBasedRLEnv
 
     from .events import randomize_gear_type
 
 
 class gear_shaft_pos_w(ManagerTermBase):
-    """Gear shaft position in world frame with offset applied.
+    """Gear shaft position relative to the robot base_link frame with offset applied.
 
     This class-based term caches gear offset tensors and identity quaternions for efficient computation
     across all environments. It transforms the gear base position by the appropriate offset based on the
-    active gear type in each environment.
+    active gear type in each environment, then expresses the result in the robot's base_link frame using
+    :func:`subtract_frame_transforms`.
 
     Args:
         asset_cfg: The asset configuration for the gear base. Defaults to SceneEntityCfg("factory_gear_base").
+        robot_asset_cfg: The asset configuration for the robot. Defaults to SceneEntityCfg("robot").
         gear_offsets: A dictionary mapping gear type names to their shaft offsets in the gear base frame.
             Required keys are "gear_small", "gear_medium", and "gear_large", each mapping to a 3D offset
-            list [x, y, z]. This parameter is required and must be provided in the configuration.
+            list [x, y, z] [m]. This parameter is required and must be provided in the configuration.
 
     Returns:
-        Gear shaft position tensor in the environment frame with shape (num_envs, 3).
+        Gear shaft position tensor relative to robot base_link with shape (num_envs, 3) [m].
 
     Raises:
         ValueError: If the 'gear_offsets' parameter is not provided in the configuration.
@@ -54,9 +56,13 @@ class gear_shaft_pos_w(ManagerTermBase):
         """
         super().__init__(cfg, env)
 
-        # Cache asset
+        # Cache gear base asset
         self.asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", SceneEntityCfg("factory_gear_base"))
         self.asset: RigidObject = env.scene[self.asset_cfg.name]
+
+        # Cache robot asset for base_link frame reference
+        self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
+        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
 
         # Pre-cache gear offset tensors (required parameter)
         if "gear_offsets" not in cfg.params:
@@ -106,52 +112,58 @@ class gear_shaft_pos_w(ManagerTermBase):
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg = SceneEntityCfg("factory_gear_base"),
+        robot_asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
         gear_offsets: dict | None = None,
     ) -> torch.Tensor:
-        """Compute gear shaft position in world frame.
+        """Compute gear shaft position relative to robot base_link frame.
 
         Args:
             env: Environment instance
             asset_cfg: Configuration of the gear base asset (unused, kept for compatibility)
+            robot_asset_cfg: Configuration of the robot asset (unused, kept for compatibility)
 
         Returns:
-            Gear shaft position tensor of shape (num_envs, 3)
+            Gear shaft position tensor of shape (num_envs, 3) [m]
         """
-        # Check if gear type manager exists
-        # During initialization (shape checking), the manager may not exist yet
         if not hasattr(env, "_gear_type_manager"):
-            # Return default shape during initialization
             return torch.zeros(env.num_envs, 3, device=env.device)
 
         gear_type_manager: randomize_gear_type = env._gear_type_manager
-        # Get gear type indices directly as tensor (no Python loops!)
         gear_type_indices = gear_type_manager.get_all_gear_type_indices()
 
-        # Get base gear position and orientation
+        # Get gear base position and orientation in world frame
         base_pos = wp.to_torch(self.asset.data.root_pos_w)
         base_quat = wp.to_torch(self.asset.data.root_quat_w)
 
-        # Update offsets using vectorized indexing
+        # Compute shaft position in world frame
         self.offsets_buffer = self.gear_offsets_stacked[gear_type_indices]
+        shaft_pos_w, _ = combine_frame_transforms(base_pos, base_quat, self.offsets_buffer, self.identity_quat)
 
-        # Transform offsets
-        shaft_pos, _ = combine_frame_transforms(base_pos, base_quat, self.offsets_buffer, self.identity_quat)
+        # Get robot base_link pose in world frame
+        robot_pos_w = wp.to_torch(self.robot_asset.data.root_pos_w)
+        robot_quat_w = wp.to_torch(self.robot_asset.data.root_quat_w)
 
-        return shaft_pos - env.scene.env_origins
+        # Transform shaft position into robot base_link frame
+        shaft_pos_base, _ = subtract_frame_transforms(robot_pos_w, robot_quat_w, shaft_pos_w, base_quat)
+
+        return shaft_pos_base
 
 
 class gear_shaft_quat_w(ManagerTermBase):
-    """Gear shaft orientation in world frame.
+    """Gear shaft orientation relative to the robot base_link frame.
 
     This class-based term returns the orientation of the gear base (which is the same as the gear shaft
-    orientation). The quaternion is canonicalized to ensure the w component is positive, reducing
-    observation variation for the policy.
+    orientation) expressed relative to the robot's base_link frame using :func:`subtract_frame_transforms`.
+    The quaternion is canonicalized to ensure the w component is positive, reducing observation variation
+    for the policy.
 
     Args:
         asset_cfg: The asset configuration for the gear base. Defaults to SceneEntityCfg("factory_gear_base").
+        robot_asset_cfg: The asset configuration for the robot. Defaults to SceneEntityCfg("robot").
 
     Returns:
-        Gear shaft orientation tensor as a quaternion (w, x, y, z) with shape (num_envs, 4).
+        Gear shaft orientation tensor as a quaternion (w, x, y, z) relative to robot base_link
+        with shape (num_envs, 4).
     """
 
     def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
@@ -163,45 +175,62 @@ class gear_shaft_quat_w(ManagerTermBase):
         """
         super().__init__(cfg, env)
 
-        # Cache asset
+        # Cache gear base asset
         self.asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", SceneEntityCfg("factory_gear_base"))
         self.asset: RigidObject = env.scene[self.asset_cfg.name]
+
+        # Cache robot asset for base_link frame reference
+        self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
+        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
 
     def __call__(
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg = SceneEntityCfg("factory_gear_base"),
+        robot_asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     ) -> torch.Tensor:
-        """Compute gear shaft orientation in world frame.
+        """Compute gear shaft orientation relative to robot base_link frame.
 
         Args:
             env: Environment instance
             asset_cfg: Configuration of the gear base asset (unused, kept for compatibility)
+            robot_asset_cfg: Configuration of the robot asset (unused, kept for compatibility)
 
         Returns:
             Gear shaft orientation tensor of shape (num_envs, 4)
         """
-        # Get base quaternion
+        # Get gear base pose in world frame
+        base_pos = wp.to_torch(self.asset.data.root_pos_w)
         base_quat = wp.to_torch(self.asset.data.root_quat_w)
 
+        # Get robot base_link pose in world frame
+        robot_pos_w = wp.to_torch(self.robot_asset.data.root_pos_w)
+        robot_quat_w = wp.to_torch(self.robot_asset.data.root_quat_w)
+
+        # Transform orientation into robot base_link frame
+        _, quat_base = subtract_frame_transforms(robot_pos_w, robot_quat_w, base_pos, base_quat)
+
         # Ensure w component is positive (q and -q represent the same rotation)
-        # Pick one canonical form to reduce observation variation seen by the policy
-        w_negative = base_quat[:, 0] < 0
-        positive_quat = base_quat.clone()
-        positive_quat[w_negative] = -base_quat[w_negative]
+        w_negative = quat_base[:, 0] < 0
+        positive_quat = quat_base.clone()
+        positive_quat[w_negative] = -quat_base[w_negative]
 
         return positive_quat
 
 
 class gear_pos_w(ManagerTermBase):
-    """Gear position in world frame.
+    """Gear position relative to the robot base_link frame.
 
-    This class-based term returns the position of the active gear in each environment. It uses
-    vectorized indexing to efficiently select the correct gear position based on the gear type
-    (small, medium, or large) active in each environment.
+    This class-based term returns the position of the active gear in each environment expressed
+    in the robot's base_link frame using :func:`subtract_frame_transforms`. It uses vectorized
+    indexing to efficiently select the correct gear position based on the gear type (small,
+    medium, or large) active in each environment.
+
+    Args:
+        robot_asset_cfg: The asset configuration for the robot. Defaults to SceneEntityCfg("robot").
 
     Returns:
-        Gear position tensor in the environment frame with shape (num_envs, 3).
+        Gear position tensor relative to robot base_link with shape (num_envs, 3) [m].
 
     Raises:
         RuntimeError: If the gear type manager is not initialized in the environment.
@@ -228,26 +257,26 @@ class gear_pos_w(ManagerTermBase):
             "gear_large": env.scene["factory_gear_large"],
         }
 
+        # Cache robot asset for base_link frame reference
+        self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
+        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
+
     def __call__(self, env: ManagerBasedRLEnv) -> torch.Tensor:
-        """Compute gear position in world frame.
+        """Compute gear position relative to robot base_link frame.
 
         Args:
             env: Environment instance
 
         Returns:
-            Gear position tensor of shape (num_envs, 3)
+            Gear position tensor of shape (num_envs, 3) [m]
         """
-        # Check if gear type manager exists
-        # During initialization (shape checking), the manager may not exist yet
         if not hasattr(env, "_gear_type_manager"):
-            # Return default shape during initialization
             return torch.zeros(env.num_envs, 3, device=env.device)
 
         gear_type_manager: randomize_gear_type = env._gear_type_manager
-        # Get gear type indices directly as tensor (no Python loops!)
         self.gear_type_indices = gear_type_manager.get_all_gear_type_indices()
 
-        # Stack all gear positions
+        # Stack all gear positions and quaternions
         all_gear_positions = torch.stack(
             [
                 wp.to_torch(self.gear_assets["gear_small"].data.root_pos_w),
@@ -256,23 +285,44 @@ class gear_pos_w(ManagerTermBase):
             ],
             dim=1,
         )
+        all_gear_quats = torch.stack(
+            [
+                wp.to_torch(self.gear_assets["gear_small"].data.root_quat_w),
+                wp.to_torch(self.gear_assets["gear_medium"].data.root_quat_w),
+                wp.to_torch(self.gear_assets["gear_large"].data.root_quat_w),
+            ],
+            dim=1,
+        )
 
-        # Select gear positions using advanced indexing
-        gear_positions = all_gear_positions[self.env_indices, self.gear_type_indices]
+        # Select gear poses using advanced indexing
+        gear_pos_w = all_gear_positions[self.env_indices, self.gear_type_indices]
+        gear_quat_w = all_gear_quats[self.env_indices, self.gear_type_indices]
 
-        return gear_positions - env.scene.env_origins
+        # Get robot base_link pose in world frame
+        robot_pos_w = wp.to_torch(self.robot_asset.data.root_pos_w)
+        robot_quat_w = wp.to_torch(self.robot_asset.data.root_quat_w)
+
+        # Transform gear position into robot base_link frame
+        gear_pos_base, _ = subtract_frame_transforms(robot_pos_w, robot_quat_w, gear_pos_w, gear_quat_w)
+
+        return gear_pos_base
 
 
 class gear_quat_w(ManagerTermBase):
-    """Gear orientation in world frame.
+    """Gear orientation relative to the robot base_link frame.
 
-    This class-based term returns the orientation of the active gear in each environment. It uses
+    This class-based term returns the orientation of the active gear in each environment expressed
+    relative to the robot's base_link frame using :func:`subtract_frame_transforms`. It uses
     vectorized indexing to efficiently select the correct gear orientation based on the gear type
     (small, medium, or large) active in each environment. The quaternion is canonicalized to ensure
     the w component is positive, reducing observation variation for the policy.
 
+    Args:
+        robot_asset_cfg: The asset configuration for the robot. Defaults to SceneEntityCfg("robot").
+
     Returns:
-        Gear orientation tensor as a quaternion (w, x, y, z) with shape (num_envs, 4).
+        Gear orientation tensor as a quaternion (w, x, y, z) relative to robot base_link
+        with shape (num_envs, 4).
 
     Raises:
         RuntimeError: If the gear type manager is not initialized in the environment.
@@ -299,8 +349,12 @@ class gear_quat_w(ManagerTermBase):
             "gear_large": env.scene["factory_gear_large"],
         }
 
+        # Cache robot asset for base_link frame reference
+        self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
+        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
+
     def __call__(self, env: ManagerBasedRLEnv) -> torch.Tensor:
-        """Compute gear orientation in world frame.
+        """Compute gear orientation relative to robot base_link frame.
 
         Args:
             env: Environment instance
@@ -308,19 +362,23 @@ class gear_quat_w(ManagerTermBase):
         Returns:
             Gear orientation tensor of shape (num_envs, 4)
         """
-        # Check if gear type manager exists
-        # During initialization (shape checking), the manager may not exist yet
         if not hasattr(env, "_gear_type_manager"):
-            # Return default shape during initialization (identity quaternion)
             default_quat = torch.zeros(env.num_envs, 4, device=env.device)
             default_quat[:, 3] = 1.0
             return default_quat
 
         gear_type_manager: randomize_gear_type = env._gear_type_manager
-        # Get gear type indices directly as tensor (no Python loops!)
         self.gear_type_indices = gear_type_manager.get_all_gear_type_indices()
 
-        # Stack all gear quaternions
+        # Stack all gear positions and quaternions
+        all_gear_pos = torch.stack(
+            [
+                wp.to_torch(self.gear_assets["gear_small"].data.root_pos_w),
+                wp.to_torch(self.gear_assets["gear_medium"].data.root_pos_w),
+                wp.to_torch(self.gear_assets["gear_large"].data.root_pos_w),
+            ],
+            dim=1,
+        )
         all_gear_quat = torch.stack(
             [
                 wp.to_torch(self.gear_assets["gear_small"].data.root_quat_w),
@@ -330,13 +388,20 @@ class gear_quat_w(ManagerTermBase):
             dim=1,
         )
 
-        # Select gear quaternions using advanced indexing
-        gear_quat = all_gear_quat[self.env_indices, self.gear_type_indices]
+        # Select gear poses using advanced indexing
+        gear_pos_w = all_gear_pos[self.env_indices, self.gear_type_indices]
+        gear_quat_w = all_gear_quat[self.env_indices, self.gear_type_indices]
+
+        # Get robot base_link pose in world frame
+        robot_pos_w = wp.to_torch(self.robot_asset.data.root_pos_w)
+        robot_quat_w = wp.to_torch(self.robot_asset.data.root_quat_w)
+
+        # Transform gear orientation into robot base_link frame
+        _, gear_quat_base = subtract_frame_transforms(robot_pos_w, robot_quat_w, gear_pos_w, gear_quat_w)
 
         # Ensure w component is positive (q and -q represent the same rotation)
-        # Pick one canonical form to reduce observation variation seen by the policy
-        w_negative = gear_quat[:, 0] < 0
-        gear_positive_quat = gear_quat.clone()
-        gear_positive_quat[w_negative] = -gear_quat[w_negative]
+        w_negative = gear_quat_base[:, 0] < 0
+        gear_positive_quat = gear_quat_base.clone()
+        gear_positive_quat[w_negative] = -gear_quat_base[w_negative]
 
         return gear_positive_quat
