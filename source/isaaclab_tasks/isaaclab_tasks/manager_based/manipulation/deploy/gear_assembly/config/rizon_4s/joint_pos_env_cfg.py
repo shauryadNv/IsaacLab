@@ -16,7 +16,10 @@ from isaaclab.utils import configclass
 
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp as mdp
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp.events as gear_assembly_events
-from isaaclab_tasks.manager_based.manipulation.deploy.gear_assembly.gear_assembly_env_cfg import GearAssemblyEnvCfg
+from isaaclab_tasks.manager_based.manipulation.deploy.gear_assembly.gear_assembly_env_cfg import (
+    GearAssemblyEnvCfg,
+    transform_init_poses_by_robot_base,
+)
 
 ##
 # Pre-defined configs
@@ -424,6 +427,12 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
 
         self.terminations.gear_orientation_exceeded.params["end_effector_body_name"] = self.end_effector_body_name
         self.terminations.gear_orientation_exceeded.params["grasp_rot_offset"] = self.grasp_rot_offset
+
+        # Transform gear init_state poses from robot base frame to world frame.
+        # Gear poses above are authored relative to robot base_link; this converts
+        # them to world-frame coordinates using the robot's init_state pose.
+        # No-op when robot is at the origin with identity rotation.
+        transform_init_poses_by_robot_base(self.scene)
 
 
 @configclass

@@ -8,6 +8,10 @@ import math
 from isaaclab.assets import RigidObjectCfg
 from isaaclab.utils import configclass
 
+from isaaclab_tasks.manager_based.manipulation.deploy.gear_assembly.gear_assembly_env_cfg import (
+    transform_init_poses_by_robot_base,
+)
+
 from .joint_pos_env_cfg import Rizon4sGearAssemblyEnvCfg
 
 
@@ -21,9 +25,10 @@ class Rizon4sGearAssemblyROSInferenceEnvCfg(Rizon4sGearAssemblyEnvCfg):
     - Aligns robot mounting pose with the Flexiv Rizon 4s installation at NVIDIA Hubble Lab
     """
 
-    # Single source for base + all gear rigid bodies (Rizon: closer to robot, centered)
+    # Gear base pose in the robot base_link frame (from real-world setup).
+    # transform_init_poses_by_robot_base converts these to world frame at the end of __post_init__.
     ros_inference_factory_gears_init_state: RigidObjectCfg.InitialStateCfg = RigidObjectCfg.InitialStateCfg(
-        pos=(0.927, 0.046, -0.109),
+        pos=(0.046, -0.927, -0.109),
         rot=(0.0, 0.0, 0.70711, -0.70711),
     )
 
@@ -114,3 +119,8 @@ class Rizon4sGearAssemblyROSInferenceEnvCfg(Rizon4sGearAssemblyEnvCfg):
             gear_shaft_pos_noise,
             gear_shaft_pos_noise,
         ]
+
+        # Transform gear init_state poses from robot base frame to world frame.
+        # The observations use subtract_frame_transforms to express gear poses back in
+        # the robot base frame, so the policy will see exactly the values authored above.
+        transform_init_poses_by_robot_base(self.scene)
