@@ -384,6 +384,12 @@ class UR10e2F140GearAssemblyEnvCfg(UR10eGearAssemblyEnvCfg):
         self.events.set_robot_to_grasp_pose.params["num_arm_joints"] = self.num_arm_joints
         self.events.set_robot_to_grasp_pose.params["grasp_rot_offset"] = self.grasp_rot_offset
         self.events.set_robot_to_grasp_pose.params["gripper_joint_setter_func"] = self.gripper_joint_setter_func
+        self.events.set_robot_to_grasp_pose.params["curobo_robot_cfg"] = "ur10e.yml"
+        self.events.set_robot_to_grasp_pose.params["curobo_num_seeds"] = 1
+        self.events.set_robot_to_grasp_pose.params["curobo_grad_iters"] = 3
+        self.events.set_robot_to_grasp_pose.params["curobo_newton_iters"] = 1
+        self.events.set_robot_to_grasp_pose.params["curobo_full_batch"] = True
+        self.events.set_robot_to_grasp_pose.params["curobo_use_cuda_graph"] = True
 
         # Populate termination term parameters
         self.terminations.gear_dropped.params["gear_offsets_grasp"] = self.gear_offsets_grasp
@@ -482,6 +488,12 @@ class UR10e2F85GearAssemblyEnvCfg(UR10eGearAssemblyEnvCfg):
         self.events.set_robot_to_grasp_pose.params["num_arm_joints"] = self.num_arm_joints
         self.events.set_robot_to_grasp_pose.params["grasp_rot_offset"] = self.grasp_rot_offset
         self.events.set_robot_to_grasp_pose.params["gripper_joint_setter_func"] = self.gripper_joint_setter_func
+        self.events.set_robot_to_grasp_pose.params["curobo_robot_cfg"] = "ur10e.yml"
+        self.events.set_robot_to_grasp_pose.params["curobo_num_seeds"] = 1
+        self.events.set_robot_to_grasp_pose.params["curobo_grad_iters"] = 3
+        self.events.set_robot_to_grasp_pose.params["curobo_newton_iters"] = 1
+        self.events.set_robot_to_grasp_pose.params["curobo_full_batch"] = True
+        self.events.set_robot_to_grasp_pose.params["curobo_use_cuda_graph"] = True
 
         # Populate termination term parameters
         self.terminations.gear_dropped.params["gear_offsets_grasp"] = self.gear_offsets_grasp
