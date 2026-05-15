@@ -7,16 +7,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import random
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Callable
 
 import torch
-import warp as wp
-
 import isaaclab.utils.math as math_utils
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
-
-from isaaclab_tasks.direct.automate import factory_control as fc
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation, RigidObject
@@ -99,119 +97,203 @@ class randomize_gear_type(ManagerTermBase):
         return self._current_gear_type_indices
 
 
+@dataclass
+class _CuroboIKCacheEntry:
+    solver: Any
+    goal_buffer: Any | None = None
+    seed_buffer: torch.Tensor | None = None
+
+
 class set_robot_to_grasp_pose(ManagerTermBase):
-    """Set robot to grasp pose using IK with pre-cached tensors.
+    """Drop-in reset event term that uses cuRobo batched IK for grasp-pose initialization."""
 
-    This class-based term caches all required tensors and gear offsets during initialization,
-    avoiding repeated allocations and lookups during execution.
-    """
+    _solver_cache: dict[tuple[Any, ...], _CuroboIKCacheEntry] = {}
 
-    def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
-        """Initialize the set robot to grasp pose term.
-
-        Args:
-            cfg: Event term configuration
-            env: Environment instance
-        """
+    def __init__(self, cfg: EventTermCfg, env):
         super().__init__(cfg, env)
-
-        # Get robot asset configuration
         self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
-        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
+        self.robot_asset = env.scene[self.robot_asset_cfg.name]
 
-        # Get robot-specific parameters from environment config (all required)
-        # Validate required parameters
-        if "end_effector_body_name" not in cfg.params:
-            raise ValueError(
-                "'end_effector_body_name' parameter is required in set_robot_to_grasp_pose configuration. "
-                "Example: 'wrist_3_link'"
-            )
-        if "num_arm_joints" not in cfg.params:
-            raise ValueError(
-                "'num_arm_joints' parameter is required in set_robot_to_grasp_pose configuration. Example: 6 for UR10e"
-            )
-        if "grasp_rot_offset" not in cfg.params:
-            raise ValueError(
-                "'grasp_rot_offset' parameter is required in set_robot_to_grasp_pose configuration. "
-                "It should be a quaternion [x, y, z, w]. Example: [0.707, 0.707, 0.0, 0.0]"
-            )
-        if "gripper_joint_setter_func" not in cfg.params:
-            raise ValueError(
-                "'gripper_joint_setter_func' parameter is required in set_robot_to_grasp_pose configuration. "
-                "It should be a function to set gripper joint positions."
-            )
+        for key in ["end_effector_body_name", "num_arm_joints", "grasp_rot_offset", "gripper_joint_setter_func", "gear_offsets_grasp"]:
+            if key not in cfg.params:
+                raise ValueError(f"'{key}' parameter is required for CuroboSetRobotToGraspPose")
 
         self.end_effector_body_name = cfg.params["end_effector_body_name"]
         self.num_arm_joints = cfg.params["num_arm_joints"]
         self.gripper_joint_setter_func = cfg.params["gripper_joint_setter_func"]
-
-        # Pre-cache gear grasp offsets as tensors (required parameter)
-        if "gear_offsets_grasp" not in cfg.params:
-            raise ValueError(
-                "'gear_offsets_grasp' parameter is required in set_robot_to_grasp_pose configuration. "
-                "It should be a dict with keys 'gear_small', 'gear_medium', 'gear_large' mapping to [x, y, z] offsets."
-            )
-        gear_offsets_grasp = cfg.params["gear_offsets_grasp"]
-        if not isinstance(gear_offsets_grasp, dict):
-            raise TypeError(
-                f"'gear_offsets_grasp' parameter must be a dict, got {type(gear_offsets_grasp).__name__}. "
-                "It should have keys 'gear_small', 'gear_medium', 'gear_large' mapping to [x, y, z] offsets."
-            )
-
-        self.gear_grasp_offset_tensors = {}
-        for gear_type in ["gear_small", "gear_medium", "gear_large"]:
-            if gear_type not in gear_offsets_grasp:
-                raise ValueError(
-                    f"'{gear_type}' offset is required in 'gear_offsets_grasp' parameter. "
-                    f"Found keys: {list(gear_offsets_grasp.keys())}"
-                )
-            self.gear_grasp_offset_tensors[gear_type] = torch.tensor(
-                gear_offsets_grasp[gear_type], device=env.device, dtype=torch.float32
-            )
-
-        # Stack grasp offset tensors for vectorized indexing (shape: 3, 3)
-        # Index 0=small, 1=medium, 2=large
-        self.gear_grasp_offsets_stacked = torch.stack(
-            [
-                self.gear_grasp_offset_tensors["gear_small"],
-                self.gear_grasp_offset_tensors["gear_medium"],
-                self.gear_grasp_offset_tensors["gear_large"],
-            ],
-            dim=0,
-        )
-
-        # Pre-cache grasp rotation offset tensor
-        grasp_rot_offset = cfg.params["grasp_rot_offset"]
-        self.grasp_rot_offset_tensor = (
-            torch.tensor(grasp_rot_offset, device=env.device, dtype=torch.float32).unsqueeze(0).repeat(env.num_envs, 1)
-        )
-
-        # Pre-allocate buffers for batch operations
-        self.gear_type_indices = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
-        self.local_env_indices = torch.arange(env.num_envs, device=env.device)
-        self.gear_grasp_offsets_buffer = torch.zeros(env.num_envs, 3, device=env.device, dtype=torch.float32)
-
-        # Cache hand grasp/close widths
         self.hand_grasp_width = env.cfg.hand_grasp_width
         self.hand_close_width = env.cfg.hand_close_width
 
-        # Find end effector index once
-        eef_indices, _ = self.robot_asset.find_bodies([self.end_effector_body_name])
-        if len(eef_indices) == 0:
-            raise ValueError(f"End effector body '{self.end_effector_body_name}' not found in robot")
-        self.eef_idx = eef_indices[0]
+        gear_offsets_grasp = cfg.params["gear_offsets_grasp"]
+        self.gear_grasp_offsets_stacked = torch.stack(
+            [
+                torch.tensor(gear_offsets_grasp[k], device=env.device, dtype=torch.float32)
+                for k in ["gear_small", "gear_medium", "gear_large"]
+            ],
+            dim=0,
+        )
+        self.grasp_rot_offset_tensor = (
+            torch.tensor(cfg.params["grasp_rot_offset"], device=env.device, dtype=torch.float32)
+            .unsqueeze(0)
+            .repeat(env.num_envs, 1)
+        )
+        self.gear_type_indices = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+        self.local_env_indices = torch.arange(env.num_envs, device=env.device)
+        self.gear_grasp_offsets_buffer = torch.zeros(env.num_envs, 3, device=env.device, dtype=torch.float32)
+        self.full_target_pos_buffer = torch.zeros((env.num_envs, 3), device=env.device, dtype=torch.float32)
+        self.full_target_quat_buffer = torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.float32)
+        self.full_target_quat_buffer[:, 0] = 1.0
+        self.full_targets_initialized = False
+        self.full_targets_dirty = torch.ones(env.num_envs, device=env.device, dtype=torch.bool)
+        self.gear_type_strings = (
+            tuple(env._gear_type_manager.get_all_gear_types()) if hasattr(env, "_gear_type_manager") else None
+        )
+        self.gear_type_string_to_index = {"gear_small": 0, "gear_medium": 1, "gear_large": 2}
+        self.finger_width_grasp_tensor = torch.zeros((3, 2), device=env.device, dtype=torch.float32)
+        self.finger_width_close_tensor = torch.zeros((3, 2), device=env.device, dtype=torch.float32)
+        for gear_key, gear_idx in self.gear_type_string_to_index.items():
+            self.finger_width_grasp_tensor[gear_idx] = torch.tensor(
+                env.cfg.hand_grasp_width[gear_key], device=env.device, dtype=torch.float32
+            )
+            self.finger_width_close_tensor[gear_idx] = torch.tensor(
+                env.cfg.hand_close_width[gear_key], device=env.device, dtype=torch.float32
+            )
 
-        # Find jacobian body index (for fixed-base robots, subtract 1)
-        self.jacobi_body_idx = self.eef_idx - 1
-
-        # Find all joints once
-        all_joints, all_joints_names = self.robot_asset.find_joints([".*"])
+        all_joints, _ = self.robot_asset.find_joints([".*"])
         self.all_joints = all_joints
         self.finger_joints = all_joints[self.num_arm_joints :]
 
+        import isaaclab.utils.math as math_utils
+        from curobo.types.base import TensorDeviceType
+        from curobo.util_file import get_robot_configs_path, join_path, load_yaml
+        from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
+
+        self._math_utils = math_utils
+        self._curobo_pose_cls = __import__("curobo.types.math", fromlist=["Pose"]).Pose
+        self.num_seeds = int(cfg.params.get("curobo_num_seeds", 1))
+        self.newton_iters = int(cfg.params.get("curobo_newton_iters", 1))
+        self.full_batch = bool(cfg.params.get("curobo_full_batch", True))
+        self.use_cuda_graph = bool(cfg.params.get("curobo_use_cuda_graph", True))
+        self.robot_cfg_name = cfg.params.get("curobo_robot_cfg", "ur10e.yml")
+
+        tensor_args = TensorDeviceType(device=torch.device(env.device), dtype=torch.float32)
+        robot_cfg = load_yaml(join_path(get_robot_configs_path(), self.robot_cfg_name))["robot_cfg"]
+        cache_key = (
+            self.robot_cfg_name,
+            str(env.device),
+            self.num_seeds,
+            int(cfg.params.get("curobo_grad_iters", 3)),
+            self.use_cuda_graph,
+            self.full_batch,
+            int(env.num_envs if self.full_batch else -1),
+        )
+        cache_entry = self._solver_cache.get(cache_key)
+        if cache_entry is None:
+            ik_cfg = IKSolverConfig.load_from_robot_config(
+                robot_cfg,
+                None,
+                tensor_args=tensor_args,
+                num_seeds=self.num_seeds,
+                position_threshold=float(cfg.params.get("pos_threshold", 0.005)),
+                rotation_threshold=float(cfg.params.get("rot_threshold", 0.05)),
+                use_cuda_graph=self.use_cuda_graph,
+                self_collision_check=False,
+                self_collision_opt=False,
+                use_particle_opt=False,
+                grad_iters=int(cfg.params.get("curobo_grad_iters", 3)),
+                collision_checker_type=None,
+                sync_cuda_time=False,
+                regularization=True,
+            )
+            solver = IKSolver(ik_cfg)
+            goal_pos = torch.zeros((env.num_envs, 3), device=env.device, dtype=torch.float32)
+            goal_quat = torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.float32)
+            goal_quat[:, 0] = 1.0
+            seed_buffer = (
+                self.robot_asset.data.default_joint_pos.torch[:, : self.num_arm_joints]
+                .clone()
+                .unsqueeze(0)
+                .contiguous()
+            )
+            goal_buffer = self._curobo_pose_cls(position=goal_pos, quaternion=goal_quat)
+            cache_entry = _CuroboIKCacheEntry(solver=solver, goal_buffer=goal_buffer, seed_buffer=seed_buffer)
+            self._solver_cache[cache_key] = cache_entry
+        self._cache_entry = cache_entry
+        self.solver = cache_entry.solver
+
+        # Warm the fixed full-env batch so reset calls with tiny env_ids can reuse one CUDA graph shape.
+        if self.use_cuda_graph and self.full_batch and cache_entry.goal_buffer is not None and cache_entry.seed_buffer is not None:
+            try:
+                self.solver.solve_batch(
+                    cache_entry.goal_buffer,
+                    seed_config=cache_entry.seed_buffer,
+                    num_seeds=self.num_seeds,
+                    return_seeds=1,
+                    use_nn_seed=False,
+                    newton_iters=self.newton_iters,
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+            except Exception as exc:
+                print(f"[PROFILE_CUROBO_IK_WARMUP_FAILED] {exc!r}")
+
+    def _compute_target_pose(self, env, env_ids, pos_randomization_range):
+        profiler = getattr(env, "_reset_fine_profiler", None)
+        ctx = profiler.section if profiler is not None else None
+        math_utils = self._math_utils
+        num_reset_envs = len(env_ids)
+        gear_type_indices = self.gear_type_indices[:num_reset_envs]
+        local_env_indices = self.local_env_indices[:num_reset_envs]
+        gear_grasp_offsets = self.gear_grasp_offsets_buffer[:num_reset_envs]
+        with (ctx("reset_fine.curobo_compute_target.slice_buffers") if ctx else contextlib.nullcontext()):
+            grasp_rot_offset_tensor = self.grasp_rot_offset_tensor[env_ids]
+
+        with (ctx("reset_fine.curobo_compute_target.stack_gear_pose") if ctx else contextlib.nullcontext()):
+            all_gear_pos = torch.stack(
+                [
+                    env.scene["factory_gear_small"].data.root_link_pos_w.torch,
+                    env.scene["factory_gear_medium"].data.root_link_pos_w.torch,
+                    env.scene["factory_gear_large"].data.root_link_pos_w.torch,
+                ],
+                dim=1,
+            )[env_ids]
+            all_gear_quat = torch.stack(
+                [
+                    env.scene["factory_gear_small"].data.root_link_quat_w.torch,
+                    env.scene["factory_gear_medium"].data.root_link_quat_w.torch,
+                    env.scene["factory_gear_large"].data.root_link_quat_w.torch,
+                ],
+                dim=1,
+            )[env_ids]
+        with (ctx("reset_fine.curobo_compute_target.select_gear_type") if ctx else contextlib.nullcontext()):
+            all_gear_type_indices = env._gear_type_manager.get_all_gear_type_indices()
+            gear_type_indices[:] = all_gear_type_indices[env_ids]
+            grasp_object_pos_world = all_gear_pos[local_env_indices, gear_type_indices]
+            grasp_object_quat_xyzw = all_gear_quat[local_env_indices, gear_type_indices]
+        with (ctx("reset_fine.curobo_compute_target.rotation_offsets") if ctx else contextlib.nullcontext()):
+            grasp_object_quat_xyzw = math_utils.quat_mul(grasp_object_quat_xyzw, grasp_rot_offset_tensor)
+            gear_grasp_offsets[:] = self.gear_grasp_offsets_stacked[gear_type_indices]
+            if pos_randomization_range is not None:
+                # Matches the manager reset term behavior: sample one grasp-offset perturbation per reset call,
+                # not per environment.
+                range_list_pos = [pos_randomization_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
+                ranges_pos = torch.tensor(range_list_pos, device=env.device)
+                rand_pos_offsets = math_utils.sample_uniform(
+                    ranges_pos[:, 0], ranges_pos[:, 1], (1, 3), device=env.device
+                )
+                gear_grasp_offsets = gear_grasp_offsets + rand_pos_offsets
+            grasp_object_pos_world = grasp_object_pos_world + math_utils.quat_apply(
+                grasp_object_quat_xyzw, gear_grasp_offsets
+            )
+        with (ctx("reset_fine.curobo_compute_target.quat_reorder_contiguous") if ctx else contextlib.nullcontext()):
+            grasp_object_quat_wxyz = torch.cat(
+                [grasp_object_quat_xyzw[:, 3:4], grasp_object_quat_xyzw[:, 0:3]], dim=-1
+            ).contiguous()
+            return grasp_object_pos_world.contiguous(), grasp_object_quat_wxyz
+
     def __call__(
         self,
-        env: ManagerBasedEnv,
+        env,
         env_ids: torch.Tensor,
         robot_asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
         pos_threshold: float = 1e-6,
@@ -222,173 +304,120 @@ class set_robot_to_grasp_pose(ManagerTermBase):
         end_effector_body_name: str | None = None,
         num_arm_joints: int | None = None,
         grasp_rot_offset: list | None = None,
-        gripper_joint_setter_func: callable | None = None,
+        gripper_joint_setter_func: Callable | None = None,
+        curobo_robot_cfg: str | None = None,
+        curobo_num_seeds: int | None = None,
+        curobo_grad_iters: int | None = None,
+        curobo_newton_iters: int | None = None,
+        curobo_full_batch: bool | None = None,
+        curobo_use_cuda_graph: bool | None = None,
     ):
-        """Set robot to grasp pose using IK.
-
-        Args:
-            env: Environment instance
-            env_ids: Environment IDs to reset
-            robot_asset_cfg: Robot asset configuration (unused, kept for compatibility)
-            pos_threshold: Position convergence threshold
-            rot_threshold: Rotation convergence threshold
-            max_iterations: Maximum IK iterations
-            pos_randomization_range: Optional position randomization range
-        """
-        # Check if gear type manager exists
+        profiler = getattr(env, "_reset_fine_profiler", None)
+        ctx = profiler.section if profiler is not None else None
         if not hasattr(env, "_gear_type_manager"):
-            raise RuntimeError(
-                "Gear type manager not initialized. Ensure randomize_gear_type event is configured "
-                "in your environment's event configuration before this event term is used."
+            raise RuntimeError("Gear type manager not initialized before cuRobo reset grasp solver")
+        with (ctx("reset_fine.curobo.compute_target_pose") if ctx else contextlib.nullcontext()):
+            target_pos, target_quat_wxyz = self._compute_target_pose(env, env_ids, pos_randomization_range)
+
+        if self.full_batch:
+            with (ctx("reset_fine.curobo.full_batch_prepare") if ctx else contextlib.nullcontext()):
+                pose = self._cache_entry.goal_buffer
+                seed_config = self._cache_entry.seed_buffer
+                if pose is None or seed_config is None:
+                    raise RuntimeError("cuRobo full-batch cache was not initialized")
+                # Keep non-reset rows at their last reachable reset targets instead of re-solving arbitrary
+                # stale/identity goals. This preserves fixed CUDA-graph batch size without rebuilding all
+                # targets every tiny reset call.
+                if not self.full_targets_initialized:
+                    full_env_ids = torch.arange(env.num_envs, device=env.device)
+                    full_target_pos, full_target_quat = self._compute_target_pose(
+                        env, full_env_ids, pos_randomization_range
+                    )
+                    self.full_target_pos_buffer.copy_(full_target_pos)
+                    self.full_target_quat_buffer.copy_(full_target_quat)
+                    self.full_targets_initialized = True
+                    self.full_targets_dirty.zero_()
+                elif torch.any(self.full_targets_dirty[env_ids]):
+                    dirty_env_ids = torch.nonzero(self.full_targets_dirty, as_tuple=False).flatten()
+                    dirty_target_pos, dirty_target_quat = self._compute_target_pose(
+                        env, dirty_env_ids, pos_randomization_range
+                    )
+                    self.full_target_pos_buffer[dirty_env_ids] = dirty_target_pos
+                    self.full_target_quat_buffer[dirty_env_ids] = dirty_target_quat
+                    self.full_targets_dirty.zero_()
+                self.full_target_pos_buffer[env_ids] = target_pos
+                self.full_target_quat_buffer[env_ids] = target_quat_wxyz
+                pose.position.copy_(self.full_target_pos_buffer)
+                pose.quaternion.copy_(self.full_target_quat_buffer)
+                seed_config[0].copy_(self.robot_asset.data.joint_pos.torch[:, : self.num_arm_joints])
+        else:
+            with (ctx("reset_fine.curobo.variable_batch_prepare") if ctx else contextlib.nullcontext()):
+                seed_joint_pos = self.robot_asset.data.joint_pos.torch[env_ids, : self.num_arm_joints].clone()
+                seed_config = seed_joint_pos.unsqueeze(0)
+                pose = self._curobo_pose_cls(position=target_pos, quaternion=target_quat_wxyz)
+
+        with (ctx("reset_fine.curobo.solve_batch") if ctx else contextlib.nullcontext()):
+            result = self.solver.solve_batch(
+                pose,
+                seed_config=seed_config,
+                num_seeds=self.num_seeds,
+                return_seeds=1,
+                use_nn_seed=False,
+                newton_iters=self.newton_iters,
             )
+        with (ctx("reset_fine.curobo.extract_solution_success") if ctx else contextlib.nullcontext()):
+            solution = result.solution[:, 0, :] if result.solution.ndim == 3 else result.solution
+            if self.full_batch:
+                arm_solution = solution[env_ids]
+                success = result.success[env_ids].flatten()
+            else:
+                arm_solution = solution
+                success = result.success.flatten()
+            if not torch.all(success):
+                # Keep the seed joints for failed solves rather than poisoning reset with NaNs/large jumps.
+                fallback = self.robot_asset.data.joint_pos.torch[env_ids, : self.num_arm_joints]
+                arm_solution = torch.where(success.view(-1, 1), arm_solution, fallback)
 
-        gear_type_manager: randomize_gear_type = env._gear_type_manager
-
-        # Slice buffers for current batch size
-        num_reset_envs = len(env_ids)
-        gear_type_indices = self.gear_type_indices[:num_reset_envs]
-        local_env_indices = self.local_env_indices[:num_reset_envs]
-        gear_grasp_offsets = self.gear_grasp_offsets_buffer[:num_reset_envs]
-        grasp_rot_offset_tensor = self.grasp_rot_offset_tensor[env_ids]
-
-        # IK loop
-        for i in range(max_iterations):
-            # Get current joint state
+        with (ctx("reset_fine.curobo.build_joint_state") if ctx else contextlib.nullcontext()):
             joint_pos = self.robot_asset.data.joint_pos.torch[env_ids].clone()
-            joint_vel = self.robot_asset.data.joint_vel.torch[env_ids].clone()
-
-            # Stack all gear positions and quaternions
-            all_gear_pos = torch.stack(
-                [
-                    env.scene["factory_gear_small"].data.root_link_pos_w.torch,
-                    env.scene["factory_gear_medium"].data.root_link_pos_w.torch,
-                    env.scene["factory_gear_large"].data.root_link_pos_w.torch,
-                ],
-                dim=1,
-            )[env_ids]
-
-            all_gear_quat = torch.stack(
-                [
-                    env.scene["factory_gear_small"].data.root_link_quat_w.torch,
-                    env.scene["factory_gear_medium"].data.root_link_quat_w.torch,
-                    env.scene["factory_gear_large"].data.root_link_quat_w.torch,
-                ],
-                dim=1,
-            )[env_ids]
-
-            # Get gear type indices directly as tensor
-            all_gear_type_indices = gear_type_manager.get_all_gear_type_indices()
-            gear_type_indices[:] = all_gear_type_indices[env_ids]
-
-            # Select gear data using advanced indexing
-            grasp_object_pos_world = all_gear_pos[local_env_indices, gear_type_indices]
-            grasp_object_quat = all_gear_quat[local_env_indices, gear_type_indices]
-
-            # Apply rotation offset
-            grasp_object_quat = math_utils.quat_mul(grasp_object_quat, grasp_rot_offset_tensor)
-
-            # Get grasp offsets (vectorized)
-            gear_grasp_offsets[:] = self.gear_grasp_offsets_stacked[gear_type_indices]
-
-            # Add position randomization if specified
-            if pos_randomization_range is not None:
-                pos_keys = ["x", "y", "z"]
-                range_list_pos = [pos_randomization_range.get(key, (0.0, 0.0)) for key in pos_keys]
-                ranges_pos = torch.tensor(range_list_pos, device=env.device)
-                rand_pos_offsets = math_utils.sample_uniform(
-                    ranges_pos[:, 0], ranges_pos[:, 1], (len(env_ids), 3), device=env.device
-                )
-                gear_grasp_offsets = gear_grasp_offsets + rand_pos_offsets
-
-            # Transform offsets from gear frame to world frame
-            grasp_object_pos_world = grasp_object_pos_world + math_utils.quat_apply(
-                grasp_object_quat, gear_grasp_offsets
-            )
-
-            # Get end effector pose
-            eef_pos = self.robot_asset.data.body_pos_w.torch[env_ids, self.eef_idx]
-            eef_quat = self.robot_asset.data.body_quat_w.torch[env_ids, self.eef_idx]
-
-            # Compute pose error
-            pos_error, axis_angle_error = fc.get_pose_error(
-                fingertip_midpoint_pos=eef_pos,
-                fingertip_midpoint_quat=eef_quat,
-                ctrl_target_fingertip_midpoint_pos=grasp_object_pos_world,
-                ctrl_target_fingertip_midpoint_quat=grasp_object_quat,
-                jacobian_type="geometric",
-                rot_error_type="axis_angle",
-            )
-            delta_hand_pose = torch.cat((pos_error, axis_angle_error), dim=-1)
-
-            # Check convergence
-            pos_error_norm = torch.linalg.norm(pos_error, dim=-1)
-            rot_error_norm = torch.linalg.norm(axis_angle_error, dim=-1)
-
-            if torch.all(pos_error_norm < pos_threshold) and torch.all(rot_error_norm < rot_threshold):
-                break
-
-            # Solve IK using jacobian
-            jacobians = wp.to_torch(self.robot_asset.root_view.get_jacobians()).clone()
-            jacobian = jacobians[env_ids, self.jacobi_body_idx, :, :]
-
-            delta_dof_pos = fc._get_delta_dof_pos(
-                delta_pose=delta_hand_pose,
-                ik_method="dls",
-                jacobian=jacobian,
-                device=env.device,
-            )
-
-            # Update joint positions
-            joint_pos = joint_pos + delta_dof_pos
-
-            # Wrap arm joint positions to fall within robot's actual joint limits
-            joint_pos_limits = self.robot_asset.data.joint_pos_limits.torch[env_ids, : self.num_arm_joints, :]
-            joint_min = joint_pos_limits[:, :, 0]
-            joint_max = joint_pos_limits[:, :, 1]
-            joint_range = joint_max - joint_min
-
-            # Wrap only the arm joint positions (not gripper joints)
-            arm_joint_pos = joint_pos[:, : self.num_arm_joints]
-            arm_joint_pos = torch.where(
-                joint_range > 0,
-                joint_min + torch.remainder(arm_joint_pos - joint_min, joint_range),
-                arm_joint_pos,
-            )
-            joint_pos[:, : self.num_arm_joints] = arm_joint_pos
-
+            joint_pos[:, : self.num_arm_joints] = arm_solution
             joint_vel = torch.zeros_like(joint_pos)
 
-            # Write to sim
-            self.robot_asset.set_joint_position_target_index(target=joint_pos, env_ids=env_ids)
-            self.robot_asset.set_joint_velocity_target_index(target=joint_vel, env_ids=env_ids)
+        with (ctx("reset_fine.curobo.set_gripper_grasp") if ctx else contextlib.nullcontext()):
+            gear_type_indices = env._gear_type_manager.get_all_gear_type_indices()[env_ids]
+            if len(self.finger_joints) == 2:
+                joint_pos[:, self.num_arm_joints :] = self.finger_width_grasp_tensor[gear_type_indices]
+            else:
+                all_gear_types = self.gear_type_strings or env._gear_type_manager.get_all_gear_types()
+                for row_idx, env_id in enumerate(env_ids.tolist()):
+                    gear_key = all_gear_types[env_id]
+                    self.gripper_joint_setter_func(
+                        joint_pos, [row_idx], self.finger_joints, self.hand_grasp_width[gear_key]
+                    )
+        with (ctx("reset_fine.curobo.set_joint_position_target_grasp") if ctx else contextlib.nullcontext()):
+            self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
+        with (ctx("reset_fine.curobo.write_joint_position_to_sim") if ctx else contextlib.nullcontext()):
             self.robot_asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
+        with (ctx("reset_fine.curobo.write_joint_velocity_to_sim") if ctx else contextlib.nullcontext()):
             self.robot_asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
 
-        # Reset joint velocities to zero after IK convergence
-        joint_vel = torch.zeros_like(self.robot_asset.data.joint_vel.torch[env_ids])
-
-        # Set gripper to grasp position
-        joint_pos = self.robot_asset.data.joint_pos.torch[env_ids].clone()
-
-        # Get gear types for all environments
-        all_gear_types = gear_type_manager.get_all_gear_types()
-        for row_idx, env_id in enumerate(env_ids.tolist()):
-            gear_key = all_gear_types[env_id]
-            hand_grasp_width = self.hand_grasp_width[gear_key]
-            self.gripper_joint_setter_func(joint_pos, [row_idx], self.finger_joints, hand_grasp_width)
-
-        self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
-        self.robot_asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
-        self.robot_asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
-
-        # Set gripper to closed position
-        for row_idx, env_id in enumerate(env_ids.tolist()):
-            gear_key = all_gear_types[env_id]
-            hand_close_width = self.hand_close_width[gear_key]
-            self.gripper_joint_setter_func(joint_pos, [row_idx], self.finger_joints, hand_close_width)
-
-        self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
-
+        with (ctx("reset_fine.curobo.set_gripper_close") if ctx else contextlib.nullcontext()):
+            if len(self.finger_joints) == 2:
+                joint_pos[:, self.num_arm_joints :] = self.finger_width_close_tensor[gear_type_indices]
+            else:
+                all_gear_types = self.gear_type_strings or env._gear_type_manager.get_all_gear_types()
+                for row_idx, env_id in enumerate(env_ids.tolist()):
+                    gear_key = all_gear_types[env_id]
+                    self.gripper_joint_setter_func(
+                        joint_pos, [row_idx], self.finger_joints, self.hand_close_width[gear_key]
+                    )
+        with (ctx("reset_fine.curobo.set_joint_position_target_close") if ctx else contextlib.nullcontext()):
+            self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
+        if self.full_batch:
+            with (ctx("reset_fine.curobo.mark_full_targets_dirty") if ctx else contextlib.nullcontext()):
+                # These envs may now be moving under policy control, so recompute their non-reset CUDA-graph goals
+                # only if/when they are needed again as padding rows.
+                self.full_targets_dirty[env_ids] = True
 
 class randomize_gears_and_base_pose(ManagerTermBase):
     """Randomize both the gear base pose and individual gear poses.
