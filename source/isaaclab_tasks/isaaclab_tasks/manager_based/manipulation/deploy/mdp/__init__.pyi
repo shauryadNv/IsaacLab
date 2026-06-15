@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 __all__ = [
+    "DeployRelativeJointPositionActionCfg",
     "randomize_gear_type",
     "randomize_gears_and_base_pose",
     "set_robot_to_grasp_pose",
@@ -50,6 +51,7 @@ from .delayed_joint_actions_cfg import (
     ShapedDelayedRelativeJointPositionActionCfg,
     FlexivDynamicsAwareRelativeJointPositionActionCfg,
 )
+from .actions_cfg import DeployRelativeJointPositionActionCfg
 from .events import (
     randomize_gear_type,
     randomize_gears_and_base_pose,
