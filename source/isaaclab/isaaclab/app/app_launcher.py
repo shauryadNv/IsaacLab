@@ -1358,7 +1358,16 @@ class AppLauncher:
     def is_isaac_sim_version_5(self) -> bool:
         if not hasattr(self, "_is_sim_ver_5"):
             # 1) Try to read the VERSION file (for manual / binary installs)
-            version_path = os.path.abspath(os.path.join(os.path.dirname(isaacsim.__file__), "../../VERSION"))
+            # isaacsim may not be importable when using an omni-style install, so guard against NameError.
+            try:
+                _isaacsim_file = isaacsim.__file__
+            except NameError:
+                _isaacsim_file = None
+            version_path = (
+                os.path.abspath(os.path.join(os.path.dirname(_isaacsim_file), "../../VERSION"))
+                if _isaacsim_file is not None
+                else ""
+            )
             if os.path.isfile(version_path):
                 with open(version_path) as f:
                     ver = f.readline().strip()

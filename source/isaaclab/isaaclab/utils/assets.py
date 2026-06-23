@@ -248,6 +248,25 @@ def _resolve_git_asset_source_path(local_path: str, git_asset_dir: str) -> str:
     return source_path
 
 
+def _http_download(url: str, dest: str) -> None:
+    """Download a file from an HTTP/HTTPS URL to a local path.
+
+    Non-essential files (materials, textures, etc.) that fail to download are
+    silently skipped so that headless/kitless workflows can proceed.
+    """
+    import urllib.request  # noqa: PLC0415
+
+    logger.info(f"Downloading: {url} -> {dest}")
+    try:
+        urllib.request.urlretrieve(url, dest)
+    except Exception:
+        suffix = os.path.splitext(dest)[1].lower()
+        if suffix in {".usd", ".usda", ".usdc", ".usdz"}:
+            raise
+        logger.warning(f"Skipping non-essential dependency (download failed): {url}")
+        return
+
+
 def check_file_path(path: str) -> Literal[0, 1, 2]:
     """Checks if a file exists on the Nucleus Server or locally.
 
@@ -264,11 +283,25 @@ def check_file_path(path: str) -> Literal[0, 1, 2]:
     if os.path.isfile(path):
         return 1
 
-    import omni.client  # noqa: PLC0415
+    try:
+        import omni.client  # noqa: PLC0415
 
-    if omni.client.stat(path.replace(os.sep, "/"))[0] == omni.client.Result.OK:
-        return 2
-    else:
+        if omni.client.stat(path.replace(os.sep, "/"))[0] == omni.client.Result.OK:
+            return 2
+        else:
+            return 0
+    except (ImportError, ModuleNotFoundError):
+        parsed = urlparse(path)
+        if parsed.scheme in ("http", "https"):
+            import urllib.request  # noqa: PLC0415
+
+            try:
+                req = urllib.request.Request(path, method="HEAD")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        return 2
+            except Exception:
+                pass
         return 0
 
 
@@ -299,8 +332,6 @@ def retrieve_file_path(path: str, download_dir: str | None = None, force_downloa
     if file_status == 1:
         return os.path.abspath(path)
     elif file_status == 2:
-        import omni.client  # noqa: PLC0415
-
         # resolve download directory
         if download_dir is None:
             download_dir = tempfile.gettempdir()
@@ -315,23 +346,28 @@ def retrieve_file_path(path: str, download_dir: str | None = None, force_downloa
         visited = set()
         local_root = None
 
+        try:
+            import omni.client  # noqa: PLC0415
+
+            _has_omni_client = True
+        except (ImportError, ModuleNotFoundError):
+            _has_omni_client = False
+
         while to_visit:
             cur_url = to_visit.pop()
             if cur_url in visited:
                 continue
             visited.add(cur_url)
 
-            # UDIM textures use a <UDIM> placeholder (e.g. texture.<UDIM>.png) that does not
-            # correspond to a real file. Expand to individual tile URLs by probing tile numbers
-            # starting at 1001; UDIM tiles are contiguous so stop at the first missing tile.
             if _UDIM_RE.search(cur_url):
-                for tile in range(1001, 1101):
-                    tile_url = _UDIM_RE.sub(str(tile), cur_url)
-                    if omni.client.stat(tile_url.replace(os.sep, "/"))[0] == omni.client.Result.OK:
-                        if tile_url not in visited:
-                            to_visit.append(tile_url)
-                    else:
-                        break
+                if _has_omni_client:
+                    for tile in range(1001, 1101):
+                        tile_url = _UDIM_RE.sub(str(tile), cur_url)
+                        if omni.client.stat(tile_url.replace(os.sep, "/"))[0] == omni.client.Result.OK:
+                            if tile_url not in visited:
+                                to_visit.append(tile_url)
+                        else:
+                            break
                 continue
 
             cur_rel = urlparse(cur_url).path.lstrip("/")
@@ -340,12 +376,15 @@ def retrieve_file_path(path: str, download_dir: str | None = None, force_downloa
 
             is_root_asset = local_root is None
             if not os.path.isfile(target_path) or force_download:
-                result = omni.client.copy(cur_url, target_path, omni.client.CopyBehavior.OVERWRITE)
-                if result != omni.client.Result.OK:
-                    if force_download or is_root_asset:
-                        raise RuntimeError(f"Unable to copy file: '{cur_url}'. Is the Nucleus Server running?")
-                    logger.debug("Skipping unavailable dependency: %s", cur_url)
-                    continue
+                if _has_omni_client:
+                    result = omni.client.copy(cur_url, target_path, omni.client.CopyBehavior.OVERWRITE)
+                    if result != omni.client.Result.OK:
+                        if force_download or is_root_asset:
+                            raise RuntimeError(f"Unable to copy file: '{cur_url}'. Is the Nucleus Server running?")
+                        logger.debug("Skipping unavailable dependency: %s", cur_url)
+                        continue
+                else:
+                    _http_download(cur_url, target_path)
 
             if local_root is None:
                 local_root = target_path
@@ -379,10 +418,16 @@ def read_file(path: str) -> io.BytesIO:
         with open(path, "rb") as f:
             return io.BytesIO(f.read())
     elif file_status == 2:
-        import omni.client  # noqa: PLC0415
+        try:
+            import omni.client  # noqa: PLC0415
 
-        file_content = omni.client.read_file(path.replace(os.sep, "/"))[2]
-        return io.BytesIO(memoryview(file_content).tobytes())
+            file_content = omni.client.read_file(path.replace(os.sep, "/"))[2]
+            return io.BytesIO(memoryview(file_content).tobytes())
+        except (ImportError, ModuleNotFoundError):
+            import urllib.request  # noqa: PLC0415
+
+            with urllib.request.urlopen(path, timeout=30) as resp:
+                return io.BytesIO(resp.read())
     else:
         raise FileNotFoundError(f"Unable to find the file: {path}")
 

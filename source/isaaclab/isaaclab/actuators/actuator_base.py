@@ -353,6 +353,11 @@ class ActuatorBase(ABC):
                 # if tensor, then use the same tensor for all joints
                 if default_value.shape == (self._num_envs, self.num_joints):
                     param = default_value.float()
+                elif default_value.dim() == 2 and default_value.shape == (1, self.num_joints):
+                    # Some backends (e.g. Newton) supply USD-template values read from a
+                    # single prototype instance with shape [1, num_joints].  Broadcast to
+                    # all environments so downstream code always sees [num_envs, num_joints].
+                    param = default_value.float().expand(self._num_envs, self.num_joints).clone()
                 else:
                     raise ValueError(
                         "Invalid default value tensor shape.\n"
