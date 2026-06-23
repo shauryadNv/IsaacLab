@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+import numpy as np
 import torch
 from newton import ModelBuilder
 from newton._src.usd.schemas import SchemaResolverNewton, SchemaResolverPhysx
@@ -26,12 +28,272 @@ from isaaclab_newton.cloner.newton_clone_utils import (
 )
 from isaaclab_newton.physics import NewtonManager
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     _MappingBatch: TypeAlias = tuple[
         tuple[str, ...], tuple[str, ...], torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None
     ]
 else:
     _MappingBatch = tuple
+
+
+def _enable_intended_mesh_colliders(builder: ModelBuilder, stage: Usd.Stage) -> list[int]:
+    """Enable collision on mesh shapes whose USD body declares collision intent but for which
+    Newton's importer produced no collider.
+
+    Newton's :meth:`ModelBuilder.add_usd` only creates a collider when ``UsdPhysics.CollisionAPI``
+    is applied directly to a geometry prim. Some assets (e.g. the factory gears) apply the API to a
+    parent ``Xform`` over the collision mesh, so the importer skips the collider and loads only the
+    (identical-geometry) visual mesh as a non-colliding shape -- the body then has no collision and
+    falls through everything. For each body that has shapes but none colliding, if its USD subtree
+    declares collision intent, enable ``COLLIDE_SHAPES`` on its mesh shapes, reusing the geometry and
+    transform already imported for the visual mesh.
+
+    Must run on the builder before :meth:`ModelBuilder.finalize` (here, on each prototype before
+    replication).
+
+    Args:
+        builder: The prototype model builder to repair in place.
+        stage: The USD stage the builder was populated from.
+
+    Returns:
+        Indices of the shapes switched to colliding. These are full (non-remeshed) meshes, so the
+        caller should keep them out of any convex-hull approximation pass to preserve the concave
+        geometry the assets are authored for (e.g. ``sdf``).
+    """
+    from newton import GeoType, ShapeFlags
+
+    from pxr import UsdPhysics
+
+    collide_bit = int(ShapeFlags.COLLIDE_SHAPES)
+    mesh_type = int(GeoType.MESH)
+
+    body_to_shapes: dict[int, list[int]] = {}
+    for i in range(builder.shape_count):
+        body_to_shapes.setdefault(builder.shape_body[i], []).append(i)
+
+    recovered: list[int] = []
+    for body_idx, shape_ids in body_to_shapes.items():
+        if body_idx < 0:
+            continue
+        if any(int(builder.shape_flags[i]) & collide_bit for i in shape_ids):
+            continue  # body already has a collider; nothing was skipped
+        prim = stage.GetPrimAtPath(builder.body_label[body_idx])
+        if not prim or not prim.IsValid():
+            continue
+        if not any(p.HasAPI(UsdPhysics.CollisionAPI) for p in Usd.PrimRange(prim, Usd.TraverseInstanceProxies())):
+            continue
+        for i in shape_ids:
+            if int(builder.shape_type[i]) == mesh_type:
+                builder.shape_flags[i] = int(builder.shape_flags[i]) | collide_bit
+                recovered.append(i)
+    return recovered
+
+
+def _author_skipped_mesh_colliders(stage: Usd.Stage, sources: Sequence[str]) -> set[str]:
+    """Author colliders the importer would otherwise skip, as real (approximation-tagged) colliders.
+
+    Newton's :meth:`ModelBuilder.add_usd` only builds a collider when ``UsdPhysics.CollisionAPI`` is
+    applied directly to a geometry prim. Assets such as the factory gears apply the API to a parent
+    ``Xform`` over an *instanced* collision mesh, so the importer builds no collider at all. De-instance
+    those subtrees and apply ``CollisionAPI`` -- plus the ancestor's ``MeshCollisionAPI`` approximation
+    (e.g. ``sdf``) -- to the collision mesh itself, so the importer builds a real collider that honors
+    the authored approximation. This is what lets the hydroelastic SDF path grip concave geometry (such
+    as a gear hub) instead of a filled-in convex hull.
+
+    Must run on the stage before any :meth:`ModelBuilder.add_usd`.
+
+    Args:
+        stage: USD stage to edit in place.
+        sources: Source prim paths to scan.
+
+    Returns:
+        Rigid-body prim paths for which a collider was authored. The caller keeps these bodies'
+        collision meshes out of convex-hull approximation to preserve their concave geometry.
+    """
+    from pxr import UsdPhysics
+
+    authored: set[str] = set()
+    for src in sources:
+        root = stage.GetPrimAtPath(src)
+        if not root or not root.IsValid():
+            continue
+        root_path = root.GetPath()
+        # De-instance so proxy collision meshes become real, authorable prims.
+        for prim in Usd.PrimRange(root):
+            if prim.IsInstanceable():
+                prim.SetInstanceable(False)
+        for prim in Usd.PrimRange(root):
+            if prim.GetTypeName() != "Mesh" or prim.HasAPI(UsdPhysics.CollisionAPI):
+                continue  # not a mesh, or the importer already builds this collider
+            # Walk up to the nearest ancestor that declares collision intent on an Xform.
+            approx = None
+            declares = False
+            ancestor = prim.GetParent()
+            while ancestor and ancestor.IsValid() and ancestor.GetPath().HasPrefix(root_path):
+                if ancestor.HasAPI(UsdPhysics.CollisionAPI):
+                    declares = True
+                    if ancestor.HasAPI(UsdPhysics.MeshCollisionAPI):
+                        approx = UsdPhysics.MeshCollisionAPI(ancestor).GetApproximationAttr().Get()
+                    break
+                ancestor = ancestor.GetParent()
+            if not declares:
+                continue
+            UsdPhysics.CollisionAPI.Apply(prim)
+            mca = UsdPhysics.MeshCollisionAPI.Apply(prim)
+            if approx:
+                mca.CreateApproximationAttr().Set(approx)
+            # Record the owning rigid body (nearest ancestor with RigidBodyAPI, else the source root).
+            body = prim
+            while body and body.IsValid() and body.GetPath().HasPrefix(root_path):
+                if body.HasAPI(UsdPhysics.RigidBodyAPI):
+                    break
+                body = body.GetParent()
+            authored.add(str(body.GetPath()) if body and body.IsValid() else str(root_path))
+    return authored
+
+
+def _weld_builder_collision_meshes(source_builders: dict[str, ModelBuilder]) -> int:
+    """Merge coincident (duplicate) vertices on mesh colliders so they are watertight.
+
+    Meshes exported from CAD tools (e.g. Onshape) often emit per-face duplicate vertices, leaving the
+    surface topologically open (non-watertight). PhysX tolerates this, but Newton's own collision
+    pipeline builds a signed-distance field from the mesh, which is only well defined for a watertight
+    surface -- otherwise contacts are spurious and grasped/seated objects are ejected or
+    interpenetrated. Welding coincident vertices closes these seams without changing the surface
+    geometry (it only reindexes faces onto a deduplicated vertex set).
+
+    Runs on the per-source :class:`ModelBuilder` mesh shapes (after import and convex-hull
+    simplification, before replication), so it is unaffected by USD instancing of the collision
+    geometry. Only concave ``MESH`` shapes are touched -- convex-hull shapes are already watertight.
+
+    Args:
+        source_builders: Per-source builders to edit in place.
+
+    Returns:
+        Number of mesh colliders that were welded.
+    """
+    from newton import GeoType, Mesh, ShapeFlags
+
+    mesh_type = int(GeoType.MESH)
+    collide_bit = int(ShapeFlags.COLLIDE_SHAPES)
+    welded = 0
+    for builder in source_builders.values():
+        for i in range(builder.shape_count):
+            if int(builder.shape_type[i]) != mesh_type or not (int(builder.shape_flags[i]) & collide_bit):
+                continue  # only concave colliders get an SDF; skip non-colliding (e.g. visual) meshes
+            source = builder.shape_source[i]
+            if source is None or getattr(source, "vertices", None) is None:
+                continue
+            vertices = np.asarray(source.vertices, dtype=np.float64)
+            indices = np.asarray(source.indices, dtype=np.int64)
+            if len(vertices) == 0 or len(indices) == 0:
+                continue
+            # Quantize to a small fraction of the mesh extent so only coincident duplicates merge.
+            extent = float(np.max(vertices.max(axis=0) - vertices.min(axis=0)))
+            tol = max(extent, 1.0) * 1e-7
+            keys = np.round(vertices / tol).astype(np.int64)
+            _, first, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
+            if len(first) == len(vertices):
+                continue  # no duplicate vertices to merge
+            new_vertices = vertices[first].astype(np.float32)
+            new_indices = inverse[indices].astype(np.int32)
+            builder.shape_source[i] = Mesh(new_vertices, new_indices)
+            welded += 1
+    return welded
+
+
+def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder]) -> int:
+    """Build SDFs and enable hydroelastic contacts on eligible colliding shapes.
+
+    Newton hydroelastic SDF contact is activated per shape: both shapes in a contact pair must carry
+    :attr:`ShapeFlags.HYDROELASTIC`, and mesh shapes must have an SDF attached before model
+    finalization. USD collision schemas declare the author's intent, but Newton's builder still needs
+    explicit mesh SDF data and hydroelastic flags.
+
+    Args:
+        source_builders: Per-source builders to edit in place.
+
+    Returns:
+        Number of shapes marked as hydroelastic.
+    """
+    from newton import GeoType, ShapeFlags
+
+    collide_bit = int(ShapeFlags.COLLIDE_SHAPES)
+    hydroelastic_bit = int(ShapeFlags.HYDROELASTIC)
+    mesh_types = {int(GeoType.MESH), int(GeoType.CONVEX_MESH)}
+    primitive_types = {
+        int(GeoType.BOX),
+        int(GeoType.SPHERE),
+        int(GeoType.CAPSULE),
+        int(GeoType.CYLINDER),
+        int(GeoType.CONE),
+        int(GeoType.ELLIPSOID),
+    }
+    marked = 0
+    for builder in source_builders.values():
+        for i in range(builder.shape_count):
+            if not (int(builder.shape_flags[i]) & collide_bit):
+                continue
+            shape_type = int(builder.shape_type[i])
+            source = builder.shape_source[i]
+            if shape_type in mesh_types and source is not None and getattr(source, "vertices", None) is not None:
+                shape_scale = np.asarray(builder.shape_scale[i], dtype=np.float32)
+                mesh = source
+                if not np.allclose(shape_scale, 1.0):
+                    mesh = mesh.copy(vertices=np.asarray(mesh.vertices, dtype=np.float32) * shape_scale)
+                    builder.shape_source[i] = mesh
+                    builder.shape_scale[i] = (1.0, 1.0, 1.0)
+                if getattr(mesh, "sdf", None) is None:
+                    gap = float(builder.shape_gap[i] if builder.shape_gap[i] is not None else 0.005)
+                    sdf_radius = max(gap, 0.005)
+                    mesh.build_sdf(
+                        max_resolution=64,
+                        narrow_band_range=(-sdf_radius, sdf_radius),
+                        margin=sdf_radius,
+                    )
+                builder.shape_type[i] = GeoType.MESH
+            elif shape_type not in primitive_types:
+                continue
+            builder.shape_flags[i] = int(builder.shape_flags[i]) | hydroelastic_bit
+            marked += 1
+    return marked
+
+
+def _recover_and_simplify_source_builders(
+    source_builders: dict[str, ModelBuilder], stage: Usd.Stage, authored_bodies: set[str], simplify_meshes: bool
+) -> None:
+    """Recover importer-skipped colliders and convex-hull the rest, in place on each source builder.
+
+    Runs after :func:`build_source_builders` (called with ``simplify_meshes=False``). For each source
+    builder it enables collision on mesh shapes the importer skipped (see
+    :func:`_enable_intended_mesh_colliders`), then convex-hulls every remaining collision mesh except
+    those recovered shapes and the bodies given real (e.g. ``sdf``) colliders by
+    :func:`_author_skipped_mesh_colliders` -- both must keep their concave geometry.
+    """
+    if not simplify_meshes:
+        return
+    from newton import GeoType, ShapeFlags
+
+    collide_bit = int(ShapeFlags.COLLIDE_SHAPES)
+    mesh_type = int(GeoType.MESH)
+    for p in source_builders.values():
+        recovered = _enable_intended_mesh_colliders(p, stage)
+        keep = set(recovered)
+        keep.update(i for i in range(p.shape_count) if p.body_label[p.shape_body[i]] in authored_bodies)
+        # Keep gripper finger colliders concave (out of the hull) so the contact surface conforms to a
+        # grasped object instead of a convex shell that interpenetrates it. The MuJoCo-contacts preset
+        # convex-hulls at solve time regardless, so this only affects Newton's own (e.g. hydroelastic)
+        # collision pipeline, where it matches the concave PhysX gripper collision.
+        keep.update(i for i in range(p.shape_count) if "finger" in str(p.body_label[p.shape_body[i]]).lower())
+        hull_ids = [
+            i
+            for i in range(p.shape_count)
+            if i not in keep and int(p.shape_type[i]) == mesh_type and (int(p.shape_flags[i]) & collide_bit)
+        ]
+        if hull_ids:
+            p.approximate_meshes("convex_hull", shape_indices=hull_ids, keep_visual_shapes=True)
 
 
 def _build_newton_builder_from_mapping(
@@ -82,14 +344,49 @@ def _build_newton_builder_from_mapping(
                 if any(pattern.fullmatch(child_path) for pattern in deformable_patterns):
                     deformable_ignore_paths.append(child_path)
 
+    # Author proper colliders for bodies whose collision mesh the importer would skip (CollisionAPI on
+    # a parent Xform of an instanced mesh, e.g. the factory gears), so the importer builds real,
+    # approximation-tagged (sdf) colliders the hydroelastic path can use. Only for Newton's own
+    # collision pipeline (``use_mujoco_contacts=False``): under MuJoCo contacts the solver convex-hulls
+    # the concave collision mesh into a degenerate hull (NaN training), so there we keep the lighter
+    # ``_enable_intended_mesh_colliders`` flag-recovery on the visual mesh instead.
+    # Whether Newton's own (SDF) collision pipeline will be used. ``_needs_collision_pipeline`` is only
+    # set True later, when the solver is built (after this cloner runs), so at this point we detect the
+    # intent from the config: a ``collision_cfg`` is authored only for the SDF preset. Fall back to the
+    # flag in case it is already set.
+    needs_sdf = (
+        NewtonManager._needs_collision_pipeline or getattr(PhysicsManager._cfg, "collision_cfg", None) is not None
+    )
+
+    authored_bodies: set[str] = set()
+    if needs_sdf:
+        authored_bodies = _author_skipped_mesh_colliders(stage, sources)
+
+    # Build source builders without simplification, then recover importer-skipped colliders before
+    # convex-hulling (so recovered/authored concave meshes are preserved). See
+    # :func:`_recover_and_simplify_source_builders`.
     source_builders = build_source_builders(
         stage,
         sources,
         lambda: manager_cls.create_builder(up_axis=up_axis),
         schema_resolvers,
         ignore_paths=deformable_ignore_paths or None,
-        simplify_meshes=simplify_meshes,
+        simplify_meshes=False,
     )
+    _recover_and_simplify_source_builders(source_builders, stage, authored_bodies, simplify_meshes)
+
+    # Weld duplicate vertices on the remaining concave mesh colliders so the SDF pipeline sees
+    # watertight surfaces (CAD exports often are not). After simplification so convex-hull shapes are
+    # left alone, and on the builder (not the USD stage) so it is robust to collision-mesh instancing.
+    if needs_sdf:
+        welded = _weld_builder_collision_meshes(source_builders)
+        if welded:
+            logger.info("Welded duplicate vertices on %d mesh collider(s) for the SDF pipeline.", welded)
+        collision_cfg = getattr(PhysicsManager._cfg, "collision_cfg", None)
+        if getattr(collision_cfg, "sdf_hydroelastic_config", None) is not None:
+            marked = _configure_hydroelastic_sdf_shapes(source_builders)
+            if marked:
+                logger.info("Enabled hydroelastic SDF contacts on %d shape(s).", marked)
 
     # Inject registered sites into source builders (and global sites into main builder).
     global_sites, source_sites, root_sites = NewtonManager._cl_inject_sites(builder, source_builders)
