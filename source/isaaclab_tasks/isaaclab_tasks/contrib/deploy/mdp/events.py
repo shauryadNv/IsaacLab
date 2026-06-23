@@ -74,8 +74,7 @@ class randomize_gear_type(ManagerTermBase):
             env_ids: Environment IDs to randomize
             gear_types: List of available gear types to choose from
         """
-        # Randomly select gear type for each environment
-        # Use the parameter passed to __call__ (not self.gear_types) to allow runtime overrides
+        # Randomly select gear type for each environment.
         for env_id in env_ids.tolist():
             chosen_gear = random.choice(gear_types)
             self._current_gear_type[env_id] = chosen_gear
@@ -203,10 +202,25 @@ class set_robot_to_grasp_pose(ManagerTermBase):
         # Find jacobian body index (for fixed-base robots, subtract 1)
         self.jacobi_body_idx = self.eef_idx - 1
 
+        # Optional fingertip bodies used to derive the end-effector -> grasp-center transform from
+        # kinematics at runtime. This makes the IK target the fingertip midpoint (not the EE link)
+        # at the grasp point, so the grasp no longer depends on a hand-tuned, backend-specific reach
+        # offset (the EE link frame is oriented differently on PhysX vs Newton). Falls back to the
+        # configured offset when these bodies are absent (e.g. a different gripper).
+        lt, _ = self.robot_asset.find_bodies(["left_finger_tip"])
+        rt, _ = self.robot_asset.find_bodies(["right_finger_tip"])
+        self.grasp_center_idx_l = lt[0] if len(lt) > 0 else None
+        self.grasp_center_idx_r = rt[0] if len(rt) > 0 else None
+        self._fingertip_offset_in_eef = None
+
         # Find all joints once
         all_joints, all_joints_names = self.robot_asset.find_joints([".*"])
         self.all_joints = all_joints
         self.finger_joints = all_joints[self.num_arm_joints :]
+        # Map joint name -> simulation joint index. The order returned by ``find_joints`` is the
+        # backend DOF order, which differs between PhysX and Newton; gripper joint setters must
+        # therefore resolve joints by name (not by positional slice) to remain backend-agnostic.
+        self.joint_name_to_idx = {name: idx for idx, name in zip(all_joints, all_joints_names)}
 
     def __call__(
         self,
@@ -250,6 +264,20 @@ class set_robot_to_grasp_pose(ManagerTermBase):
         gear_grasp_offsets = self.gear_grasp_offsets_buffer[:num_reset_envs]
         grasp_rot_offset_tensor = self.grasp_rot_offset_tensor[env_ids]
 
+        # Measure the (constant, rigid) end-effector -> fingertip-midpoint vector in the EE frame
+        # from current kinematics. Targeting ``link7 = grasp_point - R(grasp_quat) * this`` makes the
+        # fingertip midpoint reach the grasp point regardless of how the backend orients the EE frame.
+        if self.grasp_center_idx_l is not None and self.grasp_center_idx_r is not None:
+            eef_pos_now = self.robot_asset.data.body_pos_w.torch[env_ids, self.eef_idx]
+            eef_quat_now = self.robot_asset.data.body_quat_w.torch[env_ids, self.eef_idx]
+            fingertip_mid_now = 0.5 * (
+                self.robot_asset.data.body_pos_w.torch[env_ids, self.grasp_center_idx_l]
+                + self.robot_asset.data.body_pos_w.torch[env_ids, self.grasp_center_idx_r]
+            )
+            self._fingertip_offset_in_eef = math_utils.quat_apply(
+                math_utils.quat_conjugate(eef_quat_now), fingertip_mid_now - eef_pos_now
+            )
+
         # IK loop
         for i in range(max_iterations):
             # Get current joint state
@@ -288,6 +316,16 @@ class set_robot_to_grasp_pose(ManagerTermBase):
 
             # Get grasp offsets (vectorized)
             gear_grasp_offsets[:] = self.gear_grasp_offsets_stacked[gear_type_indices]
+
+            if self._fingertip_offset_in_eef is not None:
+                # Add the measured EE -> fingertip offset so the fingertip midpoint -- not the EE link --
+                # lands on the configured grasp point on any physics backend. The configured ``z`` is
+                # kept: it is the axial offset along the gear from its center to the graspable hub (the
+                # gears are grasped by the central hub, which protrudes ~3 cm above the wide toothed disk;
+                # targeting the gear center instead leaves the fingers straddling the disk with nothing to
+                # clamp). The grasp rotation maps offset +z to gear -z, so a negative ``z`` targets the hub.
+                gear_grasp_offsets = gear_grasp_offsets.clone()
+                gear_grasp_offsets = gear_grasp_offsets - self._fingertip_offset_in_eef
 
             # Add position randomization if specified
             if pos_randomization_range is not None:
@@ -376,7 +414,9 @@ class set_robot_to_grasp_pose(ManagerTermBase):
         for row_idx, env_id in enumerate(env_ids.tolist()):
             gear_key = all_gear_types[env_id]
             hand_grasp_width = self.hand_grasp_width[gear_key]
-            self.gripper_joint_setter_func(joint_pos, [row_idx], self.finger_joints, hand_grasp_width)
+            self.gripper_joint_setter_func(
+                joint_pos, [row_idx], self.finger_joints, hand_grasp_width, self.joint_name_to_idx
+            )
 
         self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
         self.robot_asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
@@ -386,7 +426,9 @@ class set_robot_to_grasp_pose(ManagerTermBase):
         for row_idx, env_id in enumerate(env_ids.tolist()):
             gear_key = all_gear_types[env_id]
             hand_close_width = self.hand_close_width[gear_key]
-            self.gripper_joint_setter_func(joint_pos, [row_idx], self.finger_joints, hand_close_width)
+            self.gripper_joint_setter_func(
+                joint_pos, [row_idx], self.finger_joints, hand_close_width, self.joint_name_to_idx
+            )
 
         self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
 
@@ -421,16 +463,28 @@ class randomize_gears_and_base_pose(ManagerTermBase):
         pose_range: dict = {},
         velocity_range: dict = {},
         gear_pos_range: dict = {},
+        gear_offsets: dict | None = None,
+        seated_gear_z_offset: float = 0.0,
     ):
         """Randomize gear base and gear poses.
+
+        Every gear is seated on its shaft (at the shaft target the gear-shaft observation and reward
+        use), expressed relative to the randomized base pose. The single gear selected for the trial
+        is then lifted off its shaft by ``gear_pos_range`` so the gripper can grasp it for insertion.
 
         Args:
             env: Environment instance
             env_ids: Environment IDs to randomize
-            pose_range: Pose randomization range for base and all gears
-            velocity_range: Velocity randomization range
-            gear_pos_range: Additional position randomization for selected gear only
+            pose_range: Pose randomization range for the base (and, rigidly, all gears)
+            velocity_range: Unused; gears and base are reset at rest
+            gear_pos_range: Lift applied to the selected gear only, in world frame
+            gear_offsets: Per-gear shaft offset in the base frame, mapping ``gear_small`` /
+                ``gear_medium`` / ``gear_large`` to ``[x, y, z]`` (the insertion target)
+            seated_gear_z_offset: Rest-height offset [m] applied in the base frame for the two
+                non-selected gears, so they remain centered on their shafts under base rotation.
         """
+        if gear_offsets is None:
+            raise ValueError("'gear_offsets' parameter is required in randomize_gears_and_base_pose.")
         if not hasattr(env, "_gear_type_manager"):
             raise RuntimeError(
                 "Gear type manager not initialized. Ensure randomize_gear_type event is configured "
@@ -452,54 +506,68 @@ class randomize_gears_and_base_pose(ManagerTermBase):
             rand_pose_samples[:, 3], rand_pose_samples[:, 4], rand_pose_samples[:, 5]
         )
 
-        # Shared velocity samples
-        range_list_vel = [velocity_range.get(key, (0.0, 0.0)) for key in pose_keys]
-        ranges_vel = torch.tensor(range_list_vel, device=device)
-        rand_vel_samples = math_utils.sample_uniform(
-            ranges_vel[:, 0], ranges_vel[:, 1], (len(env_ids), 6), device=device
+        # Per-gear shaft offset (base frame), ordered to match self.gear_asset_names.
+        key_map = {
+            "factory_gear_small": "gear_small",
+            "factory_gear_medium": "gear_medium",
+            "factory_gear_large": "gear_large",
+        }
+        gear_offsets_t = torch.tensor(
+            [gear_offsets[key_map[name]] for name in self.gear_asset_names], device=device, dtype=torch.float32
         )
 
-        # Prepare poses for all assets
-        positions_by_asset = {}
-        orientations_by_asset = {}
-        velocities_by_asset = {}
+        # Perturbed base world pose. Each gear is seated at its shaft target (combined with the base
+        # pose) so it stays on its shaft under any base rotation; only the gear selected for this
+        # trial is lifted off. Placing gears at the linear spawn position instead drifts them off the
+        # shafts because the base orientation is not a pure z-rotation.
+        base: RigidObject | Articulation = env.scene[self.base_asset_name]
+        base_default = base.data.default_root_pose.torch[env_ids].clone()
+        base_world_pos = base_default[:, 0:3] + env.scene.env_origins[env_ids] + rand_pose_samples[:, 0:3]
+        base_world_quat = math_utils.quat_mul(base_default[:, 3:7], orientations_delta)
+        zero_vel = torch.zeros((len(env_ids), 6), device=device)
+        base.write_root_pose_to_sim_index(
+            root_pose=torch.cat([base_world_pos, base_world_quat], dim=-1), env_ids=env_ids
+        )
+        base.write_root_velocity_to_sim_index(root_velocity=zero_vel, env_ids=env_ids)
 
-        asset_names_to_process = [self.base_asset_name] + self.gear_asset_names
-        for asset_name in asset_names_to_process:
-            asset: RigidObject | Articulation = env.scene[asset_name]
-            default_root_pose = asset.data.default_root_pose.torch[env_ids].clone()
-            default_root_vel = asset.data.default_root_vel.torch[env_ids].clone()
-            positions = default_root_pose[:, 0:3] + env.scene.env_origins[env_ids] + rand_pose_samples[:, 0:3]
-            orientations = math_utils.quat_mul(default_root_pose[:, 3:7], orientations_delta)
-            velocities = default_root_vel + rand_vel_samples
-            positions_by_asset[asset_name] = positions
-            orientations_by_asset[asset_name] = orientations
-            velocities_by_asset[asset_name] = velocities
+        # Per-env selected gear index.
+        num_reset_envs = len(env_ids)
+        gear_type_indices = self.gear_type_indices[:num_reset_envs]
+        gear_type_indices[:] = gear_type_manager.get_all_gear_type_indices()[env_ids]
 
-        # Per-env gear offset (gear_pos_range) applied only to selected gear
+        # Per-env lift (gear_pos_range), applied in world frame to the selected gear only.
         range_list_gear = [gear_pos_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z"]]
         ranges_gear = torch.tensor(range_list_gear, device=device)
         rand_gear_offsets = math_utils.sample_uniform(
             ranges_gear[:, 0], ranges_gear[:, 1], (len(env_ids), 3), device=device
         )
 
-        # Get gear type indices directly as tensor
-        num_reset_envs = len(env_ids)
-        gear_type_indices = self.gear_type_indices[:num_reset_envs]
-        all_gear_type_indices = gear_type_manager.get_all_gear_type_indices()
-        gear_type_indices[:] = all_gear_type_indices[env_ids]
-
-        # Apply offsets using vectorized operations with masks
         for gear_idx, asset_name in enumerate(self.gear_asset_names):
-            if asset_name in positions_by_asset:
-                mask = gear_type_indices == gear_idx
-                positions_by_asset[asset_name][mask] = positions_by_asset[asset_name][mask] + rand_gear_offsets[mask]
+            gear: RigidObject = env.scene[asset_name]
+            gear_default = gear.data.default_root_pose.torch[env_ids].clone()
+            # Orientation of the gear relative to the base in its default (seated) configuration.
+            _, rel_quat = math_utils.subtract_frame_transforms(
+                base_default[:, 0:3], base_default[:, 3:7], gear_default[:, 0:3], gear_default[:, 3:7]
+            )
+            # Seat non-selected gears at the rest height in the base frame. Applying this offset before
+            # the base transform keeps each gear centered on its shaft even when base roll/pitch are
+            # randomized.
+            off = gear_offsets_t[gear_idx].unsqueeze(0).expand(len(env_ids), 3)
+            seated_off = off.clone()
+            seated_off[:, 2] += seated_gear_z_offset
+            gear_world_pos, gear_world_quat = math_utils.combine_frame_transforms(
+                base_world_pos, base_world_quat, seated_off, rel_quat
+            )
 
-        # Write to sim
-        for asset_name in positions_by_asset.keys():
-            asset = env.scene[asset_name]
-            positions = positions_by_asset[asset_name]
-            orientations = orientations_by_asset[asset_name]
-            velocities = velocities_by_asset[asset_name]
-            asset.write_root_pose_to_sim_index(root_pose=torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
-            asset.write_root_velocity_to_sim_index(root_velocity=velocities, env_ids=env_ids)
+            # Lift only the selected gear from the insertion target so the gripper can grasp it.
+            mask = gear_type_indices == gear_idx
+            if torch.any(mask):
+                grasp_world_pos, grasp_world_quat = math_utils.combine_frame_transforms(
+                    base_world_pos, base_world_quat, off, rel_quat
+                )
+                gear_world_pos[mask] = grasp_world_pos[mask] + rand_gear_offsets[mask]
+                gear_world_quat[mask] = grasp_world_quat[mask]
+            gear.write_root_pose_to_sim_index(
+                root_pose=torch.cat([gear_world_pos, gear_world_quat], dim=-1), env_ids=env_ids
+            )
+            gear.write_root_velocity_to_sim_index(root_velocity=zero_vel, env_ids=env_ids)

@@ -34,6 +34,7 @@ def set_finger_joint_pos_robotiq_2f140(
     reset_ind_joint_pos: list[int],
     finger_joints: list[int],
     finger_joint_position: float,
+    joint_name_to_idx: dict[str, int] | None = None,
 ):
     """Set finger joint positions for Robotiq 2F-140 gripper.
 
@@ -42,6 +43,10 @@ def set_finger_joint_pos_robotiq_2f140(
         reset_ind_joint_pos: Row indices into the sliced joint_pos tensor
         finger_joints: List of finger joint indices
         finger_joint_position: Target position for finger joints
+        joint_name_to_idx: Mapping from joint name to simulation joint index. Accepted for
+            signature compatibility with the shared grasp event; this gripper still resolves
+            joints positionally. To make it backend-agnostic, port it to name-based resolution
+            (as done for the Grav gripper).
     """
     for idx in reset_ind_joint_pos:
         # For 2F-140 gripper (8 joints expected)

@@ -6,6 +6,7 @@
 import os
 from dataclasses import MISSING
 
+from isaaclab_newton.physics import HydroelasticSDFCfg, MJWarpSolverCfg, NewtonCfg, NewtonCollisionPipelineCfg
 from isaaclab_physx.physics import PhysxCfg
 
 import isaaclab.sim as sim_utils
@@ -27,10 +28,29 @@ from isaaclab.utils.noise import UniformNoiseCfg
 import isaaclab_tasks.contrib.deploy.mdp as mdp
 import isaaclab_tasks.contrib.deploy.mdp.terminations as gear_assembly_terminations
 from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
+from isaaclab_tasks.utils import PresetCfg, preset
 
 # Get the directory where this configuration file is located
 CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(CONFIG_DIR, "assets")
+NEWTON_GEAR_ASSETS_DIR = os.path.join(ASSETS_DIR, "newton")
+
+
+def _gear_usd_path(default_usd_path: str, asset_name: str) -> PresetCfg:
+    """Create a gear USD path preset with Newton-specific collision assets.
+
+    Args:
+        default_usd_path: Factory asset USD path used by the default and PhysX presets.
+        asset_name: Gear asset directory and USD stem.
+
+    Returns:
+        Preset that resolves to a package-local Newton SDF asset for ``newton_hydroelastic``.
+    """
+    return preset(
+        default=default_usd_path,
+        newton_hydroelastic=os.path.join(NEWTON_GEAR_ASSETS_DIR, asset_name, f"{asset_name}.usda"),
+    )
+
 
 ##
 # Environment configuration
@@ -38,11 +58,88 @@ ASSETS_DIR = os.path.join(CONFIG_DIR, "assets")
 
 
 @configclass
+class GearAssemblyPhysicsCfg(PresetCfg):
+    """Physics backend presets for gear assembly.
+
+    Gear insertion is contact-rich (gear teeth, shaft walls, gripper fingers), so the
+    Newton (MuJoCo) solver limits are set conservatively. Select a preset at runtime
+    with the ``presets=<name>`` CLI override:
+
+    * ``default`` -- Newton with MuJoCo's internal contact solver (``use_mujoco_contacts=True``).
+      Stable, well-tuned point contacts; the recommended starting point for bring-up.
+    * ``newton_hydroelastic`` -- Newton's own collision pipeline (``use_mujoco_contacts=False``)
+      with SDF-based hydroelastic contacts. Produces distributed contact areas instead of
+      point contacts, which can improve fidelity for the gear-teeth/shaft-wall interaction.
+      More expensive; A/B test against ``default`` before committing to it for training.
+    * ``physx`` -- PhysX fallback with buffer sizes raised to avoid collision-stack overflow.
+
+    Note:
+        ``collision_cfg`` (and therefore hydroelastic contacts) is only valid when the Newton
+        collision pipeline is active, i.e. ``use_mujoco_contacts=False``. Setting it alongside
+        ``use_mujoco_contacts=True`` raises ``ValueError``, which is why it lives in a separate
+        preset rather than the ``default``.
+    """
+
+    default: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            solver="newton",
+            integrator="implicitfast",
+            njmax=200,
+            nconmax=100,
+            impratio=10.0,
+            cone="elliptic",
+            iterations=100,
+            ls_iterations=50,
+            use_mujoco_contacts=True,
+        ),
+        num_substeps=2,
+        debug_mode=False,
+    )
+    newton_hydroelastic: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            solver="newton",
+            integrator="implicitfast",
+            # The hydroelastic SDF pipeline produces distributed contact areas (thousands of points
+            # for a gripped concave gear), so the per-world contact/constraint buffers must be far
+            # larger than the MuJoCo-convex ``default`` preset's. Sized for ~2k contacts with headroom.
+            njmax=2048,
+            nconmax=4096,
+            impratio=10.0,
+            cone="elliptic",
+            iterations=100,
+            ls_iterations=50,
+            # Hand collision detection to Newton's pipeline so hydroelastic SDF contacts apply.
+            use_mujoco_contacts=False,
+            ccd_iterations=35,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(
+            sdf_hydroelastic_config=HydroelasticSDFCfg(
+                reduce_contacts=True,
+                normal_matching=True,
+            ),
+        ),
+        num_substeps=2,
+        debug_mode=False,
+    )
+    physx: PhysxCfg = PhysxCfg(
+        # Important to prevent collisionStackSize buffer overflow in contact-rich environments.
+        gpu_collision_stack_size=2**30,
+        gpu_max_rigid_contact_count=2**23,
+        gpu_max_rigid_patch_count=2**23,
+    )
+
+
+@configclass
 class GearAssemblySceneCfg(InteractiveSceneCfg):
     """Configuration for the scene with a robotic arm."""
 
-    # Disable scene replication to allow USD-level randomization
-    replicate_physics = False
+    # Replicate physics so each environment gets its own physics instance. The Newton backend
+    # only creates per-environment bodies through the physics-replication path; with
+    # ``replicate_physics=False`` every environment collapses onto a single physics instance
+    # (root states come back shaped ``(1, ...)`` instead of ``(num_envs, ...)``). Per-environment
+    # gear/base variation is applied at reset via the randomization events
+    # (``write_root_pose_to_sim``), so it does not rely on USD-level authoring and is preserved.
+    replicate_physics = True
 
     # world
     ground = AssetBaseCfg(
@@ -55,7 +152,10 @@ class GearAssemblySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/FactoryGearBase",
         # TODO: change to common isaac sim directory
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_base/factory_gear_base.usd",
+            usd_path=_gear_usd_path(
+                f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_base/factory_gear_base.usd",
+                "factory_gear_base",
+            ),
             activate_contact_sensors=False,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -80,7 +180,10 @@ class GearAssemblySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/FactoryGearSmall",
         # TODO: change to common isaac sim directory
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_small/factory_gear_small.usd",
+            usd_path=_gear_usd_path(
+                f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_small/factory_gear_small.usd",
+                "factory_gear_small",
+            ),
             activate_contact_sensors=False,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -105,7 +208,10 @@ class GearAssemblySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/FactoryGearMedium",
         # TODO: change to common isaac sim directory
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_medium/factory_gear_medium.usd",
+            usd_path=_gear_usd_path(
+                f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_medium/factory_gear_medium.usd",
+                "factory_gear_medium",
+            ),
             activate_contact_sensors=False,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -130,7 +236,10 @@ class GearAssemblySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/FactoryGearLarge",
         # TODO: change to common isaac sim directory
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_large/factory_gear_large.usd",
+            usd_path=_gear_usd_path(
+                f"{ISAAC_NUCLEUS_DIR}/Props/Factory/gear_assets/factory_gear_large/factory_gear_large.usd",
+                "factory_gear_large",
+            ),
             activate_contact_sensors=False,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -302,11 +411,9 @@ class GearAssemblyEnvCfg(ManagerBasedRLEnvCfg):
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
-    sim: SimulationCfg = SimulationCfg(
-        physics=PhysxCfg(  # Important to prevent collisionStackSize buffer overflow in contact-rich environments.
-            gpu_collision_stack_size=2**30, gpu_max_rigid_contact_count=2**23, gpu_max_rigid_patch_count=2**23
-        ),
-    )
+    # Newton (MuJoCo) is the default backend for contact-rich gear insertion; the preset also
+    # carries a ``physx`` fallback. See :class:`GearAssemblyPhysicsCfg`.
+    sim: SimulationCfg = SimulationCfg(physics=GearAssemblyPhysicsCfg())
 
     def __post_init__(self):
         """Post initialization."""
