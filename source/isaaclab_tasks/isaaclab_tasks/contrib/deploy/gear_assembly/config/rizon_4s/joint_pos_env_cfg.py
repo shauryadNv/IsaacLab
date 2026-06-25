@@ -385,9 +385,9 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # The fingertip collision meshes extend downward from those link origins; this lower target
         # places the pads around the hub instead of pinching the gear at its top lip.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.01],
-            "gear_medium": [0.0, 0.0, -0.01],
-            "gear_large": [0.0, 0.0, -0.01],
+            "gear_small": [0.0, 0.0, -0.025],
+            "gear_medium": [0.0, 0.0, -0.025],
+            "gear_large": [0.0, 0.0, -0.025],
         }
 
         # Initial and target close widths for the Grav gripper [rad]. The close widths mirror the
