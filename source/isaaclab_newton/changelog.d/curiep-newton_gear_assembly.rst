@@ -17,3 +17,5 @@ Fixed
 * Enabled Newton hydroelastic SDF collision setup for recovered mesh colliders by building
   mesh SDFs and setting hydroelastic shape flags when ``sdf_hydroelastic_config`` is
   active.
+* Preserved directly authored ``sdf`` mesh colliders during convex-hull simplification so
+  package-authored Newton gear and base colliders keep their concave collision geometry.

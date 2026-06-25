@@ -185,6 +185,13 @@ class EventCfg:
         },
     )
 
+    pin_unselected_gears_to_shafts = EventTerm(
+        func=gear_assembly_events.pin_unselected_gears_to_shafts,
+        mode="interval",
+        interval_range_s=(0.0, 0.0),
+        params={},
+    )
+
 
 @configclass
 class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
@@ -265,20 +272,15 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # Action configuration for Rizon 4s arm
         # Using smaller action scale for stability
         self.joint_action_scale = 0.025
-        self.actions.arm_action = mdp.RelativeJointPositionActionCfg(
-            asset_name="robot",
-            joint_names=[
-                "joint1",
-                "joint2",
-                "joint3",
-                "joint4",
-                "joint5",
-                "joint6",
-                "joint7",
-            ],
-            scale=self.joint_action_scale,
-            use_zero_offset=True,
-        )
+        arm_joint_names = [
+            "joint1",
+            "joint2",
+            "joint3",
+            "joint4",
+            "joint5",
+            "joint6",
+            "joint7",
+        ]
 
         # Switch robot to Flexiv Rizon 4s with Grav gripper
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
@@ -317,32 +319,29 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             ),
         )
 
-        # Grav gripper actuator configuration for gear manipulation. The effort limit sets the clamp
-        # force on the grasped gear; with concave SDF gear collision the fingers conform to the gear
-        # rim, so a firm clamp holds without the convex-hull overlap that previously ejected gears.
+        # Newton hydroelastic contacts are stiffer than the original USD point contacts. Use the
+        # bare Rizon arm gains so the reset grasp holds its IK pose while contacts settle.
+        self.scene.robot.actuators["shoulder"].stiffness = 6000.0
+        self.scene.robot.actuators["shoulder"].damping = 108.5
+        self.scene.robot.actuators["elbow"].stiffness = 4200.0
+        self.scene.robot.actuators["elbow"].damping = 90.7
+        self.scene.robot.actuators["wrist"].stiffness = 1500.0
+        self.scene.robot.actuators["wrist"].damping = 54.2
+
+        # Grav gripper actuator configuration for gear manipulation. Newton hydroelastic contacts
+        # need a damped, firm clamp so the fingers stay closed when the held gear contacts the base.
         self.scene.robot.actuators["gripper_drive"] = ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],
             effort_limit_sim=20.0,
             velocity_limit_sim=2.0,
             stiffness=2e3,
-            # Heavy damping + armature so the drive closes smoothly instead of overshooting the close
-            # target and bouncing open (which ejects a light gear). The near-zero-inertia gripper
-            # link on MJWarp (implicitfast, 2 substeps) is otherwise underdamped and oscillates
-            # (driver swings -0.18 -> +0.12 -> ...), unlike PhysX's stable joint drive. Armature adds
-            # effective inertia so the same force produces less overshoot.
             damping=1.5e2,
             friction=0.0,
             armature=0.1,
         )
 
-        # Follower joints of the parallel-gripper closed-loop linkage (knuckles + outer fingers).
-        # Their position is carried by the mimic constraints coupling them to ``finger_joint`` (the
-        # Newton importer turns the USD PhysxMimicJointAPI into mjEQ_JOINT equality constraints), so
-        # we add no stiffness -- mjwarp ignores per-joint PD on mimic-follower DOFs anyway. The key
-        # stabilizer is ``armature``: the gripper links have near-degenerate inertia (the run logs
-        # "Inertia validation corrected ... bodies"), and without armature the mimic-constrained
-        # followers blow up to tens of radians in a single step (flapping). Armature regularizes the
-        # mass matrix so the mimic constraints enforce correctly and all six joints move coherently.
+        # Passive/mimic joints in the gripper. Newton needs every follower link configured;
+        # otherwise the outer fingers are left unmanaged and can slip or flap under contact.
         self.scene.robot.actuators["gripper_passive"] = ImplicitActuatorCfg(
             joint_names_expr=[".*_knuckle_joint", ".*_outer_finger_joint"],
             effort_limit_sim=10.0,
@@ -360,7 +359,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # spawned coincident and, now that they collide, exploded apart on contact.)
         _base_pos = (0.481, -0.073, 0.071)
         _base_rot = (0.0, 0.0, 0.70711, -0.70711)
-        _shaft_x = {"gear_small": 0.076125, "gear_medium": 0.030375, "gear_large": -0.045375}
+        _shaft_x = {"gear_small": 0.0823685, "gear_medium": 0.0366185, "gear_large": -0.0391315}
         self.scene.factory_gear_base.init_state = RigidObjectCfg.InitialStateCfg(pos=_base_pos, rot=_base_rot)
         for _name, _asset in (
             ("gear_small", self.scene.factory_gear_small),
@@ -372,55 +371,52 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 rot=_base_rot,
             )
 
-        # Gear grasp offset (gear frame). Two consumers:
-        #  * set_robot_to_grasp_pose ignores z (the reach is derived from kinematics) and uses only
-        #    the in-plane (x, y) selection -> kept at 0 so the fingertip midpoint lands on the gear.
-        #  * reset_when_gear_dropped uses the full offset as the expected gear->end-effector vector;
-        #    the z = -0.35 reach keeps "gear + offset" near link7 while the gear is held (the
-        #    distance check would otherwise always trip, since link7 sits ~0.35 m above the gear).
-        # The previous large y offset (reused gear-shaft offset) placed the fingers off the gear.
-        # Grasp-point offset used by the grasp-keypoint rewards and the gear-dropped termination, which
-        # measure the gear grasp point against the end-effector *link* (~0.35 m above the fingertips).
-        # The -0.35 axial offset makes the grasp point coincide with the EE link when grasped, so the
-        # reward error / dropped distance read ~0. (Not a physical point on the gear; see
-        # ``gear_offsets_grasp_hub`` for the actual hub the fingertips target.)
+        # Grasp-point offset used by the end-effector grasp rewards, which compare the selected gear
+        # against the Rizon ``link7`` frame. This is not a physical contact point; ``link7`` sits
+        # about 0.35 m above the fingertips in the reset grasp.
         self.gear_offsets_grasp = {
             "gear_small": [0.0, 0.0, -0.35],
             "gear_medium": [0.0, 0.0, -0.35],
             "gear_large": [0.0, 0.0, -0.35],
         }
 
-        # Grasp point the fingertip midpoint targets in ``set_robot_to_grasp_pose``: the gear's central
-        # hub, which protrudes ~29 mm above the toothed disk. The grasp rotation maps offset +z to gear
-        # -z, so a negative ``z`` reaches the hub. Distinct from ``gear_offsets_grasp`` because that term
-        # references the EE link while the grasp pose references the fingertip midpoint.
+        # Grasp point the fingertip link-origin midpoint targets in ``set_robot_to_grasp_pose``. The
+        # fingertip collision meshes extend downward from those link origins, so aim slightly above the
+        # hub shoulder to keep the fingertip ends from penetrating the toothed disk at reset.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.029],
-            "gear_medium": [0.0, 0.0, -0.029],
-            "gear_large": [0.0, 0.0, -0.029],
+            "gear_small": [0.0, 0.0, -0.034],
+            "gear_medium": [0.0, 0.0, -0.034],
+            "gear_large": [0.0, 0.0, -0.034],
         }
 
-        # Grasp widths for Grav gripper (raw radian values for finger_joint)
+        # Initial and target close widths for the Grav gripper [rad]. These values keep the
+        # finger pads around each gear hub; driving to the mechanical close limit penetrates the hub
+        # visually before hydroelastic contacts push back.
         self.hand_grasp_width = {
             "gear_small": 0.05,
             "gear_medium": 0.2,
             "gear_large": 0.28,
         }
+        self.hand_close_width = dict(self.hand_grasp_width)
 
-        # Close target for the Grav gripper main drive [rad]. The reset writes this grip pose
-        # directly, so the gear is clamped from the first step rather than slipping during a dynamic
-        # close.
-        self.hand_close_width = {
-            "gear_small": -0.155,
-            "gear_medium": -0.155,
-            "gear_large": -0.155,
-        }
+        self.actions.arm_action = mdp.GraspStabilizedRelativeJointPositionActionCfg(
+            asset_name="robot",
+            joint_names=arm_joint_names,
+            scale=self.joint_action_scale,
+            use_zero_offset=True,
+            end_effector_body_name=self.end_effector_body_name,
+            grasp_rot_offset=self.grasp_rot_offset,
+            gear_offsets_grasp_hub=self.gear_offsets_grasp_hub,
+        )
 
         # Populate event term parameters
         self.events.randomize_gears_and_base_pose.params["gear_offsets"] = self.gear_offsets
         # Rest-height offset [m] for non-selected gears, applied in the base frame so they stay centered
         # on their shafts under randomized base roll/pitch.
-        self.events.randomize_gears_and_base_pose.params["seated_gear_z_offset"] = 0.042
+        seated_gear_z_offset = 0.0075
+        self.events.randomize_gears_and_base_pose.params["seated_gear_z_offset"] = seated_gear_z_offset
+        self.events.pin_unselected_gears_to_shafts.params["gear_offsets"] = self.gear_offsets
+        self.events.pin_unselected_gears_to_shafts.params["seated_gear_z_offset"] = seated_gear_z_offset
         self.events.set_robot_to_grasp_pose.params["gear_offsets_grasp"] = self.gear_offsets_grasp_hub
         self.events.set_robot_to_grasp_pose.params["end_effector_body_name"] = self.end_effector_body_name
         self.events.set_robot_to_grasp_pose.params["num_arm_joints"] = self.num_arm_joints

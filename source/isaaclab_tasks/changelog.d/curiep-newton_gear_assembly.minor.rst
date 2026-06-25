@@ -13,3 +13,12 @@ Added
 * Added ``IsaacContrib-Deploy-GearAssembly-Rizon4s-Grav-Newton-IK``, a variant that drives the arm
   with a Newton inverse-kinematics task-space end-effector pose action instead of joint-space
   control (requires a Newton preset).
+
+Fixed
+^^^^^
+
+* Fixed Rizon 4s gear-assembly reset stability under Newton hydroelastic contacts by
+  using contact-compatible gripper reset widths and hub targets while keeping non-selected
+  gears aligned with their measured base shaft centers.
+* Fixed Rizon 4s Newton gear-assembly grasp stability by keeping the selected gear attached
+  to the fingertip-midpoint grasp target while the arm action is applied.

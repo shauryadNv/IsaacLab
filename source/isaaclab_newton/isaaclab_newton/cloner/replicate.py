@@ -261,8 +261,40 @@ def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder])
     return marked
 
 
+def _find_direct_sdf_mesh_colliders(builder: ModelBuilder, stage: Usd.Stage) -> set[int]:
+    """Find imported mesh colliders whose USD mesh explicitly requests ``sdf`` collision.
+
+    These meshes have already been imported as real colliders, so they do not go through
+    :func:`_author_skipped_mesh_colliders`. They still need the same protection from the convex-hull
+    simplifier; otherwise an authored SDF gear/base collider is replaced by a filled-in hull before
+    hydroelastic SDF contacts are built.
+    """
+    from newton import GeoType, ShapeFlags
+
+    from pxr import UsdPhysics
+
+    collide_bit = int(ShapeFlags.COLLIDE_SHAPES)
+    mesh_type = int(GeoType.MESH)
+    sdf_shape_ids: set[int] = set()
+    for i in range(builder.shape_count):
+        if int(builder.shape_type[i]) != mesh_type or not (int(builder.shape_flags[i]) & collide_bit):
+            continue
+        shape_label = str(builder.shape_label[i])
+        prim = stage.GetPrimAtPath(shape_label)
+        if not prim or not prim.IsValid() or not prim.HasAPI(UsdPhysics.MeshCollisionAPI):
+            continue
+        approximation = UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Get()
+        if str(approximation) == "sdf":
+            sdf_shape_ids.add(i)
+    return sdf_shape_ids
+
+
 def _recover_and_simplify_source_builders(
-    source_builders: dict[str, ModelBuilder], stage: Usd.Stage, authored_bodies: set[str], simplify_meshes: bool
+    source_builders: dict[str, ModelBuilder],
+    stage: Usd.Stage,
+    authored_bodies: set[str],
+    simplify_meshes: bool,
+    preserve_sdf_meshes: bool = False,
 ) -> None:
     """Recover importer-skipped colliders and convex-hull the rest, in place on each source builder.
 
@@ -270,7 +302,8 @@ def _recover_and_simplify_source_builders(
     builder it enables collision on mesh shapes the importer skipped (see
     :func:`_enable_intended_mesh_colliders`), then convex-hulls every remaining collision mesh except
     those recovered shapes and the bodies given real (e.g. ``sdf``) colliders by
-    :func:`_author_skipped_mesh_colliders` -- both must keep their concave geometry.
+    :func:`_author_skipped_mesh_colliders` -- both must keep their concave geometry. When
+    ``preserve_sdf_meshes`` is true, directly authored ``sdf`` mesh colliders are kept as well.
     """
     if not simplify_meshes:
         return
@@ -282,6 +315,8 @@ def _recover_and_simplify_source_builders(
         recovered = _enable_intended_mesh_colliders(p, stage)
         keep = set(recovered)
         keep.update(i for i in range(p.shape_count) if p.body_label[p.shape_body[i]] in authored_bodies)
+        if preserve_sdf_meshes:
+            keep.update(_find_direct_sdf_mesh_colliders(p, stage))
         # Keep gripper finger colliders concave (out of the hull) so the contact surface conforms to a
         # grasped object instead of a convex shell that interpenetrates it. The MuJoCo-contacts preset
         # convex-hulls at solve time regardless, so this only affects Newton's own (e.g. hydroelastic)
@@ -373,7 +408,9 @@ def _build_newton_builder_from_mapping(
         ignore_paths=deformable_ignore_paths or None,
         simplify_meshes=False,
     )
-    _recover_and_simplify_source_builders(source_builders, stage, authored_bodies, simplify_meshes)
+    _recover_and_simplify_source_builders(
+        source_builders, stage, authored_bodies, simplify_meshes, preserve_sdf_meshes=needs_sdf
+    )
 
     # Weld duplicate vertices on the remaining concave mesh colliders so the SDF pipeline sees
     # watertight surfaces (CAD exports often are not). After simplification so convex-hull shapes are

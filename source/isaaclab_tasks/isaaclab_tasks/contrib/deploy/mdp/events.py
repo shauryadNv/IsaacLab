@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch
@@ -571,3 +572,80 @@ class randomize_gears_and_base_pose(ManagerTermBase):
                 root_pose=torch.cat([gear_world_pos, gear_world_quat], dim=-1), env_ids=env_ids
             )
             gear.write_root_velocity_to_sim_index(root_velocity=zero_vel, env_ids=env_ids)
+
+
+def pin_unselected_gears_to_shafts(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | Sequence[int] | slice | None,
+    gear_offsets: dict[str, Sequence[float]],
+    seated_gear_z_offset: float = 0.0,
+) -> None:
+    """Keep non-selected gears seated on their base shafts.
+
+    The gear assembly task manipulates one selected gear per environment; the other gears are
+    scene context and shaft obstacles. Under Newton hydroelastic contacts those free, light gears
+    can settle into small SDF penetrations and tip off their shafts. This event rewrites only the
+    non-selected gears to their shaft rest poses after each environment step.
+
+    Args:
+        env: Environment instance.
+        env_ids: Environment IDs to update. If ``None``, all environments are updated.
+        gear_offsets: Per-gear shaft offsets in the base frame [m].
+        seated_gear_z_offset: Rest-height offset in the base frame [m].
+    """
+    if not hasattr(env, "_gear_type_manager"):
+        raise RuntimeError(
+            "Gear type manager not initialized. Ensure randomize_gear_type event is configured "
+            "before pin_unselected_gears_to_shafts is used."
+        )
+
+    device = env.device
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=device, dtype=torch.long)
+    elif isinstance(env_ids, slice):
+        env_ids = torch.arange(env.num_envs, device=device, dtype=torch.long)[env_ids]
+    elif not isinstance(env_ids, torch.Tensor):
+        env_ids = torch.tensor(env_ids, device=device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=device, dtype=torch.long)
+
+    if env_ids.numel() == 0:
+        return
+
+    gear_asset_names = ["factory_gear_small", "factory_gear_medium", "factory_gear_large"]
+    key_map = {
+        "factory_gear_small": "gear_small",
+        "factory_gear_medium": "gear_medium",
+        "factory_gear_large": "gear_large",
+    }
+    gear_offsets_t = torch.tensor(
+        [gear_offsets[key_map[name]] for name in gear_asset_names], device=device, dtype=torch.float32
+    )
+
+    base: RigidObject | Articulation = env.scene["factory_gear_base"]
+    base_world_pos = base.data.root_link_pos_w.torch[env_ids]
+    base_world_quat = base.data.root_link_quat_w.torch[env_ids]
+    base_default = base.data.default_root_pose.torch[env_ids]
+    selected_gear_indices = env._gear_type_manager.get_all_gear_type_indices()[env_ids]
+    zero_vel = torch.zeros((len(env_ids), 6), device=device)
+
+    for gear_idx, asset_name in enumerate(gear_asset_names):
+        mask = selected_gear_indices != gear_idx
+        if not torch.any(mask):
+            continue
+
+        gear: RigidObject = env.scene[asset_name]
+        gear_default = gear.data.default_root_pose.torch[env_ids]
+        _, rel_quat = math_utils.subtract_frame_transforms(
+            base_default[:, 0:3], base_default[:, 3:7], gear_default[:, 0:3], gear_default[:, 3:7]
+        )
+        seated_off = gear_offsets_t[gear_idx].unsqueeze(0).expand(len(env_ids), 3).clone()
+        seated_off[:, 2] += seated_gear_z_offset
+        gear_world_pos, gear_world_quat = math_utils.combine_frame_transforms(
+            base_world_pos, base_world_quat, seated_off, rel_quat
+        )
+        gear_env_ids = env_ids[mask]
+        gear.write_root_pose_to_sim_index(
+            root_pose=torch.cat([gear_world_pos[mask], gear_world_quat[mask]], dim=-1), env_ids=gear_env_ids
+        )
+        gear.write_root_velocity_to_sim_index(root_velocity=zero_vel[mask], env_ids=gear_env_ids)

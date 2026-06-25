@@ -101,8 +101,8 @@ class GearAssemblyPhysicsCfg(PresetCfg):
             integrator="implicitfast",
             # The hydroelastic SDF pipeline produces distributed contact areas (thousands of points
             # for a gripped concave gear), so the per-world contact/constraint buffers must be far
-            # larger than the MuJoCo-convex ``default`` preset's. Sized for ~2k contacts with headroom.
-            njmax=2048,
+            # larger than the MuJoCo-convex ``default`` preset's. Sized for ~4k constraints/contacts.
+            njmax=4096,
             nconmax=4096,
             impratio=10.0,
             cone="elliptic",
@@ -426,9 +426,9 @@ class GearAssemblyEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 1.0 / 120.0
 
         self.gear_offsets = {
-            "gear_small": [0.076125, 0.0, 0.0],
-            "gear_medium": [0.030375, 0.0, 0.0],
-            "gear_large": [-0.045375, 0.0, 0.0],
+            "gear_small": [0.0823685, 0.0, 0.0],
+            "gear_medium": [0.0366185, 0.0, 0.0],
+            "gear_large": [-0.0391315, 0.0, 0.0],
         }
 
         # Populate observation term parameters with gear offsets
