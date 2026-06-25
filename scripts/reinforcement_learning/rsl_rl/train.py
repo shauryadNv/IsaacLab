@@ -59,6 +59,29 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
+
+def _uses_recurrent_policy(agent_cfg: RslRlBaseRunnerCfg) -> bool:
+    """Return whether the RSL-RL runner config uses a recurrent policy."""
+    actor_cfg = getattr(agent_cfg, "actor", None)
+    policy_cfg = getattr(agent_cfg, "policy", None)
+    return getattr(actor_cfg, "rnn_type", None) is not None or getattr(policy_cfg, "rnn_type", None) is not None
+
+
+def _clamp_recurrent_mini_batches(agent_cfg: RslRlBaseRunnerCfg, num_envs: int) -> None:
+    """Clamp recurrent PPO mini-batches to avoid empty per-environment batches."""
+    algorithm_cfg = getattr(agent_cfg, "algorithm", None)
+    if agent_cfg.class_name != "OnPolicyRunner" or not _uses_recurrent_policy(agent_cfg):
+        return
+    if algorithm_cfg is None or not hasattr(algorithm_cfg, "num_mini_batches"):
+        return
+    if algorithm_cfg.num_mini_batches > num_envs:
+        print(
+            "[INFO] Reducing RSL-RL recurrent num_mini_batches from "
+            f"{algorithm_cfg.num_mini_batches} to {num_envs} because num_envs={num_envs}."
+        )
+        algorithm_cfg.num_mini_batches = num_envs
+
+
 # -- argparse ----------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
@@ -213,6 +236,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         # wrap around environment for rsl-rl
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+        _clamp_recurrent_mini_batches(agent_cfg, env.num_envs)
 
         # create runner from rsl-rl
         if agent_cfg.class_name == "OnPolicyRunner":

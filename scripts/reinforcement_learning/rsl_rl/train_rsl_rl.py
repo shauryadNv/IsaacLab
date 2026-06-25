@@ -45,6 +45,29 @@ with contextlib.suppress(ImportError):
     import isaaclab_tasks_experimental  # noqa: F401
 
 
+def _uses_recurrent_policy(agent_cfg: object) -> bool:
+    """Return whether the RSL-RL runner config uses a recurrent policy."""
+    actor_cfg = getattr(agent_cfg, "actor", None)
+    policy_cfg = getattr(agent_cfg, "policy", None)
+    return getattr(actor_cfg, "rnn_type", None) is not None or getattr(policy_cfg, "rnn_type", None) is not None
+
+
+def _clamp_recurrent_mini_batches(agent_cfg: object, num_envs: int) -> None:
+    """Clamp recurrent PPO mini-batches to avoid empty per-environment batches."""
+    algorithm_cfg = getattr(agent_cfg, "algorithm", None)
+    class_name = getattr(agent_cfg, "class_name", None)
+    if class_name != "OnPolicyRunner" or not _uses_recurrent_policy(agent_cfg):
+        return
+    if algorithm_cfg is None or not hasattr(algorithm_cfg, "num_mini_batches"):
+        return
+    if algorithm_cfg.num_mini_batches > num_envs:
+        print(
+            "[INFO] Reducing RSL-RL recurrent num_mini_batches from "
+            f"{algorithm_cfg.num_mini_batches} to {num_envs} because num_envs={num_envs}."
+        )
+        algorithm_cfg.num_mini_batches = num_envs
+
+
 def _check_rsl_rl_version() -> str:
     """Check that the installed RSL-RL version is supported."""
     installed_version = metadata.version("rsl-rl-lib")
@@ -161,6 +184,7 @@ def run(argv: list[str]) -> None:
 
         start_time = time.time()
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+        _clamp_recurrent_mini_batches(agent_cfg, env.num_envs)
 
         if agent_cfg.class_name == "OnPolicyRunner":
             runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
