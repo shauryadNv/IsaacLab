@@ -310,10 +310,11 @@ class NewtonManager(PhysicsManager):
     _cl_site_index_map: dict[str, _SiteEntry] = {}
     _cl_fabric_body_bindings: list[tuple[str, int]] | None = None
     _world_xforms: list[wp.transform] | None = None
-    # Per-source builders retained from replication, keyed by clone-plan source
-    # path. Single-model consumers (e.g. batched Newton IK) finalize a single-env
-    # model from these and resolve it via ``resolve_clone_plan_source``.
+    # Per-source builders and finalized single-env models retained from replication,
+    # keyed by clone-plan source path. Single-model consumers (e.g. batched Newton IK)
+    # resolve matching prototype models via ``resolve_clone_plan_source``.
     _cl_protos: dict[str, ModelBuilder] = {}
+    _cl_proto_models: dict[str, Model] = {}
     _deformable_registry: list = []
     _per_world_builder_hooks: list[Callable[[ModelBuilder, int, list[float], list[float]], None]] = []
     _post_replicate_hooks: list[Callable[[ModelBuilder], None]] = []
@@ -792,6 +793,7 @@ class NewtonManager(PhysicsManager):
         NewtonManager._cl_fabric_body_bindings = None
         NewtonManager._world_xforms = None
         NewtonManager._cl_protos = {}
+        NewtonManager._cl_proto_models = {}
         NewtonManager._pending_extended_state_attributes = set()
         NewtonManager._pending_extended_contact_attributes = set()
         NewtonManager._views = []
@@ -1109,6 +1111,11 @@ class NewtonManager(PhysicsManager):
             cls._builder.request_state_attributes(*cls._pending_extended_state_attributes)
             NewtonManager._pending_extended_state_attributes = set()
         cls._prepare_builder_for_finalize(cls._builder)
+        NewtonManager._cl_proto_models = {}
+        for source_path, prototype_builder in cls._cl_protos.items():
+            prototype_builder.up_axis = Axis.from_string(cls._up_axis)
+            cls._prepare_builder_for_finalize(prototype_builder)
+            NewtonManager._cl_proto_models[source_path] = prototype_builder.finalize(device=device)
         with Timer(name="newton_finalize_builder", msg="Finalize builder took:"):
             NewtonManager._model = cls._builder.finalize(device=device)
             cls._model.set_gravity(cls._gravity_vector)
@@ -1248,6 +1255,7 @@ class NewtonManager(PhysicsManager):
             source_builders[proto_path].add_usd(stage, root_path=proto_path, schema_resolvers=schema_resolvers)
             replace_newton_builder_shape_colors(source_builders[proto_path], stage)
             cls._cl_protos = source_builders
+            cls._cl_proto_models = {}
 
             global_site_indices, source_site_indices, env_root_sites = cls._cl_inject_sites(builder, source_builders)
             xform_cache = UsdGeom.XformCache()

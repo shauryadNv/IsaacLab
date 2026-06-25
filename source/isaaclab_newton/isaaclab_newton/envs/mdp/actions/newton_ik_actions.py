@@ -174,15 +174,23 @@ class NewtonInverseKinematicsAction(ActionTerm):
         if not pose_cfgs:
             raise ValueError("NewtonInverseKinematicsAction requires at least one pose objective.")
 
-        # Resolve the controlled asset to its clone-plan source and finalize the
-        # single-env prototype builder the cloner already retained -- the same
-        # source resolution other Newton consumers use, no bespoke registry.
+        # Resolve the controlled asset to its clone-plan source and reuse the
+        # pre-finalized single-env prototype model. Finalizing a Newton builder
+        # after the simulation CUDA graph has been captured invalidates the
+        # captured graph, so NewtonManager prepares these models before solver
+        # initialization.
         plan = sim_utils.SimulationContext.instance().get_clone_plan()
         source_path, _, asset_suffix = resolve_clone_plan_source(self._asset.cfg.prim_path, plan)
-        # The proto builder is keyed by the bare clone source; the articulation
+        # The proto model is keyed by the bare clone source; the articulation
         # lives at the asset suffix below it (e.g. ".../env_0" + "/Robot").
         self._source_path = source_path + asset_suffix
-        prototype_model = NewtonManager._cl_protos[source_path].finalize(device=NewtonManager.get_model().device)
+        try:
+            prototype_model = NewtonManager._cl_proto_models[source_path]
+        except KeyError as exc:
+            raise RuntimeError(
+                f"Newton IK prototype model for clone source '{source_path}' was not finalized before "
+                "simulation graph capture. Ensure NewtonManager.start_simulation() ran after clone replication."
+            ) from exc
         prototype_view = ArticulationView(
             prototype_model,
             self._source_path,

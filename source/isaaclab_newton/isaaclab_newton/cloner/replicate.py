@@ -566,6 +566,7 @@ class NewtonReplicateContext:
             NewtonManager._cl_fabric_body_bindings = fabric_body_bindings
             NewtonManager._world_xforms = world_xforms
             NewtonManager._cl_protos = source_builders
+            NewtonManager._cl_proto_models = {}
             NewtonManager.set_builder(builder)
             NewtonManager._num_envs = mapping.size(1)
         self._queue.clear()
