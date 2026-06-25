@@ -8,8 +8,6 @@ __all__ = [
     "randomize_gears_and_base_pose",
     "pin_unselected_gears_to_shafts",
     "set_robot_to_grasp_pose",
-    "GraspStabilizedRelativeJointPositionAction",
-    "GraspStabilizedRelativeJointPositionActionCfg",
     "ResetSampledConstantNoiseModel",
     "ResetSampledConstantNoiseModelCfg",
     "gear_pos_w",
@@ -26,7 +24,6 @@ __all__ = [
     "reset_when_gear_orientation_exceeds_threshold",
 ]
 
-from .actions import GraspStabilizedRelativeJointPositionAction, GraspStabilizedRelativeJointPositionActionCfg
 from .events import (
     pin_unselected_gears_to_shafts,
     randomize_gear_type,

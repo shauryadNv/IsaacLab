@@ -328,25 +328,26 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         self.scene.robot.actuators["wrist"].stiffness = 1500.0
         self.scene.robot.actuators["wrist"].damping = 54.2
 
-        # Grav gripper actuator configuration for gear manipulation. Newton hydroelastic contacts
-        # need a damped, firm clamp so the fingers stay closed when the held gear contacts the base.
+        # Grav gripper actuator configuration for gear manipulation. Keep the driven joint close to
+        # the PhysX setup while giving it enough effort headroom to maintain a contact grasp in Newton.
         self.scene.robot.actuators["gripper_drive"] = ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],
-            effort_limit_sim=20.0,
+            effort_limit_sim=200.0,
             velocity_limit_sim=2.0,
             stiffness=2e3,
-            damping=1.5e2,
+            damping=1e1,
             friction=0.0,
             armature=0.1,
         )
 
-        # Passive/mimic joints in the gripper. Newton needs every follower link configured;
-        # otherwise the outer fingers are left unmanaged and can slip or flap under contact.
+        # Newton does not get the same passive linkage support from the Grav USD that PhysX does.
+        # Hold the follower joints with a physical PD target so the gripper behaves like a coupled
+        # mechanism instead of letting the light fingertip links splay open under gear contact.
         self.scene.robot.actuators["gripper_passive"] = ImplicitActuatorCfg(
             joint_names_expr=[".*_knuckle_joint", ".*_outer_finger_joint"],
-            effort_limit_sim=10.0,
+            effort_limit_sim=20.0,
             velocity_limit_sim=1.0,
-            stiffness=0.0,
+            stiffness=2e3,
             damping=10.0,
             friction=0.0,
             armature=0.05,
@@ -380,33 +381,33 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             "gear_large": [0.0, 0.0, -0.35],
         }
 
-        # Grasp point the fingertip link-origin midpoint targets in ``set_robot_to_grasp_pose``. The
-        # fingertip collision meshes extend downward from those link origins, so aim slightly above the
-        # hub shoulder to keep the fingertip ends from penetrating the toothed disk at reset.
+        # Grasp point the fingertip link-origin midpoint targets in ``set_robot_to_grasp_pose``.
+        # The fingertip collision meshes extend downward from those link origins; this lower target
+        # places the pads around the hub instead of pinching the gear at its top lip.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.034],
-            "gear_medium": [0.0, 0.0, -0.034],
-            "gear_large": [0.0, 0.0, -0.034],
+            "gear_small": [0.0, 0.0, -0.01],
+            "gear_medium": [0.0, 0.0, -0.01],
+            "gear_large": [0.0, 0.0, -0.01],
         }
 
-        # Initial and target close widths for the Grav gripper [rad]. These values keep the
-        # finger pads around each gear hub; driving to the mechanical close limit penetrates the hub
-        # visually before hydroelastic contacts push back.
+        # Initial and target close widths for the Grav gripper [rad]. The close widths mirror the
+        # stable PhysX gear-insertion setup and provide a real contact clamp after reset.
         self.hand_grasp_width = {
             "gear_small": 0.05,
             "gear_medium": 0.2,
             "gear_large": 0.28,
         }
-        self.hand_close_width = dict(self.hand_grasp_width)
+        self.hand_close_width = {
+            "gear_small": 0.0,
+            "gear_medium": 0.139626,
+            "gear_large": 0.139626,
+        }
 
-        self.actions.arm_action = mdp.GraspStabilizedRelativeJointPositionActionCfg(
+        self.actions.arm_action = mdp.RelativeJointPositionActionCfg(
             asset_name="robot",
             joint_names=arm_joint_names,
             scale=self.joint_action_scale,
             use_zero_offset=True,
-            end_effector_body_name=self.end_effector_body_name,
-            grasp_rot_offset=self.grasp_rot_offset,
-            gear_offsets_grasp_hub=self.gear_offsets_grasp_hub,
         )
 
         # Populate event term parameters
