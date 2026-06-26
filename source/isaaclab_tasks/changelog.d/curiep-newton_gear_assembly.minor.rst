@@ -20,5 +20,7 @@ Fixed
 * Fixed Rizon 4s gear-assembly reset stability under Newton hydroelastic contacts by
   using contact-compatible gripper reset widths and hub targets while keeping non-selected
   gears aligned with their measured base shaft centers.
-* Fixed Rizon 4s Newton gear-assembly grasp stability by keeping the selected gear attached
-  to the fingertip-midpoint grasp target while the arm action is applied.
+* Fixed Rizon 4s Newton gear-assembly grasp stability with contact-compatible gripper
+  actuator tuning and hub-centered grasp reset targets.
+* Fixed Rizon 4s gear-assembly insertion rewards so the selected gear is tracked to
+  the selected shaft on the gear base instead of the gear-base origin.

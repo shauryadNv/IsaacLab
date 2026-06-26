@@ -431,6 +431,8 @@ class GearAssemblyEnvCfg(ManagerBasedRLEnvCfg):
             "gear_large": [-0.0391315, 0.0, 0.0],
         }
 
-        # Populate observation term parameters with gear offsets
+        # Populate observation and reward term parameters with gear offsets
         self.observations.policy.gear_shaft_pos.params["gear_offsets"] = self.gear_offsets
         self.observations.critic.gear_shaft_pos.params["gear_offsets"] = self.gear_offsets
+        self.rewards.end_effector_gear_keypoint_tracking.params["gear_offsets"] = self.gear_offsets
+        self.rewards.end_effector_gear_keypoint_tracking_exp.params["gear_offsets"] = self.gear_offsets
