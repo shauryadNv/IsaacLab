@@ -31,19 +31,33 @@ class Rizon4sGearAssemblyIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGearAssemblyEnv
         super().__post_init__()
 
         # Relative end-effector pose action solved by Newton's on-device IK. ``body_offset_pos`` is
-        # left at the link frame; the grasped gear follows ``link7`` rigidly, so commanding the link
-        # pose is sufficient. ``scale`` is intentionally small for stable contact-rich motion.
+        # left at the link frame; the grasped gear follows ``link7`` through contact, so commanding
+        # the link pose is sufficient. Keep the per-step Cartesian delta bounded so early policy
+        # outputs do not shake the contact grasp loose.
         self.actions.arm_action = NewtonInverseKinematicsActionCfg(
             asset_name="robot",
             joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
             controller=NewtonIKSolverCfg(optimizer="lm", jacobian_mode="analytic", iterations=24),
+            clip={".*": (-0.5, 0.5)},
             objectives=[
                 NewtonIKPoseObjectiveCfg(
                     body_name=self.end_effector_body_name,
                     command_type="pose",
                     use_relative_mode=True,
-                    scale=0.1,
+                    scale=0.025,
                 ),
                 NewtonIKJointLimitObjectiveCfg(weight=0.1),
             ],
+        )
+
+        # Newton hydroelastic contact can leave the small gear held securely but tilted slightly
+        # during the first settling steps. Keep the drop termination strict and relax only the
+        # orientation guard for this IK variant to avoid false reset loops at startup.
+        self.gear_orientation_roll_threshold_deg = 25.0
+        self.gear_orientation_pitch_threshold_deg = 25.0
+        self.terminations.gear_orientation_exceeded.params["roll_threshold_deg"] = (
+            self.gear_orientation_roll_threshold_deg
+        )
+        self.terminations.gear_orientation_exceeded.params["pitch_threshold_deg"] = (
+            self.gear_orientation_pitch_threshold_deg
         )

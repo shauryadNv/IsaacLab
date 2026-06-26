@@ -382,10 +382,11 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         }
 
         # Grasp point the fingertip link-origin midpoint targets in ``set_robot_to_grasp_pose``.
-        # The fingertip collision meshes extend downward from those link origins; this lower target
-        # places the pads around the hub instead of pinching the gear at its top lip.
+        # The fingertip collision meshes extend downward from those link origins. The small gear
+        # needs a slightly higher link-origin target so the actual fingertip pads land on the hub
+        # instead of dragging under the toothed disk.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.025],
+            "gear_small": [0.0, 0.0, -0.035],
             "gear_medium": [0.0, 0.0, -0.025],
             "gear_large": [0.0, 0.0, -0.025],
         }
@@ -393,7 +394,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # Initial and target close widths for the Grav gripper [rad]. The close widths mirror the
         # stable PhysX gear-insertion setup and provide a real contact clamp after reset.
         self.hand_grasp_width = {
-            "gear_small": 0.05,
+            "gear_small": 0.01,
             "gear_medium": 0.2,
             "gear_large": 0.28,
         }
