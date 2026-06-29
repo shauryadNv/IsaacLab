@@ -406,11 +406,14 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             "gear_large": 0.139626,
         }
 
-        self.actions.arm_action = mdp.RelativeJointPositionActionCfg(
+        self.actions.arm_action = mdp.GraspStabilizedRelativeJointPositionActionCfg(
             asset_name="robot",
             joint_names=arm_joint_names,
             scale=self.joint_action_scale,
             use_zero_offset=True,
+            end_effector_body_name=self.end_effector_body_name,
+            grasp_rot_offset=self.grasp_rot_offset,
+            gear_offsets_grasp_hub=self.gear_offsets_grasp_hub,
         )
 
         # Populate event term parameters
