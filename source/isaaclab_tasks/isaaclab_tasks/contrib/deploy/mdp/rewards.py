@@ -442,6 +442,15 @@ class keypoint_ee_grasp_error(keypoint_entity_error):
         eef_indices, _ = self.robot_asset.find_bodies([self.end_effector_body_name])
         self.eef_idx = eef_indices[0] if len(eef_indices) > 0 else None
 
+        self.grasp_center_body_indices: list[int] | None = None
+        grasp_center_body_names = cfg.params.get("grasp_center_body_names")
+        if grasp_center_body_names is not None:
+            grasp_center_body_names = list(grasp_center_body_names)
+            grasp_center_body_indices, _ = self.robot_asset.find_bodies(grasp_center_body_names)
+            if len(grasp_center_body_indices) != len(grasp_center_body_names):
+                raise ValueError(f"Grasp center bodies not found on robot: {grasp_center_body_names}")
+            self.grasp_center_body_indices = grasp_center_body_indices
+
     def _get_weight_scale(self, env: ManagerBasedRLEnv) -> float:
         progress = min(env.common_step_counter / max(self.weight_ramp_steps, 1), 1.0)
         return self.weight_ramp_start + (1.0 - self.weight_ramp_start) * progress
@@ -454,7 +463,11 @@ class keypoint_ee_grasp_error(keypoint_entity_error):
         Returns:
             Tuple of (eef_pos, eef_quat, gear_grasp_pos, gear_quat_grasp).
         """
-        eef_pos = self.robot_asset.data.body_link_pos_w.torch[:, self.eef_idx]
+        if self.grasp_center_body_indices is None:
+            eef_pos = self.robot_asset.data.body_link_pos_w.torch[:, self.eef_idx]
+        else:
+            grasp_center_pos = self.robot_asset.data.body_link_pos_w.torch[:, self.grasp_center_body_indices]
+            eef_pos = grasp_center_pos.mean(dim=1)
         eef_quat = self.robot_asset.data.body_link_quat_w.torch[:, self.eef_idx]
 
         gear_pos, gear_quat = self._get_selected_gear_poses(env)
@@ -477,6 +490,7 @@ class keypoint_ee_grasp_error(keypoint_entity_error):
         weight_ramp_start: float = 0.0,
         weight_ramp_steps: int = 1,
         ee_grasp_threshold: float = 0.0,
+        grasp_center_body_names: tuple[str, ...] | None = None,
     ) -> torch.Tensor:
         if self.eef_idx is None:
             return torch.zeros(env.num_envs, device=env.device)
@@ -542,6 +556,7 @@ class keypoint_ee_grasp_error_exp(keypoint_ee_grasp_error):
         weight_ramp_start: float = 0.0,
         weight_ramp_steps: int = 1,
         ee_grasp_threshold: float = 0.0,
+        grasp_center_body_names: tuple[str, ...] | None = None,
     ) -> torch.Tensor:
         if self.eef_idx is None:
             return torch.zeros(env.num_envs, device=env.device)

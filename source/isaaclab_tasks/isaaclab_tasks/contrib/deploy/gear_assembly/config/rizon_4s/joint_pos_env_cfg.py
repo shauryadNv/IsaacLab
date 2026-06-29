@@ -373,16 +373,6 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 rot=_base_rot,
             )
 
-        # Grasp-frame offset used by the EE grasp reward/drop checks against the Rizon ``link7``
-        # frame. Unlike the PhysX factory USD, Newton places each gear root at the actual gear
-        # center on its shaft, so no lateral shaft offset is applied here. ``gear_offsets_grasp_hub``
-        # below remains the physical fingertip reset target.
-        self.gear_offsets_grasp = {
-            "gear_small": [0.0, 0.0, -0.35],
-            "gear_medium": [0.0, 0.0, -0.35],
-            "gear_large": [0.0, 0.0, -0.35],
-        }
-
         # Grasp point the fingertip link-origin midpoint targets in ``set_robot_to_grasp_pose``.
         # The fingertip collision meshes extend downward from those link origins. The small gear
         # needs a slightly higher link-origin target so the actual fingertip pads land on the hub
@@ -392,6 +382,10 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             "gear_medium": [0.0, 0.0, -0.025],
             "gear_large": [0.0, 0.0, -0.025],
         }
+        # Use the same physical hub point for grasp/drop metrics. The measurement position is the
+        # fingertip midpoint configured below, not the distant ``link7`` frame.
+        self.gear_offsets_grasp = dict(self.gear_offsets_grasp_hub)
+        self.grasp_center_body_names = ("left_finger_tip", "right_finger_tip")
 
         # Initial and target close widths for the Grav gripper [rad]. The close widths mirror the
         # stable PhysX gear-insertion setup and provide a real contact clamp after reset.
@@ -440,6 +434,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 "end_effector_body_name": self.end_effector_body_name,
                 "grasp_rot_offset": self.grasp_rot_offset,
                 "gear_offsets_grasp": self.gear_offsets_grasp,
+                "grasp_center_body_names": self.grasp_center_body_names,
             },
         )
         self.rewards.end_effector_grasp_keypoint_tracking_exp = RewTerm(
@@ -456,11 +451,13 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 "end_effector_body_name": self.end_effector_body_name,
                 "grasp_rot_offset": self.grasp_rot_offset,
                 "gear_offsets_grasp": self.gear_offsets_grasp,
+                "grasp_center_body_names": self.grasp_center_body_names,
             },
         )
 
         # Populate termination term parameters
         self.terminations.gear_dropped.params["gear_offsets_grasp"] = self.gear_offsets_grasp
+        self.terminations.gear_dropped.params["grasp_center_body_names"] = self.grasp_center_body_names
         self.terminations.gear_dropped.params["end_effector_body_name"] = self.end_effector_body_name
         self.terminations.gear_dropped.params["grasp_rot_offset"] = self.grasp_rot_offset
 
