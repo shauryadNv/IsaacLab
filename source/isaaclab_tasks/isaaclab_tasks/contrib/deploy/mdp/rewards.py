@@ -441,7 +441,6 @@ class keypoint_ee_grasp_error(keypoint_entity_error):
 
         eef_indices, _ = self.robot_asset.find_bodies([self.end_effector_body_name])
         self.eef_idx = eef_indices[0] if len(eef_indices) > 0 else None
-        self._step_count = 0
 
     def _get_weight_scale(self, env: ManagerBasedRLEnv) -> float:
         progress = min(env.common_step_counter / max(self.weight_ramp_steps, 1), 1.0)
@@ -509,16 +508,6 @@ class keypoint_ee_grasp_error(keypoint_entity_error):
         env.extras["log"]["ee_grasp_kp_error/mean_keypoint_dist"] = mean_error_scalar
         env.extras["log"]["ee_grasp_kp_error/pct_envs_active"] = pct_active
         env.extras["log"]["ee_grasp_kp_error/weight_scale"] = weight_scale
-
-        self._step_count += 1
-        import carb
-
-        carb.log_info(
-            f"[ee_grasp_kp_error] step={self._step_count}"
-            f" | mean_kp_error={mean_error_scalar:.5f}"
-            f" | pct_active={pct_active:.3f}"
-            f" | weight_scale={weight_scale:.4f}"
-        )
 
         return scaled_reward
 
@@ -599,17 +588,6 @@ class keypoint_ee_grasp_error_exp(keypoint_ee_grasp_error):
         env.extras["log"]["ee_grasp_kp_error_exp/mean_exp_reward"] = mean_reward_scalar
         env.extras["log"]["ee_grasp_kp_error_exp/pct_envs_active"] = pct_active
         env.extras["log"]["ee_grasp_kp_error_exp/weight_scale"] = weight_scale
-
-        self._step_count += 1
-        import carb
-
-        carb.log_info(
-            f"[ee_grasp_kp_error_exp] step={self._step_count}"
-            f" | mean_kp_error={mean_error_scalar:.5f}"
-            f" | pct_active={pct_active:.3f}"
-            f" | weight_scale={weight_scale:.4f}"
-            f" | mean_exp_reward={mean_reward_scalar:.5f}"
-        )
 
         return scaled_reward
 

@@ -201,7 +201,8 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
     Flexiv Grav parallel gripper for gear manipulation tasks.
     """
 
-    ee_grasp_weight_ramp_steps: int = 512_000
+    ee_grasp_weight_ramp_start: float = 0.2
+    ee_grasp_weight_ramp_steps: int = 250_000
 
     def __post_init__(self):
         # post init of parent
@@ -434,7 +435,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 "robot_asset_cfg": SceneEntityCfg("robot"),
                 "keypoint_scale": 0.15,
                 "ee_grasp_threshold": 0.00,
-                "weight_ramp_start": 0.0,
+                "weight_ramp_start": self.ee_grasp_weight_ramp_start,
                 "weight_ramp_steps": self.ee_grasp_weight_ramp_steps,
                 "end_effector_body_name": self.end_effector_body_name,
                 "grasp_rot_offset": self.grasp_rot_offset,
@@ -450,7 +451,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 "kp_use_sum_of_exps": False,
                 "keypoint_scale": 0.15,
                 "ee_grasp_threshold": 0.00,
-                "weight_ramp_start": 0.0,
+                "weight_ramp_start": self.ee_grasp_weight_ramp_start,
                 "weight_ramp_steps": self.ee_grasp_weight_ramp_steps,
                 "end_effector_body_name": self.end_effector_body_name,
                 "grasp_rot_offset": self.grasp_rot_offset,
