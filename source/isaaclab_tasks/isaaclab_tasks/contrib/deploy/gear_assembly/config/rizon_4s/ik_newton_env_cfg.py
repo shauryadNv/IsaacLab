@@ -53,8 +53,8 @@ class Rizon4sGearAssemblyIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGearAssemblyEnv
         # Newton hydroelastic contact can leave the small gear held securely but tilted slightly
         # during the first settling steps. Keep the drop termination strict and relax only the
         # orientation guard for this IK variant to avoid false reset loops at startup.
-        self.gear_orientation_roll_threshold_deg = 25.0
-        self.gear_orientation_pitch_threshold_deg = 25.0
+        self.gear_orientation_roll_threshold_deg = 35.0
+        self.gear_orientation_pitch_threshold_deg = 35.0
         self.terminations.gear_orientation_exceeded.params["roll_threshold_deg"] = (
             self.gear_orientation_roll_threshold_deg
         )

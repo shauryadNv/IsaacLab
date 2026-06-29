@@ -231,8 +231,8 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         self.gripper_joint_setter_func = set_finger_joint_pos_grav  # Grav gripper joint setter function
 
         # Gear orientation termination thresholds (in degrees)
-        self.gear_orientation_roll_threshold_deg = 15.0  # Maximum allowed roll deviation
-        self.gear_orientation_pitch_threshold_deg = 15.0  # Maximum allowed pitch deviation
+        self.gear_orientation_roll_threshold_deg = 30.0  # Maximum allowed roll deviation
+        self.gear_orientation_pitch_threshold_deg = 30.0  # Maximum allowed pitch deviation
         self.gear_orientation_yaw_threshold_deg = 180.0  # Maximum allowed yaw deviation
 
         # Common observation configuration for Rizon 4s joints (arm only, not gripper)
@@ -372,9 +372,10 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 rot=_base_rot,
             )
 
-        # Grasp-point offset used by the end-effector grasp rewards, which compare the selected gear
-        # against the Rizon ``link7`` frame. This is not a physical contact point; ``link7`` sits
-        # about 0.35 m above the fingertips in the reset grasp.
+        # Grasp-frame offset used by the EE grasp reward/drop checks against the Rizon ``link7``
+        # frame. Unlike the PhysX factory USD, Newton places each gear root at the actual gear
+        # center on its shaft, so no lateral shaft offset is applied here. ``gear_offsets_grasp_hub``
+        # below remains the physical fingertip reset target.
         self.gear_offsets_grasp = {
             "gear_small": [0.0, 0.0, -0.35],
             "gear_medium": [0.0, 0.0, -0.35],
