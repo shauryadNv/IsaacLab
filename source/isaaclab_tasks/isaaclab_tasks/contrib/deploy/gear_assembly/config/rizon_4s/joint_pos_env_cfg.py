@@ -232,8 +232,10 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         self.gripper_joint_setter_func = set_finger_joint_pos_grav  # Grav gripper joint setter function
 
         # Gear orientation termination thresholds (in degrees)
-        self.gear_orientation_roll_threshold_deg = 30.0  # Maximum allowed roll deviation
-        self.gear_orientation_pitch_threshold_deg = 30.0  # Maximum allowed pitch deviation
+        # Newton hydroelastic contact lets the gear passively settle inside the fingertips while it remains grasped.
+        # Keep orientation termination as a gross-failure guard and use the fingertip hub-distance check for drops.
+        self.gear_orientation_roll_threshold_deg = 90.0
+        self.gear_orientation_pitch_threshold_deg = 90.0
         self.gear_orientation_yaw_threshold_deg = 180.0  # Maximum allowed yaw deviation
 
         # Common observation configuration for Rizon 4s joints (arm only, not gripper)
