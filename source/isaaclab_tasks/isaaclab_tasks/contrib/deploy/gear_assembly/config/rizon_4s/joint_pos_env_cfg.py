@@ -23,6 +23,7 @@ from isaaclab_tasks.contrib.deploy.mdp.noise_models import (
     ResetSampledConstantNoiseModelCfg,
     ResetSampledQuaternionNoiseModelCfg,
 )
+from isaaclab_tasks.utils import preset
 
 ##
 # Pre-defined configs
@@ -270,9 +271,10 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             self.gear_orientation_yaw_threshold_deg
         )
 
-        # Action configuration for Rizon 4s arm
-        # Using smaller action scale for stability
-        self.joint_action_scale = 0.025
+        # Action configuration for Rizon 4s arm. Hydroelastic SDF contacts need smaller
+        # exploration deltas than the point-contact/default backend to keep the grasped gear
+        # inside the 30 degree roll/pitch envelope during early random policy rollouts.
+        self.joint_action_scale = preset(default=0.025, newton_hydroelastic=0.0025)
         arm_joint_names = [
             "joint1",
             "joint2",
@@ -373,12 +375,11 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 rot=_base_rot,
             )
 
-        # Grasp point the fingertip link-origin midpoint targets in ``set_robot_to_grasp_pose``.
-        # The fingertip collision meshes extend downward from those link origins. The small gear
-        # needs a slightly higher link-origin target so the actual fingertip pads land on the hub
-        # instead of dragging under the toothed disk.
+        # Grasp point the fingertip link-origin midpoint targets in set_robot_to_grasp_pose.
+        # Keep the pads centered on the gear hubs; lowering the small-gear target made Newton
+        # hydroelastic contact clamp the lower disk and tilt the gear during early exploration.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.035],
+            "gear_small": [0.0, 0.0, -0.025],
             "gear_medium": [0.0, 0.0, -0.025],
             "gear_large": [0.0, 0.0, -0.025],
         }
