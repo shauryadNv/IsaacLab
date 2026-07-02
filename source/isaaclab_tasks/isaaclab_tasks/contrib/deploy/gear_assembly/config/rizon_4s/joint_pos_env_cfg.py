@@ -359,7 +359,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # ``gear_offsets`` (see GearAssemblyEnvCfg); under the base rotation below that maps to world
         # -x, so each gear's world x = base_x - shaft_offset_x. (Without distinct positions the gears
         # spawned coincident and, now that they collide, exploded apart on contact.)
-        _base_pos = (0.481, -0.073, 0.071)
+        _base_pos = (0.481, -0.073, -0.005)
         _base_rot = (0.0, 0.0, 0.70711, -0.70711)
         _shaft_x = {"gear_small": 0.0823685, "gear_medium": 0.0366185, "gear_large": -0.0391315}
         self.scene.factory_gear_base.init_state = RigidObjectCfg.InitialStateCfg(pos=_base_pos, rot=_base_rot)
