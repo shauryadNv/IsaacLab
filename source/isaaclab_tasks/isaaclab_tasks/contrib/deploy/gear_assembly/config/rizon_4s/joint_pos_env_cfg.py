@@ -374,10 +374,9 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             )
 
         # Grasp point the fingertip link-origin midpoint targets in set_robot_to_grasp_pose.
-        # Keep the pads centered on the gear hubs. The small gear needs a slightly higher target so
-        # the fingertips clamp the hub instead of riding near the lower disk.
+        # Keep the fingertip pads centered on the gear hubs for all gear sizes.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.015],
+            "gear_small": [0.0, 0.0, -0.025],
             "gear_medium": [0.0, 0.0, -0.025],
             "gear_large": [0.0, 0.0, -0.025],
         }
