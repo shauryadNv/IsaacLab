@@ -421,12 +421,9 @@ class GearAssemblyEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 6.66
         self.viewer.eye = (3.5, 3.5, 3.5)
         # simulation settings
-        # Hydroelastic SDF contacts are stiff enough that the default 120 Hz physics step can
-        # inject visible tilt/slip into the gripped gear during early policy exploration. Keep the
-        # 30 Hz policy step, but resolve the hydroelastic preset to a smaller contact step.
-        self.decimation = preset(default=4, newton_hydroelastic=16)
-        self.sim.render_interval = preset(default=4, newton_hydroelastic=16)
-        self.sim.dt = preset(default=1.0 / 120.0, newton_hydroelastic=1.0 / 480.0)
+        self.decimation = 4
+        self.sim.render_interval = self.decimation
+        self.sim.dt = 1.0 / 120.0
 
         self.gear_offsets = {
             "gear_small": [0.0823685, 0.0, 0.0],
