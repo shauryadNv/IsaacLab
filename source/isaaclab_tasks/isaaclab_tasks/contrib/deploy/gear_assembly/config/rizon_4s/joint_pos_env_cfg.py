@@ -376,9 +376,9 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # Grasp point the fingertip link-origin midpoint targets in set_robot_to_grasp_pose.
         # Keep the fingertip pads centered on the gear hubs for all gear sizes.
         self.gear_offsets_grasp_hub = {
-            "gear_small": [0.0, 0.0, -0.025],
-            "gear_medium": [0.0, 0.0, -0.025],
-            "gear_large": [0.0, 0.0, -0.025],
+            "gear_small": [0.0, 0.0, -0.026],
+            "gear_medium": [0.0, 0.0, -0.026],
+            "gear_large": [0.0, 0.0, -0.026],
         }
         # Use the same physical hub point for grasp/drop metrics. The measurement position is the
         # fingertip midpoint configured below, not the distant ``link7`` frame.
@@ -393,7 +393,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
             "gear_large": 0.28,
         }
         self.hand_close_width = {
-            "gear_small": 0.0,
+            "gear_small": 0.01,
             "gear_medium": 0.139626,
             "gear_large": 0.139626,
         }
