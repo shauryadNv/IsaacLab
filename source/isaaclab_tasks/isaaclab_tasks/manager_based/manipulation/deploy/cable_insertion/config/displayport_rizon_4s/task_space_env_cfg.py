@@ -37,6 +37,7 @@ from .joint_pos_env_cfg import (
     _PLUG_ROT,
     _SOCKET_ROOT,
     _SOCKET_ROT,
+    _exp_curriculum_params,
     set_finger_joint_pos_grav,
 )
 
@@ -148,6 +149,24 @@ class TaskSpaceObservationsCfg:
     critic: CriticCfg = CriticCfg()
 
 
+# =============================== EXPERIMENT TOGGLES ===============================
+# Parametrized training-experiment sweep for the TASK-SPACE (OSC) env. Each
+# experiment commit sets these switches to a specific combination; see the
+# experiment matrix / commit log. The block between START/END markers is what
+# the experiment commits edit. Mirrors the joint-space env's EXP block, minus
+# sysid: the joint-space sysid (identified joint-PD gains + delayed joint action)
+# is invalid under OSC because the arm joint PD is zeroed for operational-space
+# control, so there is no EXP_SYSID toggle here.
+# --- EXP TOGGLES START ---
+EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
+EXP_SOCKET_ORN_DEG = 2.0                    # socket orientation randomization, +/- deg on roll/pitch/yaw
+EXP_CURRICULUM = "anneal_80_20_1000"        # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
+# --- EXP TOGGLES END ---
+
+_EXP_CURR = _exp_curriculum_params(EXP_CURRICULUM)
+# =================================================================================
+
+
 ##
 # Event configuration
 ##
@@ -200,18 +219,20 @@ class TaskSpaceEventCfg:
         mode="reset",
         params={
             "pose_range": {
-                "x": [-0.01, 0.01],
-                "y": [-0.01, 0.01],
-                "z": [-0.02, 0.02],
-                # "x": [-0.00, 0.00],
-                # "y": [-0.00, 0.00],
-                # "z": [-0.00, 0.00],
-                # "roll": [-math.radians(2.0), math.radians(2.0)],
-                # "pitch": [-math.radians(2.0), math.radians(2.0)],
-                # "yaw": [-math.radians(2.0), math.radians(2.0)],
-                "roll": [0.0, 0.0],
-                "pitch": [0.0, 0.0],
-                "yaw": [0.0, 0.0],
+                # Driven by the EXP_SOCKET_POS_RANGE / EXP_SOCKET_ORN_DEG toggles.
+                "x": [-EXP_SOCKET_POS_RANGE[0], EXP_SOCKET_POS_RANGE[0]],
+                "y": [-EXP_SOCKET_POS_RANGE[1], EXP_SOCKET_POS_RANGE[1]],
+                "z": [-EXP_SOCKET_POS_RANGE[2], EXP_SOCKET_POS_RANGE[2]],
+                "roll": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
+                "pitch": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
+                "yaw": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
+                # --- previous fixed values (superseded by EXP toggles) ---
+                # "x": [-0.01, 0.01],
+                # "y": [-0.01, 0.01],
+                # "z": [-0.02, 0.02],
+                # "roll": [0.0, 0.0],
+                # "pitch": [0.0, 0.0],
+                # "yaw": [0.0, 0.0],
             },
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("dp_socket"),
@@ -255,11 +276,16 @@ class TaskSpaceEventCfg:
         params={
             "plug_cfg": SceneEntityCfg("dp_plug"),
             "socket_cfg": SceneEntityCfg("dp_socket"),
-            "at_goal_prob": 0.0,
-            "at_goal_prob_final": 0.0,
+            # Driven by the EXP_CURRICULUM toggle (see _exp_curriculum_params).
+            "at_goal_prob": _EXP_CURR["at_goal_prob"],
+            "at_goal_prob_final": _EXP_CURR["at_goal_prob_final"],
             "anneal_start_iter": 0.0,
-            "anneal_end_iter": 1000.0,
+            "anneal_end_iter": _EXP_CURR["anneal_end_iter"],
             "num_steps_per_env": 512,
+            # --- previous fixed values (superseded by EXP_CURRICULUM toggle) ---
+            # "at_goal_prob": 0.0,
+            # "at_goal_prob_final": 0.0,
+            # "anneal_end_iter": 1000.0,
             "insertion_axis": [1.0, 0.0, 0.0],
             "insertion_length": _INSERTION_LENGTH,
             # Deadzone fix: at-goal envs seed shallow (0-15 mm) and approach envs seed
