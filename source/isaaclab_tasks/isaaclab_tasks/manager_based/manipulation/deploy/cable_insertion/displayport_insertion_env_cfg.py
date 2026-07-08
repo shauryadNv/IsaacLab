@@ -317,7 +317,10 @@ class RewardsCfg:
             "offset_1": SOCKET_INSERTION_OFFSET,
             "offset_2": PLUG_INSERTION_OFFSET,
             "rot_offset_2": PLUG_GOAL_ROT_INV,
-            "kp_exp_coeffs": [(50, 0.0001), (300, 0.0001), (600, 0.0001)],
+            # Original 3-coeff set plus IsaacLab_UR gb300's sharp a=2000 term for a
+            # tighter (<1 mm) final-alignment bonus on top of the existing a=600 bump.
+            "kp_exp_coeffs": [(50, 0.0001), (300, 0.0001), (600, 0.0001), (2000, 0.0001)],
+            # "kp_exp_coeffs": [(50, 0.0001), (300, 0.0001), (600, 0.0001)],
             "kp_use_sum_of_exps": False,
             "keypoint_scale": 0.15,
         },
