@@ -58,6 +58,43 @@ _PLUG_ROOT, _PLUG_ROT = compute_plug_pose(
 # the verified seated pose. Kept identical to the task-space env.
 _INSERTION_LENGTH = 0.011
 
+# =============================== EXPERIMENT TOGGLES ===============================
+# Parametrized training-experiment sweep. Each experiment commit sets these five
+# switches to a specific combination; see the experiment matrix / commit log.
+# The block between the START/END markers is what the experiment commits edit.
+# --- EXP TOGGLES START ---
+EXP_SYSID = False                 # enable sim2real (sysid) action model + PhysX SysID gains
+EXP_SOCKET_POS_RANGE = 0.05         # socket position randomization, +/- m per axis (UR gb300 uses 0.05)
+EXP_SOCKET_ORN_DEG = 0.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
+EXP_CURRICULUM = "disabled"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
+EXP_EQUAL_REWARD_WEIGHTS = False  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
+# --- EXP TOGGLES END ---
+
+
+def _exp_curriculum_params(mode: str) -> dict:
+    """Map an ``EXP_CURRICULUM`` mode string to reset_plug_at_goal_curriculum params.
+
+    ``at_goal_prob`` is the (starting) fraction of envs seeded near the goal;
+    ``at_goal_prob_final`` / ``anneal_end_iter`` describe the linear anneal (None
+    disables annealing, holding at_goal_prob constant). ``disabled`` uses
+    at_goal_prob=0 so every env spawns in the (harder) approach band.
+    """
+    table = {
+        "disabled":          dict(at_goal_prob=0.0, at_goal_prob_final=None, anneal_end_iter=None),
+        "fixed80":           dict(at_goal_prob=0.8, at_goal_prob_final=None, anneal_end_iter=None),
+        "anneal_80_0_1000":  dict(at_goal_prob=0.8, at_goal_prob_final=0.0,  anneal_end_iter=1000.0),
+        "anneal_80_20_1000": dict(at_goal_prob=0.8, at_goal_prob_final=0.2,  anneal_end_iter=1000.0),
+        "anneal_80_20_500":  dict(at_goal_prob=0.8, at_goal_prob_final=0.2,  anneal_end_iter=500.0),
+        "anneal_80_0_500":   dict(at_goal_prob=0.8, at_goal_prob_final=0.0,  anneal_end_iter=500.0),
+    }
+    if mode not in table:
+        raise ValueError(f"Unknown EXP_CURRICULUM mode: {mode!r}. Options: {list(table)}")
+    return table[mode]
+
+
+_EXP_CURR = _exp_curriculum_params(EXP_CURRICULUM)
+# =================================================================================
+
 # ---------------------------------------------------------------------------
 # Sim-to-real action model toggle (ported from IsaacLab_ashwin gear-assembly
 # ``sysid_physx_env_cfg.py``)
@@ -77,7 +114,9 @@ _INSERTION_LENGTH = 0.011
 # Leave ``False`` to keep the current behavior exactly (plain
 # ``RelativeJointPositionActionCfg`` + stock actuator PD gains + 240 Hz / dec 8).
 # This single flag is the only thing you need to change to revert.
-USE_SIM2REAL_ACTION_MODEL = False
+# Now driven by the EXP_SYSID experiment toggle above.
+# USE_SIM2REAL_ACTION_MODEL = False
+USE_SIM2REAL_ACTION_MODEL = EXP_SYSID
 
 # Sim rate for the sim-to-real deployment loop. 200 Hz PhysX physics with
 # decimation 4 gives a 50 Hz effective control rate (== ashwin gear assembly).
@@ -215,18 +254,20 @@ class EventCfg:
         mode="reset",
         params={
             "pose_range": {
-                "x": [-0.01, 0.01],
-                "y": [-0.01, 0.01],
-                "z": [-0.02, 0.02],
-                # "x": [-0.00, 0.00],
-                # "y": [-0.00, 0.00],
-                # "z": [-0.00, 0.00],
-                "roll": [-math.radians(2.0), math.radians(2.0)],
-                "pitch": [-math.radians(2.0), math.radians(2.0)],
-                "yaw": [-math.radians(2.0), math.radians(2.0)],
-                # "roll": [0., 0.],
-                # "pitch": [0., 0.],
-                # "yaw": [0., 0.],
+                # Driven by the EXP_SOCKET_POS_RANGE / EXP_SOCKET_ORN_DEG toggles.
+                "x": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
+                "y": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
+                "z": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
+                "roll": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
+                "pitch": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
+                "yaw": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
+                # --- previous fixed values (superseded by EXP toggles) ---
+                # "x": [-0.01, 0.01],
+                # "y": [-0.01, 0.01],
+                # "z": [-0.02, 0.02],
+                # "roll": [-math.radians(2.0), math.radians(2.0)],
+                # "pitch": [-math.radians(2.0), math.radians(2.0)],
+                # "yaw": [-math.radians(2.0), math.radians(2.0)],
             },
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("dp_socket"),
@@ -271,11 +312,16 @@ class EventCfg:
         params={
             "plug_cfg": SceneEntityCfg("dp_plug"),
             "socket_cfg": SceneEntityCfg("dp_socket"),
-            "at_goal_prob": 0.8,
-            "at_goal_prob_final": 0.0,
+            # Driven by the EXP_CURRICULUM toggle (see _exp_curriculum_params).
+            "at_goal_prob": _EXP_CURR["at_goal_prob"],
+            "at_goal_prob_final": _EXP_CURR["at_goal_prob_final"],
             "anneal_start_iter": 0.0,
-            "anneal_end_iter": 100.0,
+            "anneal_end_iter": _EXP_CURR["anneal_end_iter"],
             "num_steps_per_env": 512,
+            # --- previous fixed values (superseded by EXP_CURRICULUM toggle) ---
+            # "at_goal_prob": 0.8,
+            # "at_goal_prob_final": 0.0,
+            # "anneal_end_iter": 100.0,
             "insertion_axis": [1.0, 0.0, 0.0],
             "insertion_length": _INSERTION_LENGTH,
             # Deadzone fix: at-goal envs seed shallow (0-15 mm) and approach envs seed
@@ -353,6 +399,13 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+
+        # Experiment toggle: match IsaacLab_UR's 1:1 linear:exp keypoint weighting
+        # (exp weight == |linear weight| = 1.5) instead of the default 2:1 (exp = 3.0).
+        if EXP_EQUAL_REWARD_WEIGHTS:
+            self.rewards.plug_socket_keypoint_tracking_exp.weight = abs(
+                self.rewards.plug_socket_keypoint_tracking.weight
+            )
 
         if USE_SIM2REAL_ACTION_MODEL:
             # Deployment sim rate: 200 Hz PhysX physics, decimation 4 => 50 Hz
