@@ -63,11 +63,11 @@ _INSERTION_LENGTH = 0.011
 # switches to a specific combination; see the experiment matrix / commit log.
 # The block between the START/END markers is what the experiment commits edit.
 # --- EXP TOGGLES START ---
-EXP_SYSID = True                 # enable sim2real (sysid) action model + PhysX SysID gains
-EXP_SOCKET_POS_RANGE = 0.05         # socket position randomization, +/- m per axis (UR gb300 uses 0.05)
-EXP_SOCKET_ORN_DEG = 2.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
-EXP_CURRICULUM = "anneal_80_0_500"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
-EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
+EXP_SYSID = False                 # enable sim2real (sysid) action model + PhysX SysID gains
+EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
+EXP_SOCKET_ORN_DEG = 0.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
+EXP_CURRICULUM = "disabled"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
+EXP_EQUAL_REWARD_WEIGHTS = False  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
 # --- EXP TOGGLES END ---
 
 
@@ -255,9 +255,14 @@ class EventCfg:
         params={
             "pose_range": {
                 # Driven by the EXP_SOCKET_POS_RANGE / EXP_SOCKET_ORN_DEG toggles.
-                "x": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
-                "y": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
-                "z": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
+                # EXP_SOCKET_POS_RANGE is a per-axis [x, y, z] list (m).
+                "x": [-EXP_SOCKET_POS_RANGE[0], EXP_SOCKET_POS_RANGE[0]],
+                "y": [-EXP_SOCKET_POS_RANGE[1], EXP_SOCKET_POS_RANGE[1]],
+                "z": [-EXP_SOCKET_POS_RANGE[2], EXP_SOCKET_POS_RANGE[2]],
+                # --- scalar form (used by exps 1-48; EXP_SOCKET_POS_RANGE was a float) ---
+                # "x": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
+                # "y": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
+                # "z": [-EXP_SOCKET_POS_RANGE, EXP_SOCKET_POS_RANGE],
                 "roll": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
                 "pitch": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
                 "yaw": [-math.radians(EXP_SOCKET_ORN_DEG), math.radians(EXP_SOCKET_ORN_DEG)],
