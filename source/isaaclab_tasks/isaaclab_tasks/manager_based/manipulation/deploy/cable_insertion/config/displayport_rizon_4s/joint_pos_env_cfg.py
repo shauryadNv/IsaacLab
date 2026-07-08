@@ -278,15 +278,24 @@ class EventCfg:
             "num_steps_per_env": 512,
             "insertion_axis": [1.0, 0.0, 0.0],
             "insertion_length": _INSERTION_LENGTH,
+            # Deadzone fix: at-goal envs seed shallow (0-15 mm) and approach envs seed
+            # a deeper band (20-60 mm) along the insertion axis, from the same socket
+            # keypoint origin, so there is no unsampled gap between the two bands.
+            "at_goal_depth_range": [0.0, 0.015],
+            "approach_depth_range": [0.02, 0.06],
             "socket_insertion_offset": SOCKET_INSERTION_OFFSET,
             "plug_insertion_offset": PLUG_INSERTION_OFFSET,
             "goal_rot": list(PLUG_GOAL_ROT),
             # Non-at-goal approach randomization. Matches gb300's
             # held_asset_init_pos_range = [0.02, 0.02, 0.01] (x, y, z) [m].
+            # Lateral (x, y) only -- axial (z) spread is now handled by
+            # approach_depth_range above, so z lateral is disabled to avoid
+            # double-randomizing along the insertion axis.
             "normal_pose_range": {
                 "x": [-0.02, 0.02],
                 "y": [-0.02, 0.02],
-                "z": [-0.01, 0.01],
+                "z": [0.0, 0.0],
+                # "z": [-0.01, 0.01],
                 # "x": [-0.00, 0.00],
                 # "y": [-0.00, 0.00],
                 # "z": [-0.00, 0.00],
