@@ -304,16 +304,17 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
                 ),
                 collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
             ),
-            # Joint positions based on IK from center of distribution for randomized gear positions
+            # Joint positions measured above the large-gear shaft on the real robot. This gives the
+            # reset-time IK solver a seed close to the desired insertion approach branch.
             init_state=ArticulationCfg.InitialStateCfg(
                 joint_pos={
-                    "joint1": 0.0,
-                    "joint2": -0.698,
-                    "joint3": 0.0,
-                    "joint4": 1.571,
-                    "joint5": 0.0,
-                    "joint6": 0.698,
-                    "joint7": 0.0,
+                    "joint1": 0.050265,
+                    "joint2": -0.372105,
+                    "joint3": 0.111177,
+                    "joint4": 2.276781,
+                    "joint5": -0.083078,
+                    "joint6": 1.074427,
+                    "joint7": 0.230907,
                 },
                 pos=(0.0, 0.0, 0.0),
                 rot=(0.0, 0.0, 0.0, 1.0),
