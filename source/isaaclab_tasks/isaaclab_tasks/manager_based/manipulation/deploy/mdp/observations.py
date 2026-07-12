@@ -334,11 +334,8 @@ class gear_shaft_quat_w(ManagerTermBase):
 
         # Ensure w component is positive (q and -q represent the same rotation)
         # Pick one canonical form to reduce observation variation seen by the policy
-        w_negative = base_quat[:, 3] < 0
-        positive_quat = base_quat.clone()
-        positive_quat[w_negative] = -base_quat[w_negative]
-
-        return positive_quat
+        w_negative = base_quat[:, 3:4] < 0
+        return torch.where(w_negative, -base_quat, base_quat)
 
 
 class gear_pos_w(ManagerTermBase):
@@ -604,11 +601,8 @@ class rigid_object_quat_w(ManagerTermBase):
                 ),
             )
 
-        w_negative = obj_quat[:, 3] < 0
-        positive_quat = obj_quat.clone()
-        positive_quat[w_negative] = -obj_quat[w_negative]
-
-        return positive_quat
+        w_negative = obj_quat[:, 3:4] < 0
+        return torch.where(w_negative, -obj_quat, obj_quat)
 
 
 def _quat_to_rot_6d(quat: torch.Tensor) -> torch.Tensor:
