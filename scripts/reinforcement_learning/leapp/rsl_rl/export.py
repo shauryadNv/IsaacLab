@@ -18,7 +18,10 @@ from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
-from isaaclab_tasks.utils import setup_preset_cli
+try:
+    from isaaclab_tasks.utils import setup_preset_cli
+except ImportError:
+    setup_preset_cli = None
 
 _RSL_RL_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "rsl_rl"
 if str(_RSL_RL_SCRIPTS_DIR) not in sys.path:
@@ -110,10 +113,13 @@ def create_arg_parser() -> argparse.ArgumentParser:
 def parse_export_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
     """Parse export arguments and return remaining Hydra overrides."""
     parser = create_arg_parser()
-    # setup_preset_cli attaches the preset-selection help group then parses;
-    # remainder still carries typed selectors (physics=/renderer=/presets=)
-    # verbatim for run_export_with_hydra to fold before invoking Hydra.
-    args_cli, hydra_args = setup_preset_cli(parser, argv)
+    if setup_preset_cli is not None:
+        # setup_preset_cli attaches the preset-selection help group then parses;
+        # remainder still carries typed selectors (physics=/renderer=/presets=)
+        # verbatim for run_export_with_hydra to fold before invoking Hydra.
+        args_cli, hydra_args = setup_preset_cli(parser, argv)
+    else:
+        args_cli, hydra_args = parser.parse_known_args(argv)
     args_cli.headless = True
     return args_cli, hydra_args
 
