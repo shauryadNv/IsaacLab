@@ -75,6 +75,14 @@ def _set_leapp_traced_observation_input(env, name: str, tensor: torch.Tensor) ->
     getattr(real_env, _LEAPP_CONSUMED_OBSERVATION_INPUTS, set()).discard(name)
 
 
+def _deploy_object_input_base_name(asset_name: str) -> str:
+    """Return a stable deploy input base name for common socket/plug assets."""
+    for prefix in ("dp_", "gb300_", "factory_"):
+        if asset_name.startswith(prefix):
+            return asset_name[len(prefix) :]
+    return asset_name
+
+
 # These wrappers intentionally shadow the generic Isaac Lab joint observations
 # for the deploy gear-assembly MDP. The generic terms read
 # ``asset.data.joint_pos/vel.torch`` before slicing by ``asset_cfg.joint_ids``,
@@ -522,14 +530,32 @@ class rigid_object_pos_w(ManagerTermBase):
         asset_cfg: SceneEntityCfg | None = None,
         offset: list | None = None,
     ) -> torch.Tensor:
-        obj_pos = wp.to_torch(self.asset.data.root_pos_w)
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        real_env = _leapp_real_env(env)
+        asset = real_env.scene[self.asset_cfg.name]
+        obj_pos = _tensor_data_to_torch(asset.data.root_pos_w)
+        obj_quat = _tensor_data_to_torch(asset.data.root_quat_w)
 
         if torch.any(self.offset_tensor != 0):
-            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
+            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(real_env.num_envs, 1)
             obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, offset_repeated, self.identity_quat)
 
-        return obj_pos - env.scene.env_origins
+        obj_pos = obj_pos - real_env.scene.env_origins
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
+
+            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_pos"
+            obj_pos = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name=input_name,
+                    ref=obj_pos,
+                    kind=InputKindEnum.BODY_POSITION,
+                    element_names=XYZ_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": f"observation:policy:{input_name}"},
+                ),
+            )
+        return obj_pos
 
 
 class rigid_object_quat_w(ManagerTermBase):
@@ -560,7 +586,23 @@ class rigid_object_quat_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        real_env = _leapp_real_env(env)
+        obj_quat = _tensor_data_to_torch(real_env.scene[self.asset_cfg.name].data.root_quat_w)
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
+
+            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_quat"
+            obj_quat = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name=input_name,
+                    ref=obj_quat,
+                    kind=InputKindEnum.BODY_ROTATION,
+                    element_names=QUAT_XYZW_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": f"observation:policy:{input_name}"},
+                ),
+            )
 
         w_negative = obj_quat[:, 3] < 0
         positive_quat = obj_quat.clone()
