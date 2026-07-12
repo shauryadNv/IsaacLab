@@ -409,7 +409,10 @@ def export_rsl_rl_agent(
 
 def run_export_with_hydra(args_cli: argparse.Namespace, hydra_args: list[str]) -> bool:
     """Resolve Hydra task configuration and export one RSL-RL policy."""
-    from isaaclab.app import launch_simulation
+    try:
+        from isaaclab.app import launch_simulation
+    except ImportError:
+        from isaaclab_tasks.utils import launch_simulation
 
     from isaaclab_tasks.utils.hydra import hydra_task_config
 
