@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import warp as wp
+
 from isaaclab.envs.mdp.actions.joint_actions import RelativeJointPositionAction
 
 if TYPE_CHECKING:
@@ -23,6 +25,11 @@ _LEAPP_CONSUMED_OBSERVATION_INPUTS = "_leapp_consumed_observation_inputs"
 def _leapp_real_env(env):
     real_env = object.__getattribute__(env, "_real_env") if type(env).__name__ == "_EnvProxy" else env
     return real_env
+
+
+def _tensor_data_to_torch(data):
+    """Return a torch tensor view for Isaac Lab data stored as torch or Warp-backed data."""
+    return data.torch if hasattr(data, "torch") else wp.to_torch(data)
 
 
 def _get_observation_term_from_buffer(env, group_name: str, term_name: str):
@@ -105,9 +112,9 @@ class DeployRelativeJointPositionAction(RelativeJointPositionAction):
                         f"'{self.cfg.asset_name}_joint_pos' observation during LEAPP export."
                     )
                 real_asset = object.__getattribute__(asset, "_real_asset")
-                current_joint_pos = real_asset.data.joint_pos.torch[:, self._joint_ids]
+                current_joint_pos = _tensor_data_to_torch(real_asset.data.joint_pos)[:, self._joint_ids]
         else:
-            current_joint_pos = asset.data.joint_pos.torch[:, self._joint_ids]
+            current_joint_pos = _tensor_data_to_torch(asset.data.joint_pos)[:, self._joint_ids]
 
         current_actions = self.processed_actions + current_joint_pos
         self._asset.set_joint_position_target_index(target=current_actions, joint_ids=self._joint_ids)

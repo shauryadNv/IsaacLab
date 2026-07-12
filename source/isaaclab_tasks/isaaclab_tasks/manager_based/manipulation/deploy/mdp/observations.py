@@ -84,7 +84,7 @@ def joint_pos(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg
     """Joint positions for the configured joints, exposed as the LEAPP input boundary."""
     real_env = _leapp_real_env(env)
     asset = real_env.scene[asset_cfg.name]
-    selected_joint_pos = asset.data.joint_pos.torch[:, asset_cfg.joint_ids]
+    selected_joint_pos = _tensor_data_to_torch(asset.data.joint_pos)[:, asset_cfg.joint_ids]
     joint_names = _selected_joint_names(asset, asset_cfg.joint_ids)
     if _is_leapp_export_env(env):
         from leapp import annotate
@@ -108,7 +108,7 @@ def joint_vel(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg
     """Joint velocities for the configured joints, exposed as the LEAPP input boundary."""
     real_env = _leapp_real_env(env)
     asset = real_env.scene[asset_cfg.name]
-    selected_joint_vel = asset.data.joint_vel.torch[:, asset_cfg.joint_ids]
+    selected_joint_vel = _tensor_data_to_torch(asset.data.joint_vel)[:, asset_cfg.joint_ids]
     joint_names = _selected_joint_names(asset, asset_cfg.joint_ids)
     if _is_leapp_export_env(env):
         from leapp import annotate
