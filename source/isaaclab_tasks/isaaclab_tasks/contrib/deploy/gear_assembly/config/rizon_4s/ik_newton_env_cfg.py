@@ -27,13 +27,20 @@ class Rizon4sGearAssemblyIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGearAssemblyEnv
         ``presets=physx``.
     """
 
+    ik_body_name: str = "link7"
+    """Body whose pose is commanded by the Newton IK action."""
+
+    ik_body_offset_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    """TCP translation relative to :attr:`ik_body_name` [m]."""
+
+    ik_body_offset_rot: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    """TCP quaternion ``(x, y, z, w)`` relative to :attr:`ik_body_name`."""
+
     def __post_init__(self):
         super().__post_init__()
 
-        # Relative end-effector pose action solved by Newton's on-device IK. ``body_offset_pos`` is
-        # left at the link frame; the grasped gear follows ``link7`` through contact, so commanding
-        # the link pose is sufficient. Keep the per-step Cartesian delta bounded so early policy
-        # outputs do not shake the contact grasp loose.
+        # Relative end-effector pose action solved by Newton's on-device IK. Keep the per-step
+        # Cartesian delta bounded so early policy outputs do not shake the contact grasp loose.
         self.actions.arm_action = NewtonInverseKinematicsActionCfg(
             asset_name="robot",
             joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
@@ -41,7 +48,9 @@ class Rizon4sGearAssemblyIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGearAssemblyEnv
             clip={".*": (-0.5, 0.5)},
             objectives=[
                 NewtonIKPoseObjectiveCfg(
-                    body_name=self.end_effector_body_name,
+                    body_name=self.ik_body_name,
+                    body_offset_pos=self.ik_body_offset_pos,
+                    body_offset_rot=self.ik_body_offset_rot,
                     command_type="pose",
                     use_relative_mode=True,
                     scale=0.025,
@@ -61,3 +70,10 @@ class Rizon4sGearAssemblyIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGearAssemblyEnv
         self.terminations.gear_orientation_exceeded.params["pitch_threshold_deg"] = (
             self.gear_orientation_pitch_threshold_deg
         )
+
+
+@configclass
+class Rizon4sGearAssemblyIKNewtonFlangeEnvCfg(Rizon4sGearAssemblyIKNewtonEnvCfg):
+    """Newton IK gear assembly whose relative pose actions command the robot flange."""
+
+    ik_body_name: str = "flange"

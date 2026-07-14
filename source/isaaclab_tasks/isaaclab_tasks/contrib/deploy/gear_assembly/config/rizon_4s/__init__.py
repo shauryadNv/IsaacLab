@@ -34,6 +34,17 @@ gym.register(
     },
 )
 
+# Flexiv Rizon 4s - Newton IK at the flange (requires a Newton preset)
+gym.register(
+    id="IsaacContrib-Deploy-GearAssembly-Rizon4s-Grav-Newton-IK-Flange",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_newton_env_cfg:Rizon4sGearAssemblyIKNewtonFlangeEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGearAssemblyRNNPPORunnerCfg",
+    },
+)
+
 # Flexiv Rizon 4s - Play / Debug (deterministic, no randomization)
 gym.register(
     id="IsaacContrib-Deploy-GearAssembly-Rizon4s-Grav-Play",
