@@ -8,6 +8,14 @@ from abc import ABC, abstractmethod
 
 import warp as wp
 
+from isaaclab.utils.leapp.leapp_semantics import (
+    InputKindEnum,
+    QUAT_XYZW_ELEMENT_NAMES,
+    XYZ_ELEMENT_NAMES,
+    joint_names_resolver,
+    leapp_tensor_semantics,
+)
+
 
 class BaseArticulationData(ABC):
     """Data container for an articulation.
@@ -624,6 +632,7 @@ class BaseArticulationData(ABC):
 
     @property
     @abstractmethod
+    @leapp_tensor_semantics(kind=InputKindEnum.JOINT_POSITION, element_names_resolver=joint_names_resolver)
     def joint_pos(self) -> wp.array:
         """Joint positions of all joints.
 
@@ -994,11 +1003,13 @@ class BaseArticulationData(ABC):
         return self.root_link_pose_w
 
     @property
+    @leapp_tensor_semantics(kind=InputKindEnum.BODY_POSITION, element_names=XYZ_ELEMENT_NAMES)
     def root_pos_w(self) -> wp.array:
         """Shorthand for :attr:`root_link_pos_w`."""
         return self.root_link_pos_w
 
     @property
+    @leapp_tensor_semantics(kind=InputKindEnum.BODY_ROTATION, element_names=QUAT_XYZW_ELEMENT_NAMES)
     def root_quat_w(self) -> wp.array:
         """Shorthand for :attr:`root_link_quat_w`."""
         return self.root_link_quat_w

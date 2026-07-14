@@ -12,14 +12,11 @@ __all__ = [
     "preset",
     "resolve_task_config",
     "hydra_task_config",
-    "resolve_preset_defaults",
-    "add_launcher_args",
-    "launch_simulation",
-    "compute_kit_requirements",
+    "resolve_presets",
+    "setup_preset_cli",
 ]
 
-from .hydra import PresetCfg, preset, hydra_task_config, resolve_task_config
+from .hydra import PresetCfg, preset, hydra_task_config, resolve_task_config, resolve_presets
 from .importer import import_packages
 from .parse_cfg import get_checkpoint_path, load_cfg_from_registry, parse_env_cfg
-from .hydra import resolve_task_config, hydra_task_config, resolve_preset_defaults
-from .sim_launcher import add_launcher_args, launch_simulation, compute_kit_requirements
+from .preset_cli import setup_preset_cli

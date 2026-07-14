@@ -11,6 +11,8 @@ __all__ = [
     "reset_plug_at_goal_curriculum",
     "ResetSampledConstantNoiseModel",
     "ResetSampledConstantNoiseModelCfg",
+    "joint_pos",
+    "joint_vel",
     "gear_pos_w",
     "gear_quat_w",
     "gear_shaft_pos_w",
@@ -38,8 +40,12 @@ __all__ = [
     "ShapedDelayedRelativeJointPositionActionCfg",
     "FlexivDynamicsAwareRelativeJointPositionAction",
     "FlexivDynamicsAwareRelativeJointPositionActionCfg",
+    "DeployRelativeJointPositionAction",
+    "DeployRelativeJointPositionActionCfg",
 ]
 
+from .actions import DeployRelativeJointPositionAction
+from .actions_cfg import DeployRelativeJointPositionActionCfg
 from .delayed_joint_actions import (
     DelayedRelativeJointPositionAction,
     ShapedDelayedRelativeJointPositionAction,
@@ -59,6 +65,8 @@ from .events import (
 )
 from .noise_models import ResetSampledConstantNoiseModel, ResetSampledConstantNoiseModelCfg
 from .observations import (
+    joint_pos,
+    joint_vel,
     gear_pos_w,
     gear_quat_w,
     gear_shaft_pos_w,

@@ -8,6 +8,13 @@ from abc import ABC, abstractmethod
 
 import warp as wp
 
+from isaaclab.utils.leapp.leapp_semantics import (
+    InputKindEnum,
+    QUAT_XYZW_ELEMENT_NAMES,
+    XYZ_ELEMENT_NAMES,
+    leapp_tensor_semantics,
+)
+
 
 class BaseRigidObjectData(ABC):
     """Data container for a rigid object.
@@ -588,11 +595,13 @@ class BaseRigidObjectData(ABC):
         return self.root_link_pose_w
 
     @property
+    @leapp_tensor_semantics(kind=InputKindEnum.BODY_POSITION, element_names=XYZ_ELEMENT_NAMES)
     def root_pos_w(self) -> wp.array:
         """Shorthand for :attr:`root_link_pos_w`."""
         return self.root_link_pos_w
 
     @property
+    @leapp_tensor_semantics(kind=InputKindEnum.BODY_ROTATION, element_names=QUAT_XYZW_ELEMENT_NAMES)
     def root_quat_w(self) -> wp.array:
         """Shorthand for :attr:`root_link_quat_w`."""
         return self.root_link_quat_w
