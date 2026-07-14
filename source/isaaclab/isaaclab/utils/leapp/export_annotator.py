@@ -39,6 +39,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
 import torch
+import warp as wp
 from leapp import annotate
 from leapp.utils.tensor_description import TensorSemantics
 
@@ -58,6 +59,11 @@ if TYPE_CHECKING:
 
 
 VARIABLE_IMPEDANCE_MODES = frozenset({"variable", "variable_kp"})
+
+
+def _tensor_data_to_torch(data):
+    """Return a torch tensor view for Isaac Lab data stored as torch or Warp-backed data."""
+    return data.torch if hasattr(data, "torch") else wp.to_torch(data)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -668,7 +674,7 @@ class ExportPatcher:
                 joint_names = getattr(real_asset, "joint_names", None)
                 scene_key = self._action_term_scene_keys.get(term_name, "ego")
                 if hasattr(data, "default_joint_stiffness") and data.default_joint_stiffness is not None:
-                    gains = data.default_joint_stiffness.torch
+                    gains = _tensor_data_to_torch(data.default_joint_stiffness)
                     static_values.append(
                         TensorSemantics(
                             name=f"{term_name}_kp_gains",
@@ -679,7 +685,7 @@ class ExportPatcher:
                         )
                     )
                 if hasattr(data, "default_joint_damping") and data.default_joint_damping is not None:
-                    gains = data.default_joint_damping.torch
+                    gains = _tensor_data_to_torch(data.default_joint_damping)
                     static_values.append(
                         TensorSemantics(
                             name=f"{term_name}_kd_gains",
