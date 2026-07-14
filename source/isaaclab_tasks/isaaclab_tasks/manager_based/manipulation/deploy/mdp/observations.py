@@ -13,6 +13,7 @@ import torch
 import warp as wp
 
 from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
+from isaaclab.utils.leapp import QUAT_XYZW_ELEMENT_NAMES, XYZ_ELEMENT_NAMES, InputKindEnum
 from isaaclab.utils.math import combine_frame_transforms, matrix_from_quat
 
 if TYPE_CHECKING:
@@ -20,6 +21,103 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
     from .events import randomize_gear_type
+
+
+_LEAPP_TRACED_OBSERVATION_INPUTS = "_leapp_traced_observation_inputs"
+
+
+def _is_leapp_export_env(env) -> bool:
+    return type(env).__name__ == "_EnvProxy"
+
+
+def _real_env(env):
+    return object.__getattribute__(env, "_real_env") if _is_leapp_export_env(env) else env
+
+
+def _to_torch(data):
+    return data.torch if hasattr(data, "torch") else wp.to_torch(data)
+
+
+def _selected_joint_names(asset, joint_ids) -> list[str] | None:
+    joint_names = getattr(asset, "joint_names", None)
+    if joint_names is None:
+        return None
+    if joint_ids is None or joint_ids == slice(None):
+        return list(joint_names)
+    if isinstance(joint_ids, slice):
+        return list(joint_names[joint_ids])
+    if hasattr(joint_ids, "tolist"):
+        joint_ids = joint_ids.tolist()
+    return [joint_names[int(joint_id)] for joint_id in joint_ids]
+
+
+def _leapp_input(env, *, name: str, tensor: torch.Tensor, kind: str, element_names=None, connection: str):
+    if not _is_leapp_export_env(env):
+        return tensor
+
+    from leapp import annotate
+    from leapp.utils.tensor_description import TensorSemantics
+
+    return annotate.input_tensors(
+        env.unwrapped.spec.id,
+        TensorSemantics(
+            name=name,
+            ref=tensor,
+            kind=kind,
+            element_names=element_names,
+            extra={"isaaclab_connection": connection},
+        ),
+    )
+
+
+def _set_traced_observation_input(env, name: str, tensor: torch.Tensor) -> None:
+    if not _is_leapp_export_env(env):
+        return
+    real_env = _real_env(env)
+    traced_inputs = getattr(real_env, _LEAPP_TRACED_OBSERVATION_INPUTS, None)
+    if traced_inputs is None:
+        traced_inputs = {}
+        setattr(real_env, _LEAPP_TRACED_OBSERVATION_INPUTS, traced_inputs)
+    traced_inputs[name] = tensor
+
+
+def _deploy_object_input_base_name(asset_name: str) -> str:
+    for prefix in ("dp_", "gb300_", "factory_"):
+        if asset_name.startswith(prefix):
+            return asset_name[len(prefix) :]
+    return asset_name
+
+
+def joint_pos(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Joint positions for the configured joints, exposed as the LEAPP input boundary."""
+    real_env = _real_env(env)
+    asset = real_env.scene[asset_cfg.name]
+    selected_joint_pos = _to_torch(asset.data.joint_pos)[:, asset_cfg.joint_ids]
+    selected_joint_pos = _leapp_input(
+        env,
+        name=f"{asset_cfg.name}_joint_pos",
+        tensor=selected_joint_pos,
+        kind=InputKindEnum.JOINT_POSITION,
+        element_names=_selected_joint_names(asset, asset_cfg.joint_ids),
+        connection=f"state:{asset_cfg.name}:joint_pos",
+    )
+    _set_traced_observation_input(env, f"{asset_cfg.name}_joint_pos", selected_joint_pos)
+    return selected_joint_pos
+
+
+def joint_vel(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Joint velocities for the configured joints, exposed as the LEAPP input boundary."""
+    real_env = _real_env(env)
+    asset = real_env.scene[asset_cfg.name]
+    selected_joint_vel = _to_torch(asset.data.joint_vel)[:, asset_cfg.joint_ids]
+    return _leapp_input(
+        env,
+        name=f"{asset_cfg.name}_joint_vel",
+        tensor=selected_joint_vel,
+        kind=InputKindEnum.JOINT_VELOCITY,
+        element_names=_selected_joint_names(asset, asset_cfg.joint_ids),
+        connection=f"state:{asset_cfg.name}:joint_vel",
+    )
 
 
 class gear_shaft_pos_w(ManagerTermBase):
@@ -382,14 +480,25 @@ class rigid_object_pos_w(ManagerTermBase):
         asset_cfg: SceneEntityCfg | None = None,
         offset: list | None = None,
     ) -> torch.Tensor:
-        obj_pos = wp.to_torch(self.asset.data.root_pos_w)
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        real_env = _real_env(env)
+        asset = real_env.scene[self.asset_cfg.name]
+        obj_pos = _to_torch(asset.data.root_pos_w)
+        obj_quat = _to_torch(asset.data.root_quat_w)
 
         if torch.any(self.offset_tensor != 0):
-            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
+            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(real_env.num_envs, 1)
             obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, offset_repeated, self.identity_quat)
 
-        return obj_pos - env.scene.env_origins
+        obj_pos = obj_pos - real_env.scene.env_origins
+        input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_pos"
+        return _leapp_input(
+            env,
+            name=input_name,
+            tensor=obj_pos,
+            kind=InputKindEnum.BODY_POSITION,
+            element_names=XYZ_ELEMENT_NAMES,
+            connection=f"observation:policy:{input_name}",
+        )
 
 
 class rigid_object_quat_w(ManagerTermBase):
@@ -420,7 +529,17 @@ class rigid_object_quat_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        real_env = _real_env(env)
+        obj_quat = _to_torch(real_env.scene[self.asset_cfg.name].data.root_quat_w)
+        input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_quat"
+        obj_quat = _leapp_input(
+            env,
+            name=input_name,
+            tensor=obj_quat,
+            kind=InputKindEnum.BODY_ROTATION,
+            element_names=QUAT_XYZW_ELEMENT_NAMES,
+            connection=f"observation:policy:{input_name}",
+        )
 
         w_negative = obj_quat[:, 3:4] < 0
         return torch.where(w_negative, -obj_quat, obj_quat)

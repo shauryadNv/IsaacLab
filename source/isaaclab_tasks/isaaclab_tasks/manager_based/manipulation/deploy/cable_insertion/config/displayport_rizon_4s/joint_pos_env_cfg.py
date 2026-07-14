@@ -11,6 +11,7 @@ plug is grasped at reset and the goal is the verified seated mate.
 """
 
 import math
+import os
 
 import torch
 
@@ -63,7 +64,7 @@ _INSERTION_LENGTH = 0.011
 # switches to a specific combination; see the experiment matrix / commit log.
 # The block between the START/END markers is what the experiment commits edit.
 # --- EXP TOGGLES START ---
-EXP_SYSID = True                 # enable sim2real (sysid) action model + PhysX SysID gains
+EXP_SYSID = os.getenv("DP_CABLE_EXP_SYSID", "1").lower() not in {"0", "false", "no", "off"}
 EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
 EXP_SOCKET_ORN_DEG = 2.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
 EXP_CURRICULUM = "anneal_80_0_500"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
@@ -483,7 +484,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                 command_acceleration_limit=USE_SIM2REAL_COMMAND_ACCELERATION_LIMIT,
             )
         else:
-            self.actions.arm_action = mdp.RelativeJointPositionActionCfg(
+            self.actions.arm_action = mdp.DeployRelativeJointPositionActionCfg(
                 asset_name="robot",
                 joint_names=_arm_joint_names,
                 scale=self.joint_action_scale,
