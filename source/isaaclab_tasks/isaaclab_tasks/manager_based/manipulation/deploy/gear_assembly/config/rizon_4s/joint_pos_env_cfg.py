@@ -276,7 +276,7 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         # Action configuration for Rizon 4s arm
         # Using smaller action scale for stability
         self.joint_action_scale = 0.025
-        self.actions.arm_action = mdp.DeployRelativeJointPositionActionCfg(
+        self.actions.arm_action = mdp.RelativeJointPositionActionCfg(
             asset_name="robot",
             joint_names=[
                 "joint1",
