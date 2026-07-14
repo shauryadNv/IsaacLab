@@ -422,11 +422,8 @@ class rigid_object_quat_w(ManagerTermBase):
     ) -> torch.Tensor:
         obj_quat = wp.to_torch(self.asset.data.root_quat_w)
 
-        w_negative = obj_quat[:, 3] < 0
-        positive_quat = obj_quat.clone()
-        positive_quat[w_negative] = -obj_quat[w_negative]
-
-        return positive_quat
+        w_negative = obj_quat[:, 3:4] < 0
+        return torch.where(w_negative, -obj_quat, obj_quat)
 
 
 def _quat_to_rot_6d(quat: torch.Tensor) -> torch.Tensor:
