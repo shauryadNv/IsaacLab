@@ -11,6 +11,8 @@ from isaaclab.assets import RigidObjectCfg
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.configclass import configclass
 
+import isaaclab_tasks.contrib.deploy.mdp as mdp
+
 from .joint_pos_env_cfg import Rizon4sGearAssemblyEnvCfg
 
 
@@ -50,6 +52,12 @@ class Rizon4sGearAssemblyROSInferenceEnvCfg(Rizon4sGearAssemblyEnvCfg):
 
         # Set joint_action_scale from the existing arm_action.scale
         self.joint_action_scale = self.actions.arm_action.scale
+        self.actions.arm_action = mdp.DeployRelativeJointPositionActionCfg(
+            asset_name="robot",
+            joint_names=self.arm_joint_names,
+            scale=self.joint_action_scale,
+            use_zero_offset=True,
+        )
 
         # Dynamically generate action_scale_joint_space based on action_space
         self.action_scale_joint_space = [self.joint_action_scale] * self.action_space
