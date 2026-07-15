@@ -236,10 +236,15 @@ _UR10E_HOME_JOINT_POS = {
 # =============================== EXPERIMENT TOGGLES ===============================
 # --- EXP TOGGLES START ---
 EXP_SYSID = False
-EXP_SOCKET_POS_RANGE = [0.0, 0.0, 0.0]
-EXP_SOCKET_ORN_DEG = 0.0
+# Socket placement randomization, +/- metres per axis [x, y, z] (uniform, per
+# reset). +/-1 cm lateral, +/-2 cm along z.
+EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]
+EXP_SOCKET_ORN_DEG = 2.0
 EXP_CURRICULUM = "disabled"
 EXP_EQUAL_REWARD_WEIGHTS = True
+# Observation noise: +/- metres of uniform noise on the socket position obs
+# (sampled once per reset, held constant over the episode).
+EXP_SOCKET_OBS_NOISE_M = 0.01
 # Freeze the arm at its reset/grasp pose by zeroing the (relative) action scale,
 # so policy actions have no effect. Useful for visually inspecting the grasp at
 # launch (train or play): resets, rendering and grasp-snapping still run, but the
@@ -469,6 +474,12 @@ class UR10eDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = list(_UR10E_ARM_JOINT_NAMES)
         self.observations.critic.joint_pos.params["asset_cfg"].joint_names = list(_UR10E_ARM_JOINT_NAMES)
         self.observations.critic.joint_vel.params["asset_cfg"].joint_names = list(_UR10E_ARM_JOINT_NAMES)
+
+        # Socket-position observation noise (policy group only). Base env ships it
+        # at 0; enable it here (UR-local) so the policy is robust to socket-pose
+        # sensing error. ResetSampledConstantNoiseModelCfg samples once per reset.
+        self.observations.policy.socket_pos.noise.noise_cfg.n_min = -EXP_SOCKET_OBS_NOISE_M
+        self.observations.policy.socket_pos.noise.noise_cfg.n_max = EXP_SOCKET_OBS_NOISE_M
 
         self.events = EventCfg()
         self.terminations = TerminationsCfg()
