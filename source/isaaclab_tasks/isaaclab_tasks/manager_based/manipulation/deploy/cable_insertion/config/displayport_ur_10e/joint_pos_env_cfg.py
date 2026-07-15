@@ -240,8 +240,8 @@ EXP_SYSID = False
 # reset). +/-1 cm lateral, +/-2 cm along z.
 EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]
 EXP_SOCKET_ORN_DEG = 2.0
-EXP_CURRICULUM = "disabled"
-EXP_EQUAL_REWARD_WEIGHTS = True
+EXP_CURRICULUM = "anneal_80_0_500"
+EXP_EQUAL_REWARD_WEIGHTS = False
 # Observation noise: +/- metres of uniform noise on the socket position obs
 # (sampled once per reset, held constant over the episode).
 EXP_SOCKET_OBS_NOISE_M = 0.01
