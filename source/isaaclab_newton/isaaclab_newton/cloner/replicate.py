@@ -204,7 +204,7 @@ def _weld_builder_collision_meshes(source_builders: dict[str, ModelBuilder]) -> 
     return welded
 
 
-def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder]) -> int:
+def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder], *, max_resolution: int = 64) -> int:
     """Build SDFs and enable hydroelastic contacts on eligible colliding shapes.
 
     Newton hydroelastic SDF contact is activated per shape: both shapes in a contact pair must carry
@@ -214,11 +214,16 @@ def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder])
 
     Args:
         source_builders: Per-source builders to edit in place.
+        max_resolution: Maximum generated SDF grid dimension. Must be positive
+            and divisible by 8.
 
     Returns:
         Number of shapes marked as hydroelastic.
     """
     from newton import GeoType, ShapeFlags
+
+    if max_resolution <= 0 or max_resolution % 8 != 0:
+        raise ValueError(f"max_resolution must be positive and divisible by 8, got {max_resolution}.")
 
     collide_bit = int(ShapeFlags.COLLIDE_SHAPES)
     hydroelastic_bit = int(ShapeFlags.HYDROELASTIC)
@@ -249,7 +254,7 @@ def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder])
                     gap = float(builder.shape_gap[i] if builder.shape_gap[i] is not None else 0.005)
                     sdf_radius = max(gap, 0.005)
                     mesh.build_sdf(
-                        max_resolution=64,
+                        max_resolution=max_resolution,
                         narrow_band_range=(-sdf_radius, sdf_radius),
                         margin=sdf_radius,
                     )
@@ -420,8 +425,12 @@ def _build_newton_builder_from_mapping(
         if welded:
             logger.info("Welded duplicate vertices on %d mesh collider(s) for the SDF pipeline.", welded)
         collision_cfg = getattr(PhysicsManager._cfg, "collision_cfg", None)
-        if getattr(collision_cfg, "sdf_hydroelastic_config", None) is not None:
-            marked = _configure_hydroelastic_sdf_shapes(source_builders)
+        sdf_hydroelastic_config = getattr(collision_cfg, "sdf_hydroelastic_config", None)
+        if sdf_hydroelastic_config is not None:
+            marked = _configure_hydroelastic_sdf_shapes(
+                source_builders,
+                max_resolution=sdf_hydroelastic_config.sdf_max_resolution,
+            )
             if marked:
                 logger.info("Enabled hydroelastic SDF contacts on %d shape(s).", marked)
 

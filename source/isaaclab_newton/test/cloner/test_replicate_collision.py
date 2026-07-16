@@ -8,11 +8,17 @@ import numpy as np
 import pytest
 from isaaclab_newton.cloner import replicate as replicate_module
 from isaaclab_newton.cloner.replicate import _configure_hydroelastic_sdf_shapes
+from isaaclab_newton.physics import HydroelasticSDFCfg, NewtonCollisionPipelineCfg
 
 from pxr import Usd, UsdGeom, UsdPhysics
 
 
-def test_configure_hydroelastic_sdf_shapes_builds_mesh_sdf_and_sets_flag(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize(("configured_resolution", "expected_resolution"), [(None, 64), (128, 128)])
+def test_configure_hydroelastic_sdf_shapes_builds_mesh_sdf_and_sets_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_resolution: int | None,
+    expected_resolution: int,
+):
     builder = newton.ModelBuilder()
     builder.default_shape_cfg.gap = 0.01
     body = builder.add_body(label="body")
@@ -38,7 +44,10 @@ def test_configure_hydroelastic_sdf_shapes_builds_mesh_sdf_and_sets_flag(monkeyp
 
     monkeypatch.setattr(newton.Mesh, "build_sdf", build_sdf)
 
-    marked = _configure_hydroelastic_sdf_shapes({"body": builder})
+    if configured_resolution is None:
+        marked = _configure_hydroelastic_sdf_shapes({"body": builder})
+    else:
+        marked = _configure_hydroelastic_sdf_shapes({"body": builder}, max_resolution=configured_resolution)
 
     assert marked == 1
     assert int(builder.shape_flags[shape]) & int(newton.ShapeFlags.HYDROELASTIC)
@@ -46,11 +55,27 @@ def test_configure_hydroelastic_sdf_shapes_builds_mesh_sdf_and_sets_flag(monkeyp
     assert builder.shape_scale[shape] == (1.0, 1.0, 1.0)
     assert calls == [
         {
-            "max_resolution": 64,
+            "max_resolution": expected_resolution,
             "narrow_band_range": (-0.01, 0.01),
             "margin": 0.01,
         }
     ]
+
+
+def test_hydroelastic_sdf_resolution_is_not_forwarded_to_runtime_pipeline():
+    cfg = NewtonCollisionPipelineCfg(sdf_hydroelastic_config=HydroelasticSDFCfg(sdf_max_resolution=128))
+
+    pipeline_args = cfg.to_pipeline_args()
+
+    runtime_cfg = pipeline_args["sdf_hydroelastic_config"]
+    assert not hasattr(runtime_cfg, "sdf_max_resolution")
+    assert runtime_cfg.reduce_contacts is True
+
+
+@pytest.mark.parametrize("max_resolution", [0, 63])
+def test_configure_hydroelastic_sdf_shapes_rejects_invalid_resolution(max_resolution: int):
+    with pytest.raises(ValueError, match="positive and divisible by 8"):
+        _configure_hydroelastic_sdf_shapes({}, max_resolution=max_resolution)
 
 
 class _FakeMeshBuilder:

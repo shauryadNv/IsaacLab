@@ -24,6 +24,16 @@ class HydroelasticSDFCfg:
     .. _Newton hydroelastic contacts guide: https://newton-physics.github.io/newton/latest/concepts/collisions.html#hydroelastic-contacts
     """
 
+    sdf_max_resolution: int = 64
+    """Maximum grid dimension for generated mesh SDFs.
+
+    The value must be positive and divisible by 8. Higher resolutions preserve
+    smaller collision clearances at the cost of additional initialization time
+    and memory.
+
+    Defaults to ``64``.
+    """
+
     reduce_contacts: bool = True
     """Whether to reduce contacts to a smaller representative set per shape pair.
 
@@ -182,5 +192,6 @@ class NewtonCollisionPipelineCfg:
         cfg_dict = self.to_dict()
         hydro_cfg = cfg_dict.pop("sdf_hydroelastic_config", None)
         if hydro_cfg is not None:
+            hydro_cfg.pop("sdf_max_resolution")
             cfg_dict["sdf_hydroelastic_config"] = HydroelasticSDF.Config(**hydro_cfg)
         return cfg_dict
