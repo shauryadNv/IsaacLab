@@ -502,6 +502,9 @@ def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch
 
     events = []
 
+    class _HydroelasticSDF:
+        pass
+
     class _ContactReduction:
         pass
 
@@ -520,9 +523,11 @@ def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch
     def _load_module(module, device):
         events.append(("load", module, device))
 
-    pipeline = SimpleNamespace(
-        hydroelastic_sdf=SimpleNamespace(contact_reduction=_ContactReduction()),
-    )
+    _HydroelasticSDF.__module__ = "newton._src.geometry.sdf_hydroelastic"
+    _ContactReduction.__module__ = "newton._src.geometry.contact_reduction_hydroelastic"
+    hydroelastic_sdf = _HydroelasticSDF()
+    hydroelastic_sdf.contact_reduction = _ContactReduction()
+    pipeline = SimpleNamespace(hydroelastic_sdf=hydroelastic_sdf)
     monkeypatch.setattr(PhysicsManager, "_device", "cuda:3", raising=False)
     monkeypatch.setattr(NewtonManager, "_collision_pipeline", pipeline, raising=False)
     monkeypatch.setattr(wp, "ScopedDevice", _ScopedDevice)
@@ -532,6 +537,7 @@ def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch
 
     assert events == [
         ("enter", "cuda:3"),
+        ("load", _HydroelasticSDF.__module__, "cuda:3"),
         ("load", _ContactReduction.__module__, "cuda:3"),
         ("exit", "cuda:3"),
     ]
