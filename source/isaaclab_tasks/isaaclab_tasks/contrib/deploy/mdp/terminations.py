@@ -346,3 +346,135 @@ class reset_when_gear_orientation_exceeds_threshold(ManagerTermBase):
         )
 
         return self.reset_flags
+
+
+class reset_when_plug_dropped(ManagerTermBase):
+    """Check if a held plug has fallen out of the gripper."""
+
+    def __init__(self, cfg: TerminationTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+
+        self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
+        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
+
+        if "plug_asset_cfg" not in cfg.params:
+            raise ValueError("'plug_asset_cfg' is required in reset_when_plug_dropped configuration.")
+        self.plug_asset_cfg: SceneEntityCfg = cfg.params["plug_asset_cfg"]
+        self.plug_asset = env.scene[self.plug_asset_cfg.name]
+
+        for required in ("end_effector_body_name", "grasp_rot_offset", "grasp_offset"):
+            if required not in cfg.params:
+                raise ValueError(f"'{required}' is required in reset_when_plug_dropped configuration.")
+
+        self.end_effector_body_name: str = cfg.params["end_effector_body_name"]
+        self.grasp_offset_tensor = torch.tensor(cfg.params["grasp_offset"], device=env.device, dtype=torch.float32)
+        self.grasp_rot_offset_tensor = (
+            torch.tensor(cfg.params["grasp_rot_offset"], device=env.device, dtype=torch.float32)
+            .unsqueeze(0)
+            .repeat(env.num_envs, 1)
+        )
+        self.reset_flags = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+        eef_indices, _ = self.robot_asset.find_bodies([self.end_effector_body_name])
+        if len(eef_indices) == 0:
+            logger.warning(
+                f"{self.end_effector_body_name} not found in robot body names. Cannot check plug drop condition."
+            )
+            self.eef_idx = None
+        else:
+            self.eef_idx = eef_indices[0]
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        distance_threshold: float = 0.1,
+        robot_asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        plug_asset_cfg: SceneEntityCfg | None = None,
+        grasp_offset: list | None = None,
+        end_effector_body_name: str | None = None,
+        grasp_rot_offset: list | None = None,
+    ) -> torch.Tensor:
+        self.reset_flags.fill_(False)
+        if self.eef_idx is None:
+            return self.reset_flags
+
+        eef_pos_world = self.robot_asset.data.body_link_pos_w.torch[:, self.eef_idx]
+        plug_pos_world = self.plug_asset.data.root_link_pos_w.torch
+        plug_quat_world = self.plug_asset.data.root_link_quat_w.torch
+        plug_quat_world = math_utils.quat_mul(plug_quat_world, self.grasp_rot_offset_tensor)
+
+        grasp_offset_batch = self.grasp_offset_tensor.unsqueeze(0).expand(plug_pos_world.shape[0], -1)
+        plug_grasp_pos_world = plug_pos_world + math_utils.quat_apply(plug_quat_world, grasp_offset_batch)
+        distances = torch.linalg.norm(plug_grasp_pos_world - eef_pos_world, dim=-1)
+        self.reset_flags[:] = distances > distance_threshold
+        return self.reset_flags
+
+
+class reset_when_plug_orientation_exceeded(ManagerTermBase):
+    """Check if a held plug has rotated too much relative to the end effector."""
+
+    def __init__(self, cfg: TerminationTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+
+        self.robot_asset_cfg: SceneEntityCfg = cfg.params.get("robot_asset_cfg", SceneEntityCfg("robot"))
+        self.robot_asset: Articulation = env.scene[self.robot_asset_cfg.name]
+
+        if "plug_asset_cfg" not in cfg.params:
+            raise ValueError("'plug_asset_cfg' is required in reset_when_plug_orientation_exceeded configuration.")
+        self.plug_asset_cfg: SceneEntityCfg = cfg.params["plug_asset_cfg"]
+        self.plug_asset = env.scene[self.plug_asset_cfg.name]
+
+        for required in ("end_effector_body_name", "grasp_rot_offset"):
+            if required not in cfg.params:
+                raise ValueError(f"'{required}' is required in reset_when_plug_orientation_exceeded configuration.")
+
+        self.end_effector_body_name: str = cfg.params["end_effector_body_name"]
+        self.grasp_rot_offset_tensor = (
+            torch.tensor(cfg.params["grasp_rot_offset"], device=env.device, dtype=torch.float32)
+            .unsqueeze(0)
+            .repeat(env.num_envs, 1)
+        )
+        self.reset_flags = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+        eef_indices, _ = self.robot_asset.find_bodies([self.end_effector_body_name])
+        if len(eef_indices) == 0:
+            logger.warning(
+                f"{self.end_effector_body_name} not found in robot. Cannot check plug orientation condition."
+            )
+            self.eef_idx = None
+        else:
+            self.eef_idx = eef_indices[0]
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        roll_threshold_deg: float = 30.0,
+        pitch_threshold_deg: float = 30.0,
+        yaw_threshold_deg: float = 180.0,
+        robot_asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        plug_asset_cfg: SceneEntityCfg | None = None,
+        end_effector_body_name: str | None = None,
+        grasp_rot_offset: list | None = None,
+    ) -> torch.Tensor:
+        self.reset_flags.fill_(False)
+        if self.eef_idx is None:
+            return self.reset_flags
+
+        roll_threshold_rad = torch.deg2rad(torch.tensor(roll_threshold_deg, device=env.device))
+        pitch_threshold_rad = torch.deg2rad(torch.tensor(pitch_threshold_deg, device=env.device))
+        yaw_threshold_rad = torch.deg2rad(torch.tensor(yaw_threshold_deg, device=env.device))
+
+        eef_quat_world = self.robot_asset.data.body_link_quat_w.torch[:, self.eef_idx]
+        plug_quat_world = self.plug_asset.data.root_link_quat_w.torch
+        plug_quat_world = math_utils.quat_mul(plug_quat_world, self.grasp_rot_offset_tensor)
+
+        eef_quat_inv = math_utils.quat_conjugate(eef_quat_world)
+        relative_quat = math_utils.quat_mul(plug_quat_world, eef_quat_inv)
+        roll, pitch, yaw = math_utils.euler_xyz_from_quat(relative_quat)
+
+        self.reset_flags[:] = (
+            (torch.abs(roll) > roll_threshold_rad)
+            | (torch.abs(pitch) > pitch_threshold_rad)
+            | (torch.abs(yaw) > yaw_threshold_rad)
+        )
+        return self.reset_flags

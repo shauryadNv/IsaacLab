@@ -607,6 +607,100 @@ class keypoint_ee_grasp_error_exp(keypoint_ee_grasp_error):
         return scaled_reward
 
 
+class keypoint_two_body_error(ManagerTermBase):
+    """Keypoint distance between two rigid objects with body-frame offsets."""
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+
+        self.asset_1 = env.scene[cfg.params["asset_cfg_1"].name]
+        self.asset_2 = env.scene[cfg.params["asset_cfg_2"].name]
+
+        self.offset_1 = torch.tensor(cfg.params.get("offset_1", [0.0, 0.0, 0.0]), device=env.device)
+        self.offset_2 = torch.tensor(cfg.params.get("offset_2", [0.0, 0.0, 0.0]), device=env.device)
+        self.rot_offset_2 = (
+            torch.tensor(cfg.params.get("rot_offset_2", [0.0, 0.0, 0.0, 1.0]), device=env.device)
+            .unsqueeze(0)
+            .repeat(env.num_envs, 1)
+        )
+        self.identity_quat = torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=env.device).repeat(env.num_envs, 1)
+        self.keypoint_computer = _compute_keypoint_distance(cfg, env)
+
+    def _get_kp_frames(self, env: ManagerBasedRLEnv) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        pos_1 = self.asset_1.data.root_link_pos_w.torch
+        quat_1 = self.asset_1.data.root_link_quat_w.torch
+        pos_2 = self.asset_2.data.root_link_pos_w.torch
+        quat_2 = self.asset_2.data.root_link_quat_w.torch
+
+        offset_1_batch = self.offset_1.unsqueeze(0).expand(env.num_envs, -1)
+        kp_pos_1, kp_quat_1 = combine_frame_transforms(pos_1, quat_1, offset_1_batch, self.identity_quat)
+
+        offset_2_batch = self.offset_2.unsqueeze(0).expand(env.num_envs, -1)
+        kp_pos_2, kp_quat_2 = combine_frame_transforms(pos_2, quat_2, offset_2_batch, self.rot_offset_2)
+
+        return kp_pos_1, kp_quat_1, kp_pos_2, kp_quat_2
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg_1: SceneEntityCfg = SceneEntityCfg("factory_gear_base"),
+        asset_cfg_2: SceneEntityCfg = SceneEntityCfg("factory_gear_small"),
+        keypoint_scale: float = 0.15,
+        offset_1: list | None = None,
+        offset_2: list | None = None,
+        rot_offset_2: list | None = None,
+    ) -> torch.Tensor:
+        kp_pos_1, kp_quat_1, kp_pos_2, kp_quat_2 = self._get_kp_frames(env)
+        keypoint_dist_sep = self.keypoint_computer.compute(
+            current_pos=kp_pos_1,
+            current_quat=kp_quat_1,
+            target_pos=kp_pos_2,
+            target_quat=kp_quat_2,
+            keypoint_scale=keypoint_scale,
+        )
+        return keypoint_dist_sep.mean(-1)
+
+
+class keypoint_two_body_error_exp(keypoint_two_body_error):
+    """Exponential keypoint reward between two rigid objects with body-frame offsets."""
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg_1: SceneEntityCfg = SceneEntityCfg("factory_gear_base"),
+        asset_cfg_2: SceneEntityCfg = SceneEntityCfg("factory_gear_small"),
+        kp_exp_coeffs: list[tuple[float, float]] = [(1.0, 0.1)],
+        kp_use_sum_of_exps: bool = True,
+        keypoint_scale: float = 0.15,
+        offset_1: list | None = None,
+        offset_2: list | None = None,
+        rot_offset_2: list | None = None,
+    ) -> torch.Tensor:
+        kp_pos_1, kp_quat_1, kp_pos_2, kp_quat_2 = self._get_kp_frames(env)
+        keypoint_dist_sep = self.keypoint_computer.compute(
+            current_pos=kp_pos_1,
+            current_quat=kp_quat_1,
+            target_pos=kp_pos_2,
+            target_quat=kp_quat_2,
+            keypoint_scale=keypoint_scale,
+        )
+
+        keypoint_reward_exp = torch.zeros_like(keypoint_dist_sep[:, 0])
+        if kp_use_sum_of_exps:
+            for coeff in kp_exp_coeffs:
+                a, b = coeff
+                keypoint_reward_exp += (
+                    1.0 / (torch.exp(a * keypoint_dist_sep) + b + torch.exp(-a * keypoint_dist_sep))
+                ).mean(-1)
+        else:
+            keypoint_dist = keypoint_dist_sep.mean(-1)
+            for coeff in kp_exp_coeffs:
+                a, b = coeff
+                keypoint_reward_exp += 1.0 / (torch.exp(a * keypoint_dist) + b + torch.exp(-a * keypoint_dist))
+
+        return keypoint_reward_exp
+
+
 ##
 # Helper functions and classes
 ##
