@@ -1,0 +1,112 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+workflow:
+  name: "{{workflow_name}}"
+  tasks:
+  - name: "{{workflow_name}}"
+    image: nvcr.io/nvidian/isaac-lab:latest-release-3.0.0-beta2-506-28a37cec
+    command: ["bash"]
+    args: ["/tmp/entry.sh"]
+    environment:
+      ACCEPT_EULA: Y
+      NO_NUCLEUS: Y
+      OMNI_SERVER: isaac-dev.ov.nvidia.com
+    credentials:
+      gitlab_cred: /tmp/gitlab
+      github_cred: /tmp/github
+      omni-auth:
+        OMNI_PASS: omni_pass
+        OMNI_USER: omni_user
+
+    files:
+    - path: /tmp/setup_gitlab_auth.sh
+      contents: |-
+        GITLAB_PAT=$(cat /tmp/gitlab/gitlab_cred)
+        git config --global credential.helper store
+        echo "https://token:${GITLAB_PAT}@gitlab-master.nvidia.com" > ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - path: /tmp/setup_github_auth.sh
+      contents: |-
+        GITHUB_PAT=$(cat /tmp/github/github_cred)
+        echo "https://token:${GITHUB_PAT}@github.com" >> ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - path: /tmp/entry.sh
+      contents: |
+        set -e
+
+        bash /tmp/setup_github_auth.sh || true
+        bash /tmp/setup_gitlab_auth.sh || true
+
+        rm -rf /tmp/IsaacLab
+        git clone https://github.com/shauryadNv/IsaacLab.git /tmp/IsaacLab
+        cd /tmp/IsaacLab
+        git checkout {{commit_hash}}
+        echo "Commit: $(git rev-parse HEAD)"
+
+        if ! git lfs version >/dev/null 2>&1; then
+          LFS_VER=3.5.1
+          curl -fsSL "https://github.com/git-lfs/git-lfs/releases/download/v${LFS_VER}/git-lfs-linux-amd64-v${LFS_VER}.tar.gz" -o /tmp/git-lfs.tar.gz
+          mkdir -p /tmp/gitlfs
+          tar -xzf /tmp/git-lfs.tar.gz -C /tmp/gitlfs
+          export PATH="$(dirname "$(find /tmp/gitlfs -type f -name git-lfs | head -1)"):$PATH"
+        fi
+        git lfs install --local 2>/dev/null || true
+        git lfs pull
+
+        ASSET_DIR=source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets
+        test $(stat -c%s "${ASSET_DIR}/display_port_plug_fixed_sdf.usd") -gt 1000
+        test $(stat -c%s "${ASSET_DIR}/display_port_socket_fixed_sdf_split_visuals.usd") -gt 1000
+
+        PYSH=/workspace/isaaclab/_isaac_sim/python.sh
+        [ -x "$PYSH" ] || PYSH=/isaac-sim/python.sh
+        echo "Using python: $PYSH"
+
+        for d in /tmp/IsaacLab/source/*/; do PYTHONPATH="$d:$PYTHONPATH"; done
+        export PYTHONPATH
+        $PYSH -c "import isaaclab_tasks, isaaclab_newton; print('fork src OK:', isaaclab_tasks.__file__)"
+
+        mkdir -p /tmp/IsaacLab/logs/rsl_rl/{{exp_name}}
+        export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+        $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
+          scripts/reinforcement_learning/rsl_rl/train.py \
+          --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
+          --num_envs {{num_envs}} --headless --distributed \
+          presets=newton_hydroelastic \
+          env.sim.dt={{sim_dt}} \
+          env.decimation={{decimation}} \
+          env.sim.render_interval={{decimation}} \
+          env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
+          agent.max_iterations={{max_iters}} \
+          agent.experiment_name={{exp_name}}
+
+    checkpoint:
+    - path: /tmp/IsaacLab/logs/rsl_rl/{{exp_name}}/
+      url: swift://pdx.s8k.io/AUTH_team-isaac/datasets/shauryad/{{exp_name}}/{{commit_hash}}/
+      frequency: 30m
+
+  resources:
+    default:
+      gpu: "{{num_gpus}}"
+      cpu: "{{num_cpus}}"
+      memory: "{{mem}}"
+      storage: "{{storage}}"
+
+default-values:
+  workflow_name: isaaclab_train_dp_newton
+  commit_hash: curiep/newton_dp_cable_insertion
+  exp_name: displayport_rizon4s_newton_hydro
+  num_gpus: 1
+  num_cpus: 30
+  num_envs: 1024
+  max_iters: 1500
+  sim_dt: 0.001
+  decimation: 33
+  sdf_resolution: 256
+  mem: 100Gi
+  storage: 100Gi
