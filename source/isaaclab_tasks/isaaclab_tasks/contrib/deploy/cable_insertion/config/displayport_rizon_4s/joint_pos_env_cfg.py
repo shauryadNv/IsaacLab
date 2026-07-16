@@ -25,10 +25,14 @@ from isaaclab.utils.configclass import configclass
 import isaaclab_tasks.contrib.deploy.mdp as mdp
 import isaaclab_tasks.contrib.deploy.mdp.terminations as cable_terminations
 from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg import (
+    PLUG_GOAL_ROT,
+    PLUG_INSERTION_OFFSET,
+    SOCKET_INSERTION_OFFSET,
     DisplayportInsertionEnvCfg,
     compute_plug_pose,
     compute_socket_root,
 )
+from isaaclab_tasks.contrib.deploy.cable_insertion.events import ResetPlugAtGoalCurriculum
 
 # ---------------------------------------------------------------------------
 # Flexiv workspace layout (DisplayPort insertion station)
@@ -44,6 +48,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
 _GEOMETRY_POS = (0.475, 0.125, 0.06)
 _SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)  # opening faces +Z (top-down insertion)
 _PLUG_CLEARANCE_Z = 0.068
+_INSERTION_LENGTH = 0.011
 
 _SOCKET_ROOT = compute_socket_root(_GEOMETRY_POS, _SOCKET_ROT)
 _PLUG_ROOT, _PLUG_ROT = compute_plug_pose(
@@ -165,23 +170,29 @@ class EventCfg:
         },
     )
 
-    randomize_plug_pose = EventTerm(
-        func=mdp.reset_root_state_uniform,
+    reset_plug_curriculum = EventTerm(
+        func=ResetPlugAtGoalCurriculum,
         mode="reset",
         params={
-            "pose_range": {
+            "plug_cfg": SceneEntityCfg("dp_plug"),
+            "socket_cfg": SceneEntityCfg("dp_socket"),
+            "at_goal_prob": 0.8,
+            "at_goal_prob_final": 0.0,
+            "anneal_start_iter": 0.0,
+            "anneal_end_iter": 500.0,
+            "num_steps_per_env": 512,
+            "insertion_axis": [1.0, 0.0, 0.0],
+            "insertion_length": _INSERTION_LENGTH,
+            "at_goal_depth_range": [0.0, 0.015],
+            "approach_depth_range": [0.02, 0.06],
+            "socket_insertion_offset": SOCKET_INSERTION_OFFSET,
+            "plug_insertion_offset": PLUG_INSERTION_OFFSET,
+            "goal_rot": list(PLUG_GOAL_ROT),
+            "normal_pose_range": {
                 "x": [-0.02, 0.02],
                 "y": [-0.02, 0.02],
-                "z": [-0.01, 0.01],
-                # "x": [-0.0, 0.0],
-                # "y": [-0.0, 0.0],
-                # "z": [-0.0, 0.0],
-                "roll": [0.0, 0.0],
-                "pitch": [0.0, 0.0],
-                "yaw": [0.0, 0.0],
+                "z": [0.0, 0.0],
             },
-            "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("dp_plug"),
         },
     )
 

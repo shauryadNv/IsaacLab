@@ -374,14 +374,14 @@ class RewardsCfg:
 
     plug_socket_keypoint_tracking_exp = RewTerm(
         func=mdp.keypoint_two_body_error_exp,
-        weight=3.0,
+        weight=1.5,
         params={
             "asset_cfg_1": SceneEntityCfg("dp_socket"),
             "asset_cfg_2": SceneEntityCfg("dp_plug"),
             "offset_1": SOCKET_INSERTION_OFFSET,
             "offset_2": PLUG_INSERTION_OFFSET,
             "rot_offset_2": PLUG_GOAL_ROT_INV,
-            "kp_exp_coeffs": [(50, 0.0001), (300, 0.0001), (600, 0.0001)],
+            "kp_exp_coeffs": [(50, 0.0001), (300, 0.0001), (600, 0.0001), (2000, 0.0001)],
             "kp_use_sum_of_exps": False,
             "keypoint_scale": 0.15,
         },

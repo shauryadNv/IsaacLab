@@ -37,7 +37,7 @@ workflow:
 
     - path: /tmp/entry.sh
       contents: |
-        set -e
+        set -euo pipefail
 
         bash /tmp/setup_github_auth.sh || true
         bash /tmp/setup_gitlab_auth.sh || true
@@ -73,15 +73,26 @@ workflow:
         mkdir -p /tmp/IsaacLab/logs/rsl_rl/{{exp_name}}
         export PYTORCH_ALLOC_CONF=expandable_segments:True
 
+        TOTAL_ENVS={{num_envs}}
+        NUM_GPUS={{num_gpus}}
+        if (( TOTAL_ENVS % NUM_GPUS != 0 )); then
+          echo "num_envs (${TOTAL_ENVS}) must be divisible by num_gpus (${NUM_GPUS})" >&2
+          exit 2
+        fi
+        ENVS_PER_RANK=$((TOTAL_ENVS / NUM_GPUS))
+        export OMP_NUM_THREADS=$(({{num_cpus}} / NUM_GPUS))
+        echo "Training ${TOTAL_ENVS} total environments: ${ENVS_PER_RANK} per rank on ${NUM_GPUS} GPUs"
+
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
           scripts/reinforcement_learning/rsl_rl/train.py \
           --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
-          --num_envs {{num_envs}} --headless --distributed \
+          --num_envs "${ENVS_PER_RANK}" --headless --distributed \
           presets=newton_hydroelastic \
           env.sim.dt={{sim_dt}} \
           env.decimation={{decimation}} \
           env.sim.render_interval={{decimation}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
+          env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
           agent.max_iterations={{max_iters}} \
           agent.experiment_name={{exp_name}}
 
@@ -101,12 +112,13 @@ default-values:
   workflow_name: isaaclab_train_dp_newton
   commit_hash: curiep/newton_dp_cable_insertion
   exp_name: displayport_rizon4s_newton_hydro
-  num_gpus: 1
-  num_cpus: 30
+  num_gpus: 4
+  num_cpus: 60
   num_envs: 1024
-  max_iters: 1500
+  max_iters: 1000
   sim_dt: 0.001
   decimation: 33
   sdf_resolution: 256
+  hydro_buffer_fraction: 0.125
   mem: 100Gi
   storage: 100Gi

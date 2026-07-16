@@ -11,7 +11,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticRecurr
 @configclass
 class Rizon4sGravDisplayportInsertionRNNPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 512
-    max_iterations = 1500
+    max_iterations = 1000
     save_interval = 50
     experiment_name = "displayport_insertion_rizon4s"
     clip_actions = 1.0
