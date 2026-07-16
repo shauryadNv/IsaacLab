@@ -523,10 +523,16 @@ def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch
     def _load_module(module, device):
         events.append(("load", module, device))
 
+    sdf_generated_module = object()
+    reduction_generated_module = object()
     _HydroelasticSDF.__module__ = "newton._src.geometry.sdf_hydroelastic"
     _ContactReduction.__module__ = "newton._src.geometry.contact_reduction_hydroelastic"
     hydroelastic_sdf = _HydroelasticSDF()
-    hydroelastic_sdf.contact_reduction = _ContactReduction()
+    contact_reduction = _ContactReduction()
+    hydroelastic_sdf.contact_reduction = contact_reduction
+    hydroelastic_sdf.generate_contacts_kernel = SimpleNamespace(module=sdf_generated_module)
+    contact_reduction._reduce_kernel = SimpleNamespace(module=reduction_generated_module)
+    contact_reduction._export_kernel = SimpleNamespace(module=reduction_generated_module)
     pipeline = SimpleNamespace(hydroelastic_sdf=hydroelastic_sdf)
     monkeypatch.setattr(PhysicsManager, "_device", "cuda:3", raising=False)
     monkeypatch.setattr(NewtonManager, "_collision_pipeline", pipeline, raising=False)
@@ -539,6 +545,8 @@ def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch
         ("enter", "cuda:3"),
         ("load", _HydroelasticSDF.__module__, "cuda:3"),
         ("load", _ContactReduction.__module__, "cuda:3"),
+        ("load", sdf_generated_module, "cuda:3"),
+        ("load", reduction_generated_module, "cuda:3"),
         ("exit", "cuda:3"),
     ]
 

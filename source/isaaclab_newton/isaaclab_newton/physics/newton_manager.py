@@ -1333,13 +1333,28 @@ class NewtonManager(PhysicsManager):
             return
 
         components = (hydroelastic_sdf, contact_reduction)
-        module_names = tuple(
-            dict.fromkeys(type(component).__module__ for component in components if component is not None)
-        )
+        module_references = [type(component).__module__ for component in components if component is not None]
+        for component in components:
+            if component is None:
+                continue
+            for value in getattr(component, "__dict__", {}).values():
+                kernel_module = getattr(value, "module", None)
+                if kernel_module is not None:
+                    module_references.append(kernel_module)
+
+        unique_modules = []
+        seen_modules = set()
+        for module_reference in module_references:
+            key = ("name", module_reference) if isinstance(module_reference, str) else ("object", id(module_reference))
+            if key in seen_modules:
+                continue
+            seen_modules.add(key)
+            unique_modules.append(module_reference)
+
         with wp.ScopedDevice(device):
-            for module_name in module_names:
-                wp.load_module(module_name, device=device)
-        logger.info("Preloaded %d Newton hydroelastic collision module(s) on %s", len(module_names), device)
+            for module_reference in unique_modules:
+                wp.load_module(module_reference, device=device)
+        logger.info("Preloaded %d Newton hydroelastic collision module(s) on %s", len(unique_modules), device)
 
     # ----- Solver construction (subclass contract) ------------------------
 
