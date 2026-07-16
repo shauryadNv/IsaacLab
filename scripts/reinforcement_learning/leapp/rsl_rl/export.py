@@ -18,7 +18,10 @@ from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
-from isaaclab_tasks.utils import setup_preset_cli
+try:
+    from isaaclab_tasks.utils import setup_preset_cli
+except ImportError:
+    setup_preset_cli = None
 
 _RSL_RL_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "rsl_rl"
 if str(_RSL_RL_SCRIPTS_DIR) not in sys.path:
@@ -110,10 +113,13 @@ def create_arg_parser() -> argparse.ArgumentParser:
 def parse_export_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
     """Parse export arguments and return remaining Hydra overrides."""
     parser = create_arg_parser()
-    # setup_preset_cli attaches the preset-selection help group then parses;
-    # remainder still carries typed selectors (physics=/renderer=/presets=)
-    # verbatim for run_export_with_hydra to fold before invoking Hydra.
-    args_cli, hydra_args = setup_preset_cli(parser, argv)
+    if setup_preset_cli is not None:
+        # setup_preset_cli attaches the preset-selection help group then parses;
+        # remainder still carries typed selectors (physics=/renderer=/presets=)
+        # verbatim for run_export_with_hydra to fold before invoking Hydra.
+        args_cli, hydra_args = setup_preset_cli(parser, argv)
+    else:
+        args_cli, hydra_args = parser.parse_known_args(argv)
     args_cli.headless = True
     return args_cli, hydra_args
 
@@ -255,6 +261,19 @@ def actor_hidden_from_registered(registered_state, original_hidden):
     return registered_state
 
 
+def resolve_env_action_class_types(env_cfg) -> None:
+    """Resolve Hydra-overridden action ``class_type`` strings before constructing the env."""
+    from isaaclab.utils.string import string_to_callable
+
+    actions_cfg = getattr(env_cfg, "actions", None)
+    if actions_cfg is None:
+        return
+    for action_cfg in vars(actions_cfg).values():
+        class_type = getattr(action_cfg, "class_type", None)
+        if isinstance(class_type, str) and "{DIR}" not in class_type:
+            action_cfg.class_type = string_to_callable(class_type)
+
+
 def export_rsl_rl_agent(
     args_cli: argparse.Namespace,
     env_cfg,
@@ -301,6 +320,7 @@ def export_rsl_rl_agent(
     leapp_started = False
 
     try:
+        resolve_env_action_class_types(env_cfg)
         env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None)
         policy_node_name = ensure_env_spec_id(env)
 
@@ -389,7 +409,10 @@ def export_rsl_rl_agent(
 
 def run_export_with_hydra(args_cli: argparse.Namespace, hydra_args: list[str]) -> bool:
     """Resolve Hydra task configuration and export one RSL-RL policy."""
-    from isaaclab.app import launch_simulation
+    try:
+        from isaaclab.app import launch_simulation
+    except ImportError:
+        from isaaclab_tasks.utils import launch_simulation
 
     from isaaclab_tasks.utils.hydra import hydra_task_config
 
