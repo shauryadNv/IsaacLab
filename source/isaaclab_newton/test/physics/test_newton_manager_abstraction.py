@@ -543,10 +543,10 @@ def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch
 
     assert events == [
         ("enter", "cuda:3"),
-        ("load", _HydroelasticSDF.__module__, "cuda:3"),
-        ("load", _ContactReduction.__module__, "cuda:3"),
         ("load", sdf_generated_module, "cuda:3"),
         ("load", reduction_generated_module, "cuda:3"),
+        ("load", _HydroelasticSDF.__module__, "cuda:3"),
+        ("load", _ContactReduction.__module__, "cuda:3"),
         ("exit", "cuda:3"),
     ]
 

@@ -1333,7 +1333,7 @@ class NewtonManager(PhysicsManager):
             return
 
         components = (hydroelastic_sdf, contact_reduction)
-        module_references = [type(component).__module__ for component in components if component is not None]
+        module_references = []
         for component in components:
             if component is None:
                 continue
@@ -1341,6 +1341,9 @@ class NewtonManager(PhysicsManager):
                 kernel_module = getattr(value, "module", None)
                 if kernel_module is not None:
                     module_references.append(kernel_module)
+        # Load the concrete modules first. Closure-generated kernels share their base Python module name,
+        # but their module object carries the complete, instance-specific kernel set.
+        module_references.extend(type(component).__module__ for component in components if component is not None)
 
         unique_modules = []
         seen_modules = set()
