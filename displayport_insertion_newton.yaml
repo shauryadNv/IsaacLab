@@ -66,7 +66,7 @@ workflow:
         [ -x "$PYSH" ] || PYSH=/isaac-sim/python.sh
         echo "Using python: $PYSH"
 
-        for d in /tmp/IsaacLab/source/*/; do PYTHONPATH="$d:$PYTHONPATH"; done
+        for d in /tmp/IsaacLab/source/*/; do PYTHONPATH="$d:${PYTHONPATH:-}"; done
         export PYTHONPATH
         $PYSH -c "import isaaclab_tasks, isaaclab_newton; print('fork src OK:', isaaclab_tasks.__file__)"
 
