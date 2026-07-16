@@ -35,6 +35,36 @@ workflow:
         echo "https://token:${GITHUB_PAT}@github.com" >> ~/.git-credentials
         git config --global credential.helper 'store --file ~/.git-credentials'
 
+    - path: /tmp/run_distributed_rank.py
+      contents: |-
+        import os
+        import runpy
+        import sys
+        import tempfile
+
+        local_rank = os.environ.get("LOCAL_RANK", "0")
+        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if visible_devices:
+            devices = [device.strip() for device in visible_devices.split(",")]
+            physical_device = devices[int(local_rank)]
+        else:
+            physical_device = local_rank
+        os.environ["CUDA_VISIBLE_DEVICES"] = physical_device
+        os.environ["LOCAL_RANK"] = "0"
+        os.environ.setdefault(
+            "WARP_CACHE_PATH",
+            os.path.join(tempfile.gettempdir(), f"warp-cache-rank-{local_rank}"),
+        )
+        script = sys.argv.pop(1)
+        sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+        sys.argv[0] = script
+        print(
+            f"Rank {local_rank} physical GPU {physical_device}, logical cuda:0, "
+            f"Warp cache: {os.environ['WARP_CACHE_PATH']}",
+            flush=True,
+        )
+        runpy.run_path(script, run_name="__main__")
+
     - path: /tmp/entry.sh
       contents: |
         set -euo pipefail
@@ -84,6 +114,7 @@ workflow:
         echo "Training ${TOTAL_ENVS} total environments: ${ENVS_PER_RANK} per rank on ${NUM_GPUS} GPUs"
 
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
+          /tmp/run_distributed_rank.py \
           scripts/reinforcement_learning/rsl_rl/train.py \
           --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
