@@ -426,6 +426,43 @@ def test_mpm_unsupported_cuda_graph_capture_uses_eager_execution(monkeypatch):
     assert NewtonManager._graph_capture_pending is False
 
 
+def test_cuda_graph_capture_uses_configured_device(monkeypatch):
+    """Standard CUDA graph capture should run on the physics manager device."""
+    from isaaclab.physics import PhysicsManager
+
+    capture_devices = []
+    expected_graph = object()
+
+    class _ScopedCapture:
+        def __init__(self, device=None, **kwargs):
+            capture_devices.append(device)
+            self.graph = expected_graph
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    monkeypatch.setattr(
+        PhysicsManager,
+        "_cfg",
+        NewtonCfg(solver_cfg=MJWarpSolverCfg(), use_cuda_graph=True),
+        raising=False,
+    )
+    monkeypatch.setattr(PhysicsManager, "_device", "cuda:3", raising=False)
+    monkeypatch.setattr(NewtonManager, "_usdrt_stage", None, raising=False)
+    monkeypatch.setattr(NewtonManager, "_solver", SimpleNamespace(), raising=False)
+    monkeypatch.setattr(NewtonManager, "_is_all_graphable", classmethod(lambda cls: True))
+    monkeypatch.setattr(NewtonManager, "_simulate_full", classmethod(lambda cls: None))
+    monkeypatch.setattr(wp, "ScopedCapture", _ScopedCapture)
+
+    NewtonManager._capture_or_defer_graph()
+
+    assert capture_devices == ["cuda:3"]
+    assert NewtonManager._graph is expected_graph
+
+
 # ---------------------------------------------------------------------------
 # Manager class hierarchy and factory contracts
 # ---------------------------------------------------------------------------
