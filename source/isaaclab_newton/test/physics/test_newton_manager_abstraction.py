@@ -496,6 +496,47 @@ def test_cuda_graph_launch_uses_configured_device_context(monkeypatch):
     ]
 
 
+def test_hydroelastic_collision_module_preloads_on_configured_device(monkeypatch):
+    """Hydroelastic reduction kernels should load before the first distributed collision step."""
+    from isaaclab.physics import PhysicsManager
+
+    events = []
+
+    class _ContactReduction:
+        pass
+
+    class _ScopedDevice:
+        def __init__(self, device):
+            self.device = device
+
+        def __enter__(self):
+            events.append(("enter", self.device))
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            events.append(("exit", self.device))
+            return False
+
+    def _load_module(module, device):
+        events.append(("load", module, device))
+
+    pipeline = SimpleNamespace(
+        hydroelastic_sdf=SimpleNamespace(contact_reduction=_ContactReduction()),
+    )
+    monkeypatch.setattr(PhysicsManager, "_device", "cuda:3", raising=False)
+    monkeypatch.setattr(NewtonManager, "_collision_pipeline", pipeline, raising=False)
+    monkeypatch.setattr(wp, "ScopedDevice", _ScopedDevice)
+    monkeypatch.setattr(wp, "load_module", _load_module)
+
+    NewtonManager._preload_collision_modules()
+
+    assert events == [
+        ("enter", "cuda:3"),
+        ("load", _ContactReduction.__module__, "cuda:3"),
+        ("exit", "cuda:3"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Manager class hierarchy and factory contracts
 # ---------------------------------------------------------------------------

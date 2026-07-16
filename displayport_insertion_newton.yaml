@@ -88,11 +88,13 @@ workflow:
           --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
           presets=newton_hydroelastic \
+          env.sim.physics.use_cuda_graph={{use_cuda_graph}} \
           env.sim.dt={{sim_dt}} \
           env.decimation={{decimation}} \
           env.sim.render_interval={{decimation}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
+          agent.num_steps_per_env={{num_steps_per_env}} \
           agent.max_iterations={{max_iters}} \
           agent.experiment_name={{exp_name}}
 
@@ -120,5 +122,7 @@ default-values:
   decimation: 33
   sdf_resolution: 256
   hydro_buffer_fraction: 0.125
+  use_cuda_graph: false
+  num_steps_per_env: 512
   mem: 100Gi
   storage: 100Gi

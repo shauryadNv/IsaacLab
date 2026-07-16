@@ -1312,8 +1312,30 @@ class NewtonManager(PhysicsManager):
                 )
             else:
                 NewtonManager._collision_pipeline = CollisionPipeline(cls._model, broad_phase="explicit")
+            cls._preload_collision_modules()
         if cls._contacts is None:
             NewtonManager._contacts = cls._collision_pipeline.contacts()
+
+    @classmethod
+    def _preload_collision_modules(cls) -> None:
+        """Load lazily generated collision kernels on the physics device.
+
+        Warp otherwise loads the hydroelastic reducer during the first collision pass. In a
+        distributed launch, concurrent rank-local lazy loads can leave CUDA contexts in an
+        invalid state. The reducer is created with the collision pipeline, so its registered
+        Warp module can be loaded deterministically before simulation starts.
+        """
+        pipeline = NewtonManager._collision_pipeline
+        hydroelastic_sdf = getattr(pipeline, "hydroelastic_sdf", None)
+        contact_reduction = getattr(hydroelastic_sdf, "contact_reduction", None)
+        device = PhysicsManager._device
+        if contact_reduction is None or device is None:
+            return
+
+        module_name = type(contact_reduction).__module__
+        with wp.ScopedDevice(device):
+            wp.load_module(module_name, device=device)
+        logger.info("Preloaded Newton hydroelastic contact reduction on %s", device)
 
     # ----- Solver construction (subclass contract) ------------------------
 
