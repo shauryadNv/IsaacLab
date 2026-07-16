@@ -670,7 +670,7 @@ class NewtonManager(PhysicsManager):
         if cls._is_all_graphable():
             # --- All actuators are graph-safe: actuators + solver in one graph ---
             if use_graph:
-                wp.capture_launch(cls._graph)
+                cls._launch_cuda_graph(device)
             else:
                 with wp.ScopedDevice(device):
                     cls._simulate_full()
@@ -683,7 +683,7 @@ class NewtonManager(PhysicsManager):
                 cb()
 
             if use_graph:
-                wp.capture_launch(cls._graph)
+                cls._launch_cuda_graph(device)
             else:
                 with wp.ScopedDevice(device):
                     cls._simulate_physics_only()
@@ -1447,6 +1447,12 @@ class NewtonManager(PhysicsManager):
             logger.warning("cubric bindings init failed; falling back to update_world_xforms()")
 
     @classmethod
+    def _launch_cuda_graph(cls, device: str) -> None:
+        """Launch the captured graph with its CUDA device as the current context."""
+        with wp.ScopedDevice(device):
+            wp.capture_launch(cls._graph)
+
+    @classmethod
     def _capture_or_defer_graph(cls) -> None:
         """Capture (or schedule deferred capture of) the CUDA graph.
 
@@ -1489,7 +1495,7 @@ class NewtonManager(PhysicsManager):
                     # first step() inside graph capture. Replay once to pin those
                     # memory-pool addresses before any eager solver.reset() call.
                     if isinstance(cls._solver, SolverKamino):
-                        wp.capture_launch(cls._graph)
+                        cls._launch_cuda_graph(device)
                 else:
                     # RTX is active during initialization — cudaImportExternalMemory and other
                     # non-capturable RTX ops run on background CUDA streams right now.

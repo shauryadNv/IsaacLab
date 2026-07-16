@@ -463,6 +463,39 @@ def test_cuda_graph_capture_uses_configured_device(monkeypatch):
     assert NewtonManager._graph is expected_graph
 
 
+def test_cuda_graph_launch_uses_configured_device_context(monkeypatch):
+    """CUDA graph replay should install the physics manager device context."""
+    events = []
+    expected_graph = object()
+
+    class _ScopedDevice:
+        def __init__(self, device):
+            self.device = device
+
+        def __enter__(self):
+            events.append(("enter", self.device))
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            events.append(("exit", self.device))
+            return False
+
+    def _capture_launch(graph):
+        events.append(("launch", graph))
+
+    monkeypatch.setattr(NewtonManager, "_graph", expected_graph, raising=False)
+    monkeypatch.setattr(wp, "ScopedDevice", _ScopedDevice)
+    monkeypatch.setattr(wp, "capture_launch", _capture_launch)
+
+    NewtonManager._launch_cuda_graph("cuda:2")
+
+    assert events == [
+        ("enter", "cuda:2"),
+        ("launch", expected_graph),
+        ("exit", "cuda:2"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Manager class hierarchy and factory contracts
 # ---------------------------------------------------------------------------

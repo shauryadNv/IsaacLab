@@ -82,7 +82,7 @@ class NewtonKaminoManager(NewtonManager):
                 # joint_q_prev, and joint_lambdas via wp.clone/wp.zeros during the
                 # first step() inside graph capture. Replay once to pin those
                 # memory-pool addresses before any eager solver.reset() call.
-                wp.capture_launch(cls._graph)
+                cls._launch_cuda_graph(device)
                 logger.info("Newton CUDA graph captured (deferred relaxed mode, RTX-compatible)")
             else:
                 logger.warning("Newton deferred CUDA graph capture failed; using eager execution")
@@ -100,7 +100,7 @@ class NewtonKaminoManager(NewtonManager):
 
         # Step simulation (graphed or not; _graph is None when capture is disabled or failed)
         if cfg is not None and cfg.use_cuda_graph and cls._graph is not None and "cuda" in device:  # type: ignore[union-attr]
-            wp.capture_launch(cls._graph)
+            cls._launch_cuda_graph(device)
         else:
             with wp.ScopedDevice(device):
                 cls._simulate_physics_only()
@@ -147,7 +147,7 @@ class NewtonKaminoManager(NewtonManager):
                 # joint_q_prev, and joint_lambdas via wp.clone/wp.zeros during the
                 # first step() inside graph capture. Replay once to pin those
                 # memory-pool addresses before any eager solver.reset() call.
-                wp.capture_launch(cls._graph)
+                cls._launch_cuda_graph(device)
             else:
                 # RTX is active during initialization — cudaImportExternalMemory and other
                 # non-capturable RTX ops run on background CUDA streams right now.
