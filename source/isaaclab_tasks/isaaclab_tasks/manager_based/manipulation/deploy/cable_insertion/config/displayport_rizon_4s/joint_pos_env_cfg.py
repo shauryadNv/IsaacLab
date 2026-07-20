@@ -26,12 +26,18 @@ from isaaclab.utils import configclass
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp as mdp
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp.terminations as cable_terminations
 from isaaclab_tasks.manager_based.manipulation.deploy.cable_insertion.displayport_insertion_env_cfg import (
+    DISPLAY_ASSETS_DIR,
     PLUG_GOAL_ROT,
     PLUG_INSERTION_OFFSET,
     SOCKET_INSERTION_OFFSET,
     DisplayportInsertionEnvCfg,
     compute_plug_pose,
     compute_socket_root,
+)
+
+_RIZON4S_CALIBRATED_USD_PATH = os.path.join(
+    DISPLAY_ASSETS_DIR,
+    "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
 )
 
 # ---------------------------------------------------------------------------
@@ -64,8 +70,7 @@ _INSERTION_LENGTH = 0.011
 # switches to a specific combination; see the experiment matrix / commit log.
 # The block between the START/END markers is what the experiment commits edit.
 # --- EXP TOGGLES START ---
-EXP_SYSID = os.getenv("DP_CABLE_EXP_SYSID", "1").lower() not in {"0", "false", "no", "off"}
-# enable sim2real (sysid) action model + PhysX SysID gains
+EXP_SYSID = False                 # enable sim2real (sysid) action model + PhysX SysID gains
 EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
 EXP_SOCKET_ORN_DEG = 2.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
 EXP_CURRICULUM = "anneal_80_0_500"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
@@ -495,6 +500,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
+                usd_path=_RIZON4S_CALIBRATED_USD_PATH,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,
