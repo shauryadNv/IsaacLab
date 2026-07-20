@@ -11,7 +11,6 @@ plug is grasped at reset and the goal is the verified seated mate.
 """
 
 import math
-import os
 
 import torch
 
@@ -26,18 +25,12 @@ from isaaclab.utils import configclass
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp as mdp
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp.terminations as cable_terminations
 from isaaclab_tasks.manager_based.manipulation.deploy.cable_insertion.displayport_insertion_env_cfg import (
-    DISPLAY_ASSETS_DIR,
     PLUG_GOAL_ROT,
     PLUG_INSERTION_OFFSET,
     SOCKET_INSERTION_OFFSET,
     DisplayportInsertionEnvCfg,
     compute_plug_pose,
     compute_socket_root,
-)
-
-_RIZON4S_CALIBRATED_USD_PATH = os.path.join(
-    DISPLAY_ASSETS_DIR,
-    "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
 )
 
 # ---------------------------------------------------------------------------
@@ -71,8 +64,8 @@ _INSERTION_LENGTH = 0.011
 # The block between the START/END markers is what the experiment commits edit.
 # --- EXP TOGGLES START ---
 EXP_SYSID = False                 # enable sim2real (sysid) action model + PhysX SysID gains
-EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
-EXP_SOCKET_ORN_DEG = 2.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
+EXP_SOCKET_POS_RANGE = [0.0, 0.0, 0.0]  # socket position randomization, +/- m per axis [x, y, z]
+EXP_SOCKET_ORN_DEG = 0.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
 EXP_CURRICULUM = "anneal_80_0_500"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
 EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
 # --- EXP TOGGLES END ---
@@ -412,6 +405,10 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
+        # Disable actor observation noise for this Flexiv experiment.
+        self.observations.policy.socket_pos.noise.noise_cfg.n_min = 0.0
+        self.observations.policy.socket_pos.noise.noise_cfg.n_max = 0.0
+
         # Experiment toggle: match IsaacLab_UR's 1:1 linear:exp keypoint weighting
         # (exp weight == |linear weight| = 1.5) instead of the default 2:1 (exp = 3.0).
         if EXP_EQUAL_REWARD_WEIGHTS:
@@ -500,7 +497,6 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
-                usd_path=_RIZON4S_CALIBRATED_USD_PATH,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,
