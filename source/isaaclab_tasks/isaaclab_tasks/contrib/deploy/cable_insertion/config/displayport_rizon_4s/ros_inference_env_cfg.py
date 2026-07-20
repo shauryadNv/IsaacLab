@@ -6,14 +6,20 @@
 import math
 
 from isaaclab.assets import RigidObjectCfg
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg import (
     compute_plug_pose,
     compute_socket_root,
 )
+from isaaclab_tasks.contrib.deploy.mdp.delayed_joint_actions_cfg import ShapedDelayedRelativeJointPositionActionCfg
 
 from .joint_pos_env_cfg import Rizon4sGravDisplayportInsertionEnvCfg
+
+FLEXIV_ARM_JOINT_NAMES = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+FLEXIV_ACTION_LATENCY_MS = 20.0
+FLEXIV_ROBOT_COLLECTION_COMMAND_VELOCITY_LIMIT = 2.0
+FLEXIV_ROBOT_COLLECTION_COMMAND_ACCELERATION_LIMIT = 3.0
 
 # Deployment socket/plug poses for the physical DisplayPort insertion station.
 _DEPLOY_GEOMETRY_POS = (0.476, 0.127, 0.07)
@@ -60,6 +66,28 @@ class Rizon4sGravDisplayportInsertionROSInferenceEnvCfg(Rizon4sGravDisplayportIn
 
         # Dynamically generate action_scale_joint_space based on action_space
         self.action_scale_joint_space = [self.joint_action_scale] * self.action_space
+
+        self.flexiv_action_latency_ms = FLEXIV_ACTION_LATENCY_MS
+        self.sim_to_real_command_config = {
+            "active_env": "Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-ROS-Inference-v0",
+            "controller": "ShapedDelayedRelativeJointPositionActionCfg",
+            "command_velocity_limit_rad_s": FLEXIV_ROBOT_COLLECTION_COMMAND_VELOCITY_LIMIT,
+            "command_acceleration_limit_rad_s2": FLEXIV_ROBOT_COLLECTION_COMMAND_ACCELERATION_LIMIT,
+            "action_latency_ms": FLEXIV_ACTION_LATENCY_MS,
+            "sysid_notes": (
+                "Command-side velocity/acceleration limiting and latency matched to "
+                "Flexiv deployment command-response data. Actuator gains are unchanged."
+            ),
+        }
+        self.actions.arm_action = ShapedDelayedRelativeJointPositionActionCfg(
+            asset_name="robot",
+            joint_names=FLEXIV_ARM_JOINT_NAMES,
+            scale=self.joint_action_scale,
+            use_zero_offset=True,
+            latency_s=FLEXIV_ACTION_LATENCY_MS / 1000.0,
+            command_velocity_limit=FLEXIV_ROBOT_COLLECTION_COMMAND_VELOCITY_LIMIT,
+            command_acceleration_limit=FLEXIV_ROBOT_COLLECTION_COMMAND_ACCELERATION_LIMIT,
+        )
 
         # Override robot initial pose for ROS inference (fixed pose, no randomization)
         self.scene.robot.init_state.pos = (0.0, 0.0, 0.0)
