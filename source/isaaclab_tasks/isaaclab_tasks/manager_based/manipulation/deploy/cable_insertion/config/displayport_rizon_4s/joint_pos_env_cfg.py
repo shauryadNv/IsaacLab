@@ -64,8 +64,8 @@ _INSERTION_LENGTH = 0.011
 # The block between the START/END markers is what the experiment commits edit.
 # --- EXP TOGGLES START ---
 EXP_SYSID = False                 # enable sim2real (sysid) action model + PhysX SysID gains
-EXP_SOCKET_POS_RANGE = [0.0, 0.0, 0.0]  # socket position randomization, +/- m per axis [x, y, z]
-EXP_SOCKET_ORN_DEG = 0.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
+EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
+EXP_SOCKET_ORN_DEG = 2.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
 EXP_CURRICULUM = "anneal_80_0_500"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
 EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
 # --- EXP TOGGLES END ---
