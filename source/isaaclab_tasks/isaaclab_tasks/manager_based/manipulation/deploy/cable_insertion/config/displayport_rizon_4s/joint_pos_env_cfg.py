@@ -17,6 +17,7 @@ import torch
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
@@ -68,6 +69,9 @@ EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- 
 EXP_SOCKET_ORN_DEG = 2.0          # socket orientation randomization, +/- deg on roll/pitch/yaw
 EXP_CURRICULUM = "anneal_80_0_500"           # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
 EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
+EXP_ACTION_RATE_START = -5.0e-7
+EXP_ACTION_RATE_FINAL = -5.0e-5
+EXP_ACTION_RATE_ANNEAL_ITERS = 1000.0
 # --- EXP TOGGLES END ---
 
 
@@ -399,15 +403,35 @@ class TerminationsCfg:
 
 
 @configclass
+class CurriculumCfg:
+    """Reward-weight curriculum for the Flexiv DisplayPort insertion env."""
+
+    action_rate = CurrTerm(
+        func=mdp.modify_term_cfg,
+        params={
+            "address": "rewards.action_rate.weight",
+            "modify_fn": mdp.ramp_action_rate_weight,
+            "modify_params": {
+                "num_steps_per_env": 512,
+                "start_iter": 0.0,
+                "end_iter": EXP_ACTION_RATE_ANNEAL_ITERS,
+                "weight_start": EXP_ACTION_RATE_START,
+                "weight_end": EXP_ACTION_RATE_FINAL,
+            },
+        },
+    )
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
     """Flexiv Rizon 4s + Grav gripper DisplayPort insertion (joint-space)."""
+
+    curriculum: CurriculumCfg = CurriculumCfg()
 
     def __post_init__(self):
         super().__post_init__()
 
-        # Disable actor observation noise for this Flexiv experiment.
-        self.observations.policy.socket_pos.noise.noise_cfg.n_min = 0.0
-        self.observations.policy.socket_pos.noise.noise_cfg.n_max = 0.0
+        self.rewards.action_rate.weight = EXP_ACTION_RATE_START
 
         # Experiment toggle: match IsaacLab_UR's 1:1 linear:exp keypoint weighting
         # (exp weight == |linear weight| = 1.5) instead of the default 2:1 (exp = 3.0).
