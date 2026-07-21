@@ -35,3 +35,6 @@ class ShapedDelayedRelativeJointPositionActionCfg(DelayedRelativeJointPositionAc
 
     command_acceleration_limit: float = 0.5
     """Maximum command-target slew acceleration in rad/s^2. Set to zero to disable."""
+
+    use_measured_state_for_shaping: bool = False
+    """Anchor shaping to measured joint position/velocity instead of the previous shaped command target."""

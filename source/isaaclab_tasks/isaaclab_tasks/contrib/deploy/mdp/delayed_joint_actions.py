@@ -125,14 +125,17 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
     def process_actions(self, actions: torch.Tensor):
         RelativeJointPositionAction.process_actions(self, actions)
         current_joint_pos = self._asset.data.joint_pos.torch[:, self._joint_ids]
+        current_joint_vel = self._asset.data.joint_vel.torch[:, self._joint_ids]
         self._latest_target = current_joint_pos + self.processed_actions
 
         delayed_target = self._compute_delayed_target(self._latest_target)
         self._delayed_target = delayed_target
+        shaping_reference_target = current_joint_pos if self.cfg.use_measured_state_for_shaping else self._shaped_target
+        shaping_reference_velocity = current_joint_vel if self.cfg.use_measured_state_for_shaping else self._shaped_velocity
         self._shaped_target, self._shaped_velocity = self._shape_position_target(
             delayed_target,
-            self._shaped_target,
-            self._shaped_velocity,
+            shaping_reference_target,
+            shaping_reference_velocity,
         )
 
     def apply_actions(self):
