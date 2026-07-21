@@ -47,7 +47,32 @@ _INSERTION_LENGTH = 0.011
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG  # isort: skip
+from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG, ISAACLAB_ASSETS_DATA_DIR  # isort: skip
+
+
+_CALIBRATED_RIZON4S_GRAV_USD = (
+    f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Flexiv/Rizon4s/Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
+)
+
+_SYSID_CMDLIM2P0_ACC3P0_STIFFNESS = {
+    "joint1": 6051.500977,
+    "joint2": 3004.328857,
+    "joint3": 7032.64209,
+    "joint4": 4346.786133,
+    "joint5": 6829.847656,
+    "joint6": 3769.23291,
+    "joint7": 6181.429199,
+}
+
+_SYSID_CMDLIM2P0_ACC3P0_DAMPING = {
+    "joint1": 121.620995,
+    "joint2": 220.929214,
+    "joint3": 162.582214,
+    "joint4": 186.334442,
+    "joint5": 199.962311,
+    "joint6": 118.462029,
+    "joint7": 152.861771,
+}
 
 
 ##
@@ -308,6 +333,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
+                usd_path=_CALIBRATED_RIZON4S_GRAV_USD,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,
@@ -342,6 +368,34 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                 rot=(0.0, 0.0, 0.0, 1.0),
             ),
         )
+
+        # Use the command-response SysID PD gains that match the 2.0/3.0 command limits.
+        self.scene.robot.actuators["shoulder"].stiffness = {
+            "joint1": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint1"],
+            "joint2": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint2"],
+        }
+        self.scene.robot.actuators["shoulder"].damping = {
+            "joint1": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint1"],
+            "joint2": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint2"],
+        }
+        self.scene.robot.actuators["elbow"].stiffness = {
+            "joint3": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint3"],
+            "joint4": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint4"],
+        }
+        self.scene.robot.actuators["elbow"].damping = {
+            "joint3": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint3"],
+            "joint4": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint4"],
+        }
+        self.scene.robot.actuators["wrist"].stiffness = {
+            "joint5": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint5"],
+            "joint6": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint6"],
+            "joint7": _SYSID_CMDLIM2P0_ACC3P0_STIFFNESS["joint7"],
+        }
+        self.scene.robot.actuators["wrist"].damping = {
+            "joint5": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint5"],
+            "joint6": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint6"],
+            "joint7": _SYSID_CMDLIM2P0_ACC3P0_DAMPING["joint7"],
+        }
 
         # Grav gripper actuator configuration
         self.scene.robot.actuators["gripper_drive"] = ImplicitActuatorCfg(
