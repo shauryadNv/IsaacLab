@@ -7,7 +7,7 @@ import newton
 import numpy as np
 import pytest
 from isaaclab_newton.cloner import replicate as replicate_module
-from isaaclab_newton.cloner.replicate import _configure_hydroelastic_sdf_shapes
+from isaaclab_newton.cloner.replicate import _configure_hydroelastic_sdf_shapes, _configure_sdf_shapes
 from isaaclab_newton.physics import HydroelasticSDFCfg, NewtonCollisionPipelineCfg
 
 from pxr import Usd, UsdGeom, UsdPhysics
@@ -62,6 +62,33 @@ def test_configure_hydroelastic_sdf_shapes_builds_mesh_sdf_and_sets_flag(
     ]
 
 
+def test_configure_sdf_shapes_builds_hard_sdf_without_hydroelastic_flag(monkeypatch: pytest.MonkeyPatch):
+    """Hard SDF cooking should not opt shapes into hydroelastic contacts."""
+    builder = newton.ModelBuilder()
+    body = builder.add_body(label="body")
+    mesh = newton.Mesh(
+        vertices=np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        ),
+        indices=np.array([0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3], dtype=np.int32),
+    )
+    shape = builder.add_shape_mesh(body=body, mesh=mesh)
+
+    monkeypatch.setattr(newton.Mesh, "build_sdf", lambda self, **kwargs: setattr(self, "sdf", object()))
+
+    configured = _configure_sdf_shapes({"body": builder}, max_resolution=128)
+
+    assert configured == 1
+    assert mesh.sdf is not None
+    assert not int(builder.shape_flags[shape]) & int(newton.ShapeFlags.HYDROELASTIC)
+
+
 def test_hydroelastic_sdf_resolution_is_not_forwarded_to_runtime_pipeline():
     cfg = NewtonCollisionPipelineCfg(sdf_hydroelastic_config=HydroelasticSDFCfg(sdf_max_resolution=128))
 
@@ -70,6 +97,15 @@ def test_hydroelastic_sdf_resolution_is_not_forwarded_to_runtime_pipeline():
     runtime_cfg = pipeline_args["sdf_hydroelastic_config"]
     assert not hasattr(runtime_cfg, "sdf_max_resolution")
     assert runtime_cfg.reduce_contacts is True
+
+
+def test_hard_sdf_resolution_is_not_forwarded_to_runtime_pipeline():
+    cfg = NewtonCollisionPipelineCfg(mesh_sdf_max_resolution=128)
+
+    pipeline_args = cfg.to_pipeline_args()
+
+    assert "mesh_sdf_max_resolution" not in pipeline_args
+    assert "sdf_hydroelastic_config" not in pipeline_args
 
 
 @pytest.mark.parametrize("max_resolution", [0, 63])

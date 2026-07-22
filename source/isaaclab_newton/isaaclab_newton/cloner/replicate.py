@@ -204,21 +204,25 @@ def _weld_builder_collision_meshes(source_builders: dict[str, ModelBuilder]) -> 
     return welded
 
 
-def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder], *, max_resolution: int = 64) -> int:
-    """Build SDFs and enable hydroelastic contacts on eligible colliding shapes.
+def _configure_sdf_shapes(
+    source_builders: dict[str, ModelBuilder], *, max_resolution: int = 64, enable_hydroelastic: bool = False
+) -> int:
+    """Build SDFs on colliding meshes and optionally enable hydroelastic contacts.
 
-    Newton hydroelastic SDF contact is activated per shape: both shapes in a contact pair must carry
-    :attr:`ShapeFlags.HYDROELASTIC`, and mesh shapes must have an SDF attached before model
-    finalization. USD collision schemas declare the author's intent, but Newton's builder still needs
-    explicit mesh SDF data and hydroelastic flags.
+    Newton's hard mesh-mesh contact path uses a precomputed SDF when one is
+    attached to the mesh and otherwise falls back to BVH queries. Hydroelastic
+    contact additionally requires both shapes in a contact pair to carry
+    :attr:`ShapeFlags.HYDROELASTIC`.
 
     Args:
         source_builders: Per-source builders to edit in place.
         max_resolution: Maximum generated SDF grid dimension. Must be positive
             and divisible by 8.
+        enable_hydroelastic: Whether to mark eligible shapes for hydroelastic
+            contacts.
 
     Returns:
-        Number of shapes marked as hydroelastic.
+        Number of shapes configured for the selected contact mode.
     """
     from newton import GeoType, ShapeFlags
 
@@ -236,7 +240,7 @@ def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder],
         int(GeoType.CONE),
         int(GeoType.ELLIPSOID),
     }
-    marked = 0
+    configured = 0
     for builder in source_builders.values():
         for i in range(builder.shape_count):
             if not (int(builder.shape_flags[i]) & collide_bit):
@@ -259,11 +263,21 @@ def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder],
                         margin=sdf_radius,
                     )
                 builder.shape_type[i] = GeoType.MESH
-            elif shape_type not in primitive_types:
+            elif not enable_hydroelastic or shape_type not in primitive_types:
                 continue
-            builder.shape_flags[i] = int(builder.shape_flags[i]) | hydroelastic_bit
-            marked += 1
-    return marked
+            if enable_hydroelastic:
+                builder.shape_flags[i] = int(builder.shape_flags[i]) | hydroelastic_bit
+            configured += 1
+    return configured
+
+
+def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder], *, max_resolution: int = 64) -> int:
+    """Build mesh SDFs and mark eligible colliders as hydroelastic."""
+    return _configure_sdf_shapes(
+        source_builders,
+        max_resolution=max_resolution,
+        enable_hydroelastic=True,
+    )
 
 
 def _find_direct_sdf_mesh_colliders(builder: ModelBuilder, stage: Usd.Stage) -> set[int]:
@@ -425,14 +439,22 @@ def _build_newton_builder_from_mapping(
         if welded:
             logger.info("Welded duplicate vertices on %d mesh collider(s) for the SDF pipeline.", welded)
         collision_cfg = getattr(PhysicsManager._cfg, "collision_cfg", None)
+        mesh_sdf_max_resolution = getattr(collision_cfg, "mesh_sdf_max_resolution", None)
         sdf_hydroelastic_config = getattr(collision_cfg, "sdf_hydroelastic_config", None)
         if sdf_hydroelastic_config is not None:
             marked = _configure_hydroelastic_sdf_shapes(
                 source_builders,
-                max_resolution=sdf_hydroelastic_config.sdf_max_resolution,
+                max_resolution=mesh_sdf_max_resolution or sdf_hydroelastic_config.sdf_max_resolution,
             )
             if marked:
                 logger.info("Enabled hydroelastic SDF contacts on %d shape(s).", marked)
+        elif mesh_sdf_max_resolution is not None:
+            configured = _configure_sdf_shapes(
+                source_builders,
+                max_resolution=mesh_sdf_max_resolution,
+            )
+            if configured:
+                logger.info("Enabled hard SDF point contacts on %d mesh shape(s).", configured)
 
     # Inject registered sites into source builders (and global sites into main builder).
     global_sites, source_sites, root_sites = NewtonManager._cl_inject_sites(builder, source_builders)

@@ -1,0 +1,163 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+workflow:
+  name: "{{workflow_name}}"
+  tasks:
+  - name: "{{workflow_name}}"
+    image: nvcr.io/nvidian/isaac-lab:latest-release-3.0.0-beta2-506-28a37cec
+    command: ["bash"]
+    args: ["/tmp/entry.sh"]
+    environment:
+      ACCEPT_EULA: Y
+      NO_NUCLEUS: Y
+      OMNI_SERVER: isaac-dev.ov.nvidia.com
+    credentials:
+      gitlab_cred: /tmp/gitlab
+      github_cred: /tmp/github
+      omni-auth:
+        OMNI_PASS: omni_pass
+        OMNI_USER: omni_user
+
+    files:
+    - path: /tmp/setup_gitlab_auth.sh
+      contents: |-
+        GITLAB_PAT=$(cat /tmp/gitlab/gitlab_cred)
+        git config --global credential.helper store
+        echo "https://token:${GITLAB_PAT}@gitlab-master.nvidia.com" > ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - path: /tmp/setup_github_auth.sh
+      contents: |-
+        GITHUB_PAT=$(cat /tmp/github/github_cred)
+        echo "https://token:${GITHUB_PAT}@github.com" >> ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - path: /tmp/run_distributed_rank.py
+      contents: |-
+        import os
+        import runpy
+        import sys
+        import tempfile
+
+        local_rank = os.environ.get("LOCAL_RANK", "0")
+        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if visible_devices:
+            devices = [device.strip() for device in visible_devices.split(",")]
+            physical_device = devices[int(local_rank)]
+        else:
+            physical_device = local_rank
+        os.environ["CUDA_VISIBLE_DEVICES"] = physical_device
+        os.environ["LOCAL_RANK"] = "0"
+        os.environ.setdefault(
+            "WARP_CACHE_PATH",
+            os.path.join(tempfile.gettempdir(), f"warp-cache-rank-{local_rank}"),
+        )
+        script = sys.argv.pop(1)
+        sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+        sys.argv[0] = script
+        print(
+            f"Rank {local_rank} physical GPU {physical_device}, logical cuda:0, "
+            f"Warp cache: {os.environ['WARP_CACHE_PATH']}",
+            flush=True,
+        )
+        runpy.run_path(script, run_name="__main__")
+
+    - path: /tmp/entry.sh
+      contents: |
+        set -euo pipefail
+
+        bash /tmp/setup_github_auth.sh || true
+        bash /tmp/setup_gitlab_auth.sh || true
+
+        rm -rf /tmp/IsaacLab
+        git clone https://github.com/shauryadNv/IsaacLab.git /tmp/IsaacLab
+        cd /tmp/IsaacLab
+        git checkout {{commit_hash}}
+        echo "Commit: $(git rev-parse HEAD)"
+
+        if ! git lfs version >/dev/null 2>&1; then
+          LFS_VER=3.5.1
+          curl -fsSL "https://github.com/git-lfs/git-lfs/releases/download/v${LFS_VER}/git-lfs-linux-amd64-v${LFS_VER}.tar.gz" -o /tmp/git-lfs.tar.gz
+          mkdir -p /tmp/gitlfs
+          tar -xzf /tmp/git-lfs.tar.gz -C /tmp/gitlfs
+          export PATH="$(dirname "$(find /tmp/gitlfs -type f -name git-lfs | head -1)"):$PATH"
+        fi
+        git lfs install --local 2>/dev/null || true
+        git lfs pull
+
+        ASSET_DIR=source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets
+        test $(stat -c%s "${ASSET_DIR}/display_port_plug_fixed_sdf.usd") -gt 1000
+        test $(stat -c%s "${ASSET_DIR}/display_port_socket_fixed_sdf_split_visuals.usd") -gt 1000
+
+        PYSH=/workspace/isaaclab/_isaac_sim/python.sh
+        [ -x "$PYSH" ] || PYSH=/isaac-sim/python.sh
+        echo "Using python: $PYSH"
+
+        for d in /tmp/IsaacLab/source/*/; do PYTHONPATH="$d:${PYTHONPATH:-}"; done
+        export PYTHONPATH
+        $PYSH -c "import isaaclab_tasks, isaaclab_newton; print('fork src OK:', isaaclab_tasks.__file__)"
+
+        mkdir -p /tmp/IsaacLab/logs/rsl_rl/{{exp_name}}
+        export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+        TOTAL_ENVS={{num_envs}}
+        NUM_GPUS={{num_gpus}}
+        if (( TOTAL_ENVS % NUM_GPUS != 0 )); then
+          echo "num_envs (${TOTAL_ENVS}) must be divisible by num_gpus (${NUM_GPUS})" >&2
+          exit 2
+        fi
+        ENVS_PER_RANK=$((TOTAL_ENVS / NUM_GPUS))
+        export OMP_NUM_THREADS=$(({{num_cpus}} / NUM_GPUS))
+        echo "Training ${TOTAL_ENVS} total environments: ${ENVS_PER_RANK} per rank on ${NUM_GPUS} GPUs"
+
+        $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
+          /tmp/run_distributed_rank.py \
+          scripts/reinforcement_learning/rsl_rl/train.py \
+          --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
+          --num_envs "${ENVS_PER_RANK}" --headless --distributed \
+          presets=newton_sdf \
+          env.sim.physics.use_cuda_graph={{use_cuda_graph}} \
+          env.sim.dt={{sim_dt}} \
+          env.sim.physics.num_substeps={{num_substeps}} \
+          env.decimation={{decimation}} \
+          env.sim.render_interval={{decimation}} \
+          env.sim.physics.collision_decimation={{collision_decimation}} \
+          env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
+          env.sim.physics.collision_cfg.mesh_sdf_max_resolution={{sdf_resolution}} \
+          agent.num_steps_per_env={{num_steps_per_env}} \
+          agent.max_iterations={{max_iters}} \
+          agent.experiment_name={{exp_name}}
+
+    checkpoint:
+    - path: /tmp/IsaacLab/logs/rsl_rl/{{exp_name}}/
+      url: swift://pdx.s8k.io/AUTH_team-isaac/datasets/shauryad/{{exp_name}}/{{commit_hash}}/
+      frequency: 30m
+
+  resources:
+    default:
+      gpu: "{{num_gpus}}"
+      cpu: "{{num_cpus}}"
+      memory: "{{mem}}"
+      storage: "{{storage}}"
+
+default-values:
+  workflow_name: isaaclab_train_dp_newton_sdf
+  commit_hash: curiep/newton_dp_cable_insertion
+  exp_name: displayport_rizon4s_newton_hard_sdf
+  num_gpus: 4
+  num_cpus: 60
+  num_envs: 1024
+  max_iters: 1000
+  sim_dt: 0.01
+  decimation: 3
+  num_substeps: 10
+  collision_decimation: 0
+  update_data_interval: 10
+  sdf_resolution: 256
+  use_cuda_graph: true
+  num_steps_per_env: 512
+  mem: 100Gi
+  storage: 100Gi

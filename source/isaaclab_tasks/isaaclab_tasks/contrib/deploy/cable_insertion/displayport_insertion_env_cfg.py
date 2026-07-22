@@ -255,6 +255,26 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
         num_substeps=2,
         debug_mode=False,
     )
+    newton_sdf: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            solver="newton",
+            integrator="implicitfast",
+            njmax=4096,
+            nconmax=4096,
+            impratio=10.0,
+            cone="elliptic",
+            iterations=100,
+            ls_iterations=50,
+            use_mujoco_contacts=False,
+            ccd_iterations=35,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(
+            mesh_sdf_max_resolution=256,
+            reduce_contacts=True,
+        ),
+        num_substeps=2,
+        debug_mode=False,
+    )
     physx: PhysxCfg = PhysxCfg(
         gpu_collision_stack_size=2**30,
         gpu_max_rigid_contact_count=2**23,

@@ -168,6 +168,18 @@ class NewtonCollisionPipelineCfg:
     Defaults to ``None`` (same as Newton's default).
     """
 
+    mesh_sdf_max_resolution: int | None = None
+    """Maximum grid dimension for precomputed mesh SDFs.
+
+    When set, Isaac Lab builds an SDF for every colliding mesh before Newton
+    model finalization. The regular Newton collision pipeline can then use hard
+    point contacts for mesh pairs without enabling hydroelastic contacts. The
+    value must be positive and divisible by 8.
+
+    Defaults to ``None`` (do not precompute mesh SDFs unless hydroelastic
+    contacts request them).
+    """
+
     sdf_hydroelastic_config: HydroelasticSDFCfg | None = None
     """Configuration for SDF-based hydroelastic collision handling.
 
@@ -190,6 +202,7 @@ class NewtonCollisionPipelineCfg:
         from newton.geometry import HydroelasticSDF
 
         cfg_dict = self.to_dict()
+        cfg_dict.pop("mesh_sdf_max_resolution", None)
         hydro_cfg = cfg_dict.pop("sdf_hydroelastic_config", None)
         if hydro_cfg is not None:
             hydro_cfg.pop("sdf_max_resolution")

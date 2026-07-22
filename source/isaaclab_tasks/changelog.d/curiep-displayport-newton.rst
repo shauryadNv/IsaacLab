@@ -7,3 +7,5 @@ Fixed
   pose, clamp width, contact friction, and Grav gripper actuator gains.
 * Improved full-depth DisplayPort insertion in Newton with higher-resolution
   mesh SDFs while preserving the exact seated target used by PhysX.
+* Added a ``newton_sdf`` preset for evaluating hard SDF point contacts without
+  enabling hydroelastic contacts.

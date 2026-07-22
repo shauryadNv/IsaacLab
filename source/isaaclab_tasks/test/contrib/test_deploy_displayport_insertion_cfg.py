@@ -27,6 +27,15 @@ def test_displayport_newton_uses_full_insertion_target_and_physx_grasp():
     assert env_cfg.rewards.plug_socket_keypoint_tracking_exp.params["offset_1"] == SOCKET_INSERTION_OFFSET
 
 
+def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
+    """Hard SDF should cook mesh volumes without enabling hydroelastic contact."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_sdf"})
+
+    assert env_cfg.sim.physics.collision_cfg.mesh_sdf_max_resolution == 256
+    assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
+    assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
+
+
 def test_displayport_newton_matches_reference_training_curriculum():
     """Newton should preserve the referenced PhysX curriculum and reward shaping."""
     env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_hydroelastic"})
