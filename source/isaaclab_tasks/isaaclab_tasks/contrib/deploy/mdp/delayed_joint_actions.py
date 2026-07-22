@@ -171,9 +171,14 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
             )
 
         next_target = shaped_target + target_velocity * self._shape_dt
-        crossed = ((desired_target - shaped_target) * (desired_target - next_target)) < 0.0
-        if crossed.any():
-            next_target = torch.where(crossed, desired_target, next_target)
-            target_velocity = torch.where(crossed, torch.zeros_like(target_velocity), target_velocity)
+        error_before = desired_target - shaped_target
+        error_after = desired_target - next_target
+        reached_target = torch.isclose(error_after, torch.zeros_like(error_after), atol=1.0e-6, rtol=0.0)
+        already_at_target = torch.isclose(error_before, torch.zeros_like(error_before), atol=1.0e-6, rtol=0.0)
+        crossed_target = (error_before * error_after) < 0.0
+        snap_to_target = already_at_target | reached_target | crossed_target
+        if snap_to_target.any():
+            next_target = torch.where(snap_to_target, desired_target, next_target)
+            target_velocity = torch.where(snap_to_target, torch.zeros_like(target_velocity), target_velocity)
 
         return next_target, target_velocity
