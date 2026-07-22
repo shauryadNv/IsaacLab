@@ -10,6 +10,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.a
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
     Rizon4sGravDisplayportInsertionEnvCfg,
+    Rizon4sGravDisplayportInsertionNoJointVelEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg import SOCKET_INSERTION_OFFSET
 from isaaclab_tasks.utils.hydra import resolve_presets
@@ -34,6 +35,14 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     assert env_cfg.sim.physics.collision_cfg.mesh_sdf_max_resolution == 256
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
     assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
+
+
+def test_displayport_no_joint_velocity_hides_velocity_from_actor_only():
+    """No-joint-velocity training should retain privileged critic velocity."""
+    env_cfg = Rizon4sGravDisplayportInsertionNoJointVelEnvCfg()
+
+    assert env_cfg.observations.policy.joint_vel is None
+    assert env_cfg.observations.critic.joint_vel is not None
 
 
 def test_displayport_newton_matches_reference_training_curriculum():

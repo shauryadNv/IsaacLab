@@ -116,7 +116,7 @@ workflow:
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
           /tmp/run_distributed_rank.py \
           scripts/reinforcement_learning/rsl_rl/train.py \
-          --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
+          --task {{task_id}} \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
           presets=newton_sdf \
           env.sim.physics.use_cuda_graph={{use_cuda_graph}} \
@@ -145,7 +145,8 @@ workflow:
 
 default-values:
   workflow_name: isaaclab_train_dp_newton_sdf
-  commit_hash: curiep/newton_dp_cable_insertion
+  commit_hash: curiep/newton_dp_hard_sdf
+  task_id: IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav
   exp_name: displayport_rizon4s_newton_hard_sdf
   num_gpus: 4
   num_cpus: 60
