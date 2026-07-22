@@ -116,13 +116,16 @@ workflow:
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
           /tmp/run_distributed_rank.py \
           scripts/reinforcement_learning/rsl_rl/train.py \
-          --task IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav \
+          --task {{task_id}} \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
           presets=newton_hydroelastic \
           env.sim.physics.use_cuda_graph={{use_cuda_graph}} \
           env.sim.dt={{sim_dt}} \
+          env.sim.physics.num_substeps={{num_substeps}} \
           env.decimation={{decimation}} \
           env.sim.render_interval={{decimation}} \
+          env.sim.physics.collision_decimation={{collision_decimation}} \
+          env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
           agent.num_steps_per_env={{num_steps_per_env}} \
@@ -143,17 +146,21 @@ workflow:
 
 default-values:
   workflow_name: isaaclab_train_dp_newton
-  commit_hash: curiep/newton_dp_cable_insertion
+  commit_hash: curiep/newton_dp_hard_sdf
+  task_id: IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav
   exp_name: displayport_rizon4s_newton_hydro
   num_gpus: 4
   num_cpus: 60
   num_envs: 1024
   max_iters: 1000
-  sim_dt: 0.001
-  decimation: 33
+  sim_dt: 0.01
+  decimation: 3
+  num_substeps: 10
+  collision_decimation: 0
+  update_data_interval: 10
   sdf_resolution: 256
   hydro_buffer_fraction: 0.125
-  use_cuda_graph: false
+  use_cuda_graph: true
   num_steps_per_env: 512
   mem: 100Gi
   storage: 100Gi
