@@ -57,7 +57,8 @@ class Rizon4sGravDisplayportInsertionROSInferenceEnvCfg(Rizon4sGravDisplayportIn
         # Use inherited num_arm_joints from parent
         self.action_space = self.num_arm_joints
         # State: 7 joint pos + 7 joint vel + 3 socket pos + 4 socket quat + 3 plug pos + 4 plug quat = 28
-        self.state_space = 28
+        #      + 4 critic-only 7-DoF command-shaper state terms = 56
+        self.state_space = 56
         # Observation: 7 joint pos + 7 joint vel + 3 socket pos + 4 socket quat = 21
         self.observation_space = 21
 
@@ -74,9 +75,18 @@ class Rizon4sGravDisplayportInsertionROSInferenceEnvCfg(Rizon4sGravDisplayportIn
             "command_velocity_limit_rad_s": FLEXIV_ROBOT_COLLECTION_COMMAND_VELOCITY_LIMIT,
             "command_acceleration_limit_rad_s2": FLEXIV_ROBOT_COLLECTION_COMMAND_ACCELERATION_LIMIT,
             "action_latency_ms": FLEXIV_ACTION_LATENCY_MS,
+            "use_moving_target_shaper": True,
+            "critic_only_command_shaper_observations": [
+                "action_shaped_target_error",
+                "action_delayed_target_error",
+                "action_latest_target_lag",
+                "action_shaped_velocity",
+            ],
             "sysid_notes": (
                 "Command-side velocity/acceleration limiting and latency matched to "
-                "Flexiv deployment command-response data. Actuator gains are unchanged."
+                "Flexiv deployment command-response data. Moving-target shaping is used for the "
+                "best replay RMSE. The policy input is unchanged; command shaper state is critic-only. "
+                "Actuator gains are unchanged."
             ),
         }
         self.actions.arm_action = ShapedDelayedRelativeJointPositionActionCfg(
@@ -87,6 +97,7 @@ class Rizon4sGravDisplayportInsertionROSInferenceEnvCfg(Rizon4sGravDisplayportIn
             latency_s=FLEXIV_ACTION_LATENCY_MS / 1000.0,
             command_velocity_limit=FLEXIV_ROBOT_COLLECTION_COMMAND_VELOCITY_LIMIT,
             command_acceleration_limit=FLEXIV_ROBOT_COLLECTION_COMMAND_ACCELERATION_LIMIT,
+            use_moving_target_shaper=True,
         )
 
         # Override robot initial pose for ROS inference (fixed pose, no randomization)
@@ -157,5 +168,5 @@ class Rizon4sGravDisplayportInsertionNoJointVelROSInferenceEnvCfg(Rizon4sGravDis
         self.obs_order = ["arm_dof_pos", "socket_pos", "socket_quat"]
         # Observation: 7 joint pos + 3 socket pos + 4 socket quat = 14
         self.observation_space = 14
-        # State (critic) is unchanged: 7 jpos + 7 jvel + 3 socket pos + 4 socket quat + 3 plug pos + 4 plug quat = 28
-        self.state_space = 28
+        # State (critic): base 28 + 4 critic-only 7-DoF command-shaper state terms = 56
+        self.state_space = 56

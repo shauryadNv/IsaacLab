@@ -20,6 +20,10 @@ __all__ = [
     "rigid_object_rot_6d_w",
     "eef_pos_w",
     "eef_rot_6d_w",
+    "action_shaped_target_error",
+    "action_delayed_target_error",
+    "action_latest_target_lag",
+    "action_shaped_velocity",
     "keypoint_command_error",
     "keypoint_command_error_exp",
     "keypoint_entity_error",
@@ -52,6 +56,10 @@ from .observations import (
     rigid_object_rot_6d_w,
     eef_pos_w,
     eef_rot_6d_w,
+    action_shaped_target_error,
+    action_delayed_target_error,
+    action_latest_target_lag,
+    action_shaped_velocity,
 )
 from .rewards import (
     keypoint_command_error,

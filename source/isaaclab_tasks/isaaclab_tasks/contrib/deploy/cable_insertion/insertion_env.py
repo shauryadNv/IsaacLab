@@ -59,6 +59,7 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
             self.num_envs, 1
         )
         self._success_kp_offsets = _keypoint_offsets_6d(device) * self._success_keypoint_scale
+        self._previous_shaped_velocity = None
 
     def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute per-env success mask, mate-point distance, and keypoint distance."""
@@ -104,13 +105,55 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
 
     def step(self, action: torch.Tensor):
         obs_buf, reward_buf, terminated, time_outs, extras = super().step(action)
+        log = self.extras.setdefault("log", {})
         if getattr(self, "_log_success_metrics", False):
             is_success, pos_error, keypoint_dist = self._compute_success()
-            log = self.extras.setdefault("log", {})
             log["Metrics/success_rate"] = is_success.float().mean()
             log["Metrics/plug_socket_pos_error_m"] = pos_error.mean()
             log["Metrics/plug_socket_keypoint_dist_m"] = keypoint_dist.mean()
+        self._log_action_shaping_metrics(log)
         return obs_buf, reward_buf, terminated, time_outs, self.extras
+
+    def _log_action_shaping_metrics(self, log: dict):
+        """Log command shaper lag/saturation diagnostics without changing rewards."""
+        action_term = self.action_manager.get_term("arm_action")
+        shaped_target = getattr(action_term, "_shaped_target", None)
+        delayed_target = getattr(action_term, "_delayed_target", None)
+        latest_target = getattr(action_term, "_latest_target", None)
+        shaped_velocity = getattr(action_term, "_shaped_velocity", None)
+        if shaped_target is None or delayed_target is None or shaped_velocity is None:
+            zero = torch.zeros((), device=self.device)
+            log["action_shaping/target_lag_mean"] = zero
+            log["action_shaping/target_lag_max"] = zero
+            log["action_shaping/velocity_saturation_rate"] = zero
+            log["action_shaping/acceleration_saturation_rate"] = zero
+            log["action_shaping/delayed_target_error_mean"] = zero
+            return
+
+        target_lag = torch.abs(delayed_target - shaped_target)
+        log["action_shaping/target_lag_mean"] = target_lag.mean()
+        log["action_shaping/target_lag_max"] = target_lag.max()
+        log["action_shaping/delayed_target_error_mean"] = (
+            torch.abs(latest_target - delayed_target).mean() if latest_target is not None else torch.zeros((), device=self.device)
+        )
+
+        velocity_limit = float(getattr(action_term.cfg, "command_velocity_limit", 0.0))
+        if velocity_limit > 0.0:
+            log["action_shaping/velocity_saturation_rate"] = (
+                torch.abs(shaped_velocity) >= velocity_limit - 1.0e-6
+            ).float().mean()
+        else:
+            log["action_shaping/velocity_saturation_rate"] = torch.zeros((), device=self.device)
+
+        acceleration_limit = float(getattr(action_term.cfg, "command_acceleration_limit", 0.0))
+        if acceleration_limit > 0.0 and self._previous_shaped_velocity is not None:
+            acceleration = torch.abs((shaped_velocity - self._previous_shaped_velocity) / self.step_dt)
+            log["action_shaping/acceleration_saturation_rate"] = (
+                acceleration >= acceleration_limit - 1.0e-6
+            ).float().mean()
+        else:
+            log["action_shaping/acceleration_saturation_rate"] = torch.zeros((), device=self.device)
+        self._previous_shaped_velocity = shaped_velocity.detach().clone()
 
     def _reset_idx(self, env_ids):
         terminal_success = None

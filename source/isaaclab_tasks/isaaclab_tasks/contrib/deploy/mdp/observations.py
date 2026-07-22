@@ -564,3 +564,84 @@ class eef_rot_6d_w(ManagerTermBase):
     ) -> torch.Tensor:
         body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
         return _quat_to_rot_6d(body_quat)
+
+
+def _get_action_term(env: ManagerBasedRLEnv, action_name: str):
+    if not hasattr(env, "action_manager"):
+        return None
+    try:
+        return env.action_manager.get_term(action_name)
+    except Exception:
+        return None
+
+
+def _action_joint_pos(term) -> torch.Tensor | None:
+    if term is None or not hasattr(term, "_asset") or not hasattr(term, "_joint_ids"):
+        return None
+    joint_pos = term._asset.data.joint_pos
+    if hasattr(joint_pos, "torch"):
+        joint_pos = joint_pos.torch
+    return joint_pos[:, term._joint_ids]
+
+
+def _zero_action_obs(env: ManagerBasedRLEnv, action_name: str, num_joints: int) -> torch.Tensor:
+    action_term = _get_action_term(env, action_name)
+    joint_pos = _action_joint_pos(action_term)
+    if joint_pos is not None:
+        return torch.zeros_like(joint_pos)
+    return torch.zeros(env.num_envs, num_joints, device=env.device)
+
+
+def action_shaped_target_error(
+    env: ManagerBasedRLEnv,
+    action_name: str = "arm_action",
+    num_joints: int = 7,
+) -> torch.Tensor:
+    """Difference between the command shaper target and measured joint position."""
+    action_term = _get_action_term(env, action_name)
+    shaped_target = getattr(action_term, "_shaped_target", None)
+    joint_pos = _action_joint_pos(action_term)
+    if shaped_target is None or joint_pos is None:
+        return _zero_action_obs(env, action_name, num_joints)
+    return shaped_target - joint_pos
+
+
+def action_delayed_target_error(
+    env: ManagerBasedRLEnv,
+    action_name: str = "arm_action",
+    num_joints: int = 7,
+) -> torch.Tensor:
+    """Difference between the delayed policy target and measured joint position."""
+    action_term = _get_action_term(env, action_name)
+    delayed_target = getattr(action_term, "_delayed_target", None)
+    joint_pos = _action_joint_pos(action_term)
+    if delayed_target is None or joint_pos is None:
+        return _zero_action_obs(env, action_name, num_joints)
+    return delayed_target - joint_pos
+
+
+def action_latest_target_lag(
+    env: ManagerBasedRLEnv,
+    action_name: str = "arm_action",
+    num_joints: int = 7,
+) -> torch.Tensor:
+    """Difference between the latest policy target and the shaped target."""
+    action_term = _get_action_term(env, action_name)
+    latest_target = getattr(action_term, "_latest_target", None)
+    shaped_target = getattr(action_term, "_shaped_target", None)
+    if latest_target is None or shaped_target is None:
+        return _zero_action_obs(env, action_name, num_joints)
+    return latest_target - shaped_target
+
+
+def action_shaped_velocity(
+    env: ManagerBasedRLEnv,
+    action_name: str = "arm_action",
+    num_joints: int = 7,
+) -> torch.Tensor:
+    """Current command-shaper target velocity."""
+    action_term = _get_action_term(env, action_name)
+    shaped_velocity = getattr(action_term, "_shaped_velocity", None)
+    if shaped_velocity is None:
+        return _zero_action_obs(env, action_name, num_joints)
+    return shaped_velocity

@@ -52,6 +52,9 @@ class DelayedRelativeJointPositionAction(RelativeJointPositionAction):
         self._latest_target = current_joint_pos + self.processed_actions
 
     def apply_actions(self):
+        if self._delay_steps <= 0:
+            RelativeJointPositionAction.apply_actions(self)
+            return
         self._delayed_target = self._compute_delayed_target(self._latest_target)
         self._asset.set_joint_position_target_index(target=self._delayed_target, joint_ids=self._joint_ids)
 
@@ -121,8 +124,27 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
         self._shape_dt = control_dt
         self._shaped_target = self._delayed_target.clone()
         self._shaped_velocity = torch.zeros_like(self._shaped_target)
+        self._previous_desired_target = self._delayed_target.clone()
+
+    def _is_passthrough_enabled(self) -> bool:
+        return (
+            self._delay_steps <= 0
+            and self.cfg.command_velocity_limit == 0.0
+            and self.cfg.command_acceleration_limit == 0.0
+        )
 
     def process_actions(self, actions: torch.Tensor):
+        if self._is_passthrough_enabled():
+            RelativeJointPositionAction.process_actions(self, actions)
+            current_joint_pos = self._asset.data.joint_pos.torch[:, self._joint_ids]
+            current_target = current_joint_pos + self.processed_actions
+            self._latest_target = current_target
+            self._delayed_target = current_target
+            self._shaped_target = current_target
+            self._shaped_velocity.zero_()
+            self._previous_desired_target = current_target
+            return
+
         RelativeJointPositionAction.process_actions(self, actions)
         current_joint_pos = self._asset.data.joint_pos.torch[:, self._joint_ids]
         self._latest_target = current_joint_pos + self.processed_actions
@@ -136,6 +158,9 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
         )
 
     def apply_actions(self):
+        if self._is_passthrough_enabled():
+            RelativeJointPositionAction.apply_actions(self)
+            return
         self._asset.set_joint_position_target_index(target=self._shaped_target, joint_ids=self._joint_ids)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
@@ -144,6 +169,7 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
         current_target = self._asset.data.joint_pos.torch[:, self._joint_ids]
         self._shaped_target[reset_ids] = current_target[reset_ids]
         self._shaped_velocity[reset_ids] = 0.0
+        self._previous_desired_target[reset_ids] = current_target[reset_ids]
 
     def _shape_position_target(
         self,
@@ -151,6 +177,9 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
         shaped_target: torch.Tensor,
         shaped_velocity: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.cfg.use_moving_target_shaper:
+            return self._shape_moving_position_target(desired_target, shaped_target, shaped_velocity)
+
         if self.cfg.command_velocity_limit == 0.0 and self.cfg.command_acceleration_limit == 0.0:
             return desired_target, shaped_velocity
 
@@ -181,4 +210,52 @@ class ShapedDelayedRelativeJointPositionAction(DelayedRelativeJointPositionActio
             next_target = torch.where(snap_to_target, desired_target, next_target)
             target_velocity = torch.where(snap_to_target, torch.zeros_like(target_velocity), target_velocity)
 
+        return next_target, target_velocity
+
+    def _shape_moving_position_target(
+        self,
+        desired_target: torch.Tensor,
+        shaped_target: torch.Tensor,
+        shaped_velocity: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.cfg.command_velocity_limit == 0.0 and self.cfg.command_acceleration_limit == 0.0:
+            self._previous_desired_target = desired_target.clone()
+            return desired_target, shaped_velocity
+
+        desired_velocity = (desired_target - self._previous_desired_target) / self._shape_dt
+        target_velocity = desired_velocity + (desired_target - shaped_target) / self._shape_dt
+        if self.cfg.command_velocity_limit > 0.0:
+            target_velocity = torch.clamp(
+                target_velocity,
+                min=-self.cfg.command_velocity_limit,
+                max=self.cfg.command_velocity_limit,
+            )
+
+        if self.cfg.command_acceleration_limit > 0.0:
+            error = desired_target - shaped_target
+            relative_velocity = shaped_velocity - desired_velocity
+            moving_toward_target = (error * relative_velocity) > 0.0
+            stopping_distance = torch.square(relative_velocity) / (2.0 * self.cfg.command_acceleration_limit)
+            should_brake = moving_toward_target & (torch.abs(error) <= stopping_distance)
+            target_velocity = torch.where(should_brake, desired_velocity, target_velocity)
+
+            max_delta_velocity = self.cfg.command_acceleration_limit * self._shape_dt
+            target_velocity = shaped_velocity + torch.clamp(
+                target_velocity - shaped_velocity,
+                min=-max_delta_velocity,
+                max=max_delta_velocity,
+            )
+
+        next_target = shaped_target + target_velocity * self._shape_dt
+        error_before = desired_target - shaped_target
+        error_after = desired_target - next_target
+        reached_target = torch.isclose(error_after, torch.zeros_like(error_after), atol=1.0e-6, rtol=0.0)
+        already_at_target = torch.isclose(error_before, torch.zeros_like(error_before), atol=1.0e-6, rtol=0.0)
+        crossed_target = (error_before * error_after) < 0.0
+        snap_to_target = already_at_target | reached_target | crossed_target
+        if snap_to_target.any():
+            next_target = torch.where(snap_to_target, desired_target, next_target)
+            target_velocity = torch.where(snap_to_target, desired_velocity, target_velocity)
+
+        self._previous_desired_target = desired_target.clone()
         return next_target, target_velocity

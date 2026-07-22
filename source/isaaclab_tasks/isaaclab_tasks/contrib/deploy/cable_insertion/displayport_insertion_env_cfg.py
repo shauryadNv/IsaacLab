@@ -257,6 +257,22 @@ class ObservationsCfg:
             func=mdp.rigid_object_quat_w,
             params={"asset_cfg": SceneEntityCfg("dp_plug")},
         )
+        action_shaped_target_error = ObsTerm(
+            func=mdp.action_shaped_target_error,
+            params={"action_name": "arm_action", "num_joints": 7},
+        )
+        action_delayed_target_error = ObsTerm(
+            func=mdp.action_delayed_target_error,
+            params={"action_name": "arm_action", "num_joints": 7},
+        )
+        action_latest_target_lag = ObsTerm(
+            func=mdp.action_latest_target_lag,
+            params={"action_name": "arm_action", "num_joints": 7},
+        )
+        action_shaped_velocity = ObsTerm(
+            func=mdp.action_shaped_velocity,
+            params={"action_name": "arm_action", "num_joints": 7},
+        )
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
