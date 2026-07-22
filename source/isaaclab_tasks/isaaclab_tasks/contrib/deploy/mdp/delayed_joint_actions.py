@@ -21,6 +21,25 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
+def shaped_joint_target_delta(env: ManagerBasedEnv, action_name: str = "arm_action") -> torch.Tensor:
+    """Return the shaped joint-position target relative to the measured joint position."""
+    action_term = env.action_manager.get_term(action_name)
+    shaped_target = getattr(action_term, "_shaped_target", None)
+    if shaped_target is None:
+        shaped_target = getattr(action_term, "_delayed_target", action_term.processed_actions)
+    current_joint_pos = action_term._asset.data.joint_pos.torch[:, action_term._joint_ids]
+    return shaped_target - current_joint_pos
+
+
+def shaped_joint_target_velocity(env: ManagerBasedEnv, action_name: str = "arm_action") -> torch.Tensor:
+    """Return the command shaper's current target velocity."""
+    action_term = env.action_manager.get_term(action_name)
+    shaped_velocity = getattr(action_term, "_shaped_velocity", None)
+    if shaped_velocity is None:
+        return torch.zeros_like(action_term.processed_actions)
+    return shaped_velocity
+
+
 class DelayedRelativeJointPositionAction(RelativeJointPositionAction):
     """Relative joint-position action that applies a delayed absolute joint target."""
 

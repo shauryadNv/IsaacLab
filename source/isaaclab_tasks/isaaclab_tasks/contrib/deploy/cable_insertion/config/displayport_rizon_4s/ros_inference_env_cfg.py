@@ -6,11 +6,16 @@
 import math
 
 from isaaclab.assets import RigidObjectCfg
+from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.configclass import configclass
 
 from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg import (
     compute_plug_pose,
     compute_socket_root,
+)
+from isaaclab_tasks.contrib.deploy.mdp.delayed_joint_actions import (
+    shaped_joint_target_delta,
+    shaped_joint_target_velocity,
 )
 from isaaclab_tasks.contrib.deploy.mdp.delayed_joint_actions_cfg import ShapedDelayedRelativeJointPositionActionCfg
 
@@ -152,10 +157,18 @@ class Rizon4sGravDisplayportInsertionNoJointVelROSInferenceEnvCfg(Rizon4sGravDis
 
         # Remove joint velocity from the actor observation group
         self.observations.policy.joint_vel = None
+        self.observations.policy.shaped_target_delta = ObsTerm(
+            func=shaped_joint_target_delta,
+            params={"action_name": "arm_action"},
+        )
+        self.observations.policy.shaped_velocity = ObsTerm(
+            func=shaped_joint_target_velocity,
+            params={"action_name": "arm_action"},
+        )
 
         # Update Isaac Manipulator metadata for the velocity-free actor
-        self.obs_order = ["arm_dof_pos", "socket_pos", "socket_quat"]
-        # Observation: 7 joint pos + 3 socket pos + 4 socket quat = 14
-        self.observation_space = 14
+        self.obs_order = ["arm_dof_pos", "shaped_target_delta", "shaped_velocity", "socket_pos", "socket_quat"]
+        # Observation: 7 joint pos + 7 shaped target deltas + 7 shaped target velocities + 3 socket pos + 4 socket quat = 28
+        self.observation_space = 28
         # State (critic) is unchanged: 7 jpos + 7 jvel + 3 socket pos + 4 socket quat + 3 plug pos + 4 plug quat = 28
         self.state_space = 28
