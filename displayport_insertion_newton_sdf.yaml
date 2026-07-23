@@ -105,6 +105,10 @@ workflow:
 
         TOTAL_ENVS={{num_envs}}
         NUM_GPUS={{num_gpus}}
+        if (( NUM_GPUS < 2 )); then
+          echo "DisplayPort OSMO training requires at least 2 GPUs; use 4 GPUs for production runs." >&2
+          exit 2
+        fi
         if (( TOTAL_ENVS % NUM_GPUS != 0 )); then
           echo "num_envs (${TOTAL_ENVS}) must be divisible by num_gpus (${NUM_GPUS})" >&2
           exit 2
