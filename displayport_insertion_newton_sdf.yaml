@@ -88,9 +88,10 @@ workflow:
         git lfs install --local 2>/dev/null || true
         git lfs pull
 
-        ASSET_DIR=source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets
-        test $(stat -c%s "${ASSET_DIR}/display_port_plug_fixed_sdf.usd") -gt 1000
-        test $(stat -c%s "${ASSET_DIR}/display_port_socket_fixed_sdf_split_visuals.usd") -gt 1000
+        PLUG_ASSET="{{plug_asset}}"
+        SOCKET_ASSET="{{socket_asset}}"
+        test "$(stat -c%s "${PLUG_ASSET}")" -gt 1000
+        test "$(stat -c%s "${SOCKET_ASSET}")" -gt 1000
 
         PYSH=/workspace/isaaclab/_isaac_sim/python.sh
         [ -x "$PYSH" ] || PYSH=/isaac-sim/python.sh
@@ -123,6 +124,12 @@ workflow:
           --task {{task_id}} \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
           presets=newton_sdf \
+          env.scene.dp_plug.spawn.usd_path="${PLUG_ASSET}" \
+          env.scene.dp_socket.spawn.usd_path="${SOCKET_ASSET}" \
+          env.scene.robot.spawn.collision_props.contact_offset={{robot_contact_offset}} \
+          env.scene.dp_plug.spawn.collision_props.contact_offset={{plug_contact_offset}} \
+          env.scene.dp_socket.spawn.collision_props.contact_offset={{socket_contact_offset}} \
+          env.sim.physics.default_shape_cfg.gap={{default_shape_gap}} \
           env.sim.physics.use_cuda_graph={{use_cuda_graph}} \
           env.sim.dt={{sim_dt}} \
           env.sim.physics.num_substeps={{num_substeps}} \
@@ -149,9 +156,11 @@ workflow:
 
 default-values:
   workflow_name: isaaclab_train_dp_newton_sdf
-  commit_hash: curiep/newton_dp_hard_sdf
+  commit_hash: curiep/newton_dp_collision_ablation
   task_id: IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav
   exp_name: displayport_rizon4s_newton_hard_sdf
+  plug_asset: /tmp/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets/display_port_plug_fixed_sdf.usd
+  socket_asset: /tmp/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets/display_port_socket_fixed_sdf_split_visuals.usd
   num_gpus: 4
   num_cpus: 60
   num_envs: 1024
@@ -162,6 +171,10 @@ default-values:
   collision_decimation: 0
   update_data_interval: 10
   sdf_resolution: 256
+  default_shape_gap: 0.01
+  robot_contact_offset: 0.005
+  plug_contact_offset: 0.00001
+  socket_contact_offset: 0.0001
   use_cuda_graph: true
   num_steps_per_env: 512
   mem: 100Gi

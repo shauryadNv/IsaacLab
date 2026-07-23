@@ -123,7 +123,7 @@ workflow:
           scripts/reinforcement_learning/rsl_rl/train.py \
           --task {{task_id}} \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
-          presets={{physics_preset}} \
+          presets=default \
           env.scene.dp_plug.spawn.usd_path="${PLUG_ASSET}" \
           env.scene.dp_socket.spawn.usd_path="${SOCKET_ASSET}" \
           env.scene.robot.spawn.collision_props.contact_offset={{robot_contact_offset}} \
@@ -137,8 +137,8 @@ workflow:
           env.sim.render_interval={{decimation}} \
           env.sim.physics.collision_decimation={{collision_decimation}} \
           env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
-          env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
-          env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
+          env.sim.physics.solver_cfg.njmax={{njmax}} \
+          env.sim.physics.solver_cfg.nconmax={{nconmax}} \
           agent.num_steps_per_env={{num_steps_per_env}} \
           agent.max_iterations={{max_iters}} \
           agent.experiment_name={{exp_name}}
@@ -156,11 +156,10 @@ workflow:
       storage: "{{storage}}"
 
 default-values:
-  workflow_name: isaaclab_train_dp_newton
+  workflow_name: isaaclab_train_dp_newton_mujoco
   commit_hash: curiep/newton_dp_collision_ablation
   task_id: IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav
-  exp_name: displayport_rizon4s_newton_hydro
-  physics_preset: newton_hydroelastic
+  exp_name: displayport_rizon4s_newton_mujoco_contacts
   plug_asset: /tmp/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets/display_port_plug_fixed_sdf.usd
   socket_asset: /tmp/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets/display_port_socket_fixed_sdf_split_visuals.usd
   num_gpus: 4
@@ -172,8 +171,8 @@ default-values:
   num_substeps: 10
   collision_decimation: 0
   update_data_interval: 10
-  sdf_resolution: 256
-  hydro_buffer_fraction: 0.125
+  njmax: 4096
+  nconmax: 4096
   default_shape_gap: 0.01
   robot_contact_offset: 0.005
   plug_contact_offset: 0.00001

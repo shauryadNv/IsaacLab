@@ -180,6 +180,27 @@ class NewtonCollisionPipelineCfg:
     contacts request them).
     """
 
+    mesh_sdf_shape_path_exprs: tuple[str, ...] | None = None
+    """Regular expressions selecting shapes that receive a precomputed mesh SDF.
+
+    Expressions use Python regular-expression full-match semantics against the
+    imported Newton shape path. If ``None``, every eligible colliding mesh
+    receives an SDF. An empty tuple disables automatic SDF construction.
+
+    This setting is consumed while building the Newton model and is not passed
+    to :class:`newton.CollisionPipeline`.
+    """
+
+    preserve_concave_shape_path_exprs: tuple[str, ...] = (r"(?i).*finger.*",)
+    """Regular expressions selecting concave mesh colliders to preserve.
+
+    Matching colliders bypass Newton's convex-hull approximation when its own
+    collision pipeline is active. Expressions use Python regular-expression
+    full-match semantics against both body and shape paths.
+
+    Defaults to preserving gripper finger meshes.
+    """
+
     sdf_hydroelastic_config: HydroelasticSDFCfg | None = None
     """Configuration for SDF-based hydroelastic collision handling.
 
@@ -203,6 +224,8 @@ class NewtonCollisionPipelineCfg:
 
         cfg_dict = self.to_dict()
         cfg_dict.pop("mesh_sdf_max_resolution", None)
+        cfg_dict.pop("mesh_sdf_shape_path_exprs", None)
+        cfg_dict.pop("preserve_concave_shape_path_exprs", None)
         hydro_cfg = cfg_dict.pop("sdf_hydroelastic_config", None)
         if hydro_cfg is not None:
             hydro_cfg.pop("sdf_max_resolution")

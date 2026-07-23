@@ -89,6 +89,42 @@ def test_configure_sdf_shapes_builds_hard_sdf_without_hydroelastic_flag(monkeypa
     assert not int(builder.shape_flags[shape]) & int(newton.ShapeFlags.HYDROELASTIC)
 
 
+def test_configure_sdf_shapes_only_configures_matching_shape_paths(monkeypatch: pytest.MonkeyPatch):
+    builder = newton.ModelBuilder()
+    body = builder.add_body(label="body")
+    vertices = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    indices = np.array([0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3], dtype=np.int32)
+    selected_mesh = newton.Mesh(vertices=vertices, indices=indices)
+    skipped_mesh = newton.Mesh(vertices=vertices, indices=indices)
+    selected = builder.add_shape_mesh(body=body, mesh=selected_mesh)
+    skipped = builder.add_shape_mesh(body=body, mesh=skipped_mesh)
+    builder.shape_label[selected] = "/World/DisplayPortPlug/colliders/sdf_connector"
+    builder.shape_label[skipped] = "/World/Robot/left_finger/collisions"
+
+    monkeypatch.setattr(newton.Mesh, "build_sdf", lambda self, **kwargs: setattr(self, "sdf", object()))
+
+    configured = _configure_sdf_shapes(
+        {"body": builder},
+        max_resolution=128,
+        enable_hydroelastic=True,
+        shape_path_exprs=(r".*/DisplayPortPlug/colliders/sdf_.*",),
+    )
+
+    assert configured == 1
+    assert selected_mesh.sdf is not None
+    assert skipped_mesh.sdf is None
+    assert int(builder.shape_flags[selected]) & int(newton.ShapeFlags.HYDROELASTIC)
+    assert not int(builder.shape_flags[skipped]) & int(newton.ShapeFlags.HYDROELASTIC)
+
+
 def test_hydroelastic_sdf_resolution_is_not_forwarded_to_runtime_pipeline():
     cfg = NewtonCollisionPipelineCfg(sdf_hydroelastic_config=HydroelasticSDFCfg(sdf_max_resolution=128))
 
@@ -106,6 +142,18 @@ def test_hard_sdf_resolution_is_not_forwarded_to_runtime_pipeline():
 
     assert "mesh_sdf_max_resolution" not in pipeline_args
     assert "sdf_hydroelastic_config" not in pipeline_args
+
+
+def test_sdf_builder_options_are_not_forwarded_to_runtime_pipeline():
+    cfg = NewtonCollisionPipelineCfg(
+        mesh_sdf_shape_path_exprs=(r".*/colliders/sdf_.*",),
+        preserve_concave_shape_path_exprs=(),
+    )
+
+    pipeline_args = cfg.to_pipeline_args()
+
+    assert "mesh_sdf_shape_path_exprs" not in pipeline_args
+    assert "preserve_concave_shape_path_exprs" not in pipeline_args
 
 
 @pytest.mark.parametrize("max_resolution", [0, 63])
@@ -184,6 +232,44 @@ def test_recover_and_simplify_hulls_direct_sdf_mesh_colliders_when_not_preserved
         authored_bodies=set(),
         simplify_meshes=True,
         preserve_sdf_meshes=False,
+    )
+
+    assert builder.approximate_meshes_calls == [("convex_hull", (0, 1), True)]
+
+
+def test_recover_and_simplify_preserves_matching_concave_meshes(monkeypatch: pytest.MonkeyPatch):
+    builder = _FakeMeshBuilder()
+    builder.body_label[0] = "/World/Robot/left_finger"
+    stage = _make_mesh_collision_stage()
+    monkeypatch.setattr(replicate_module, "_enable_intended_mesh_colliders", lambda builder, stage: [])
+
+    replicate_module._recover_and_simplify_source_builders(
+        {"source": builder},
+        stage,
+        authored_bodies=set(),
+        simplify_meshes=True,
+        preserve_sdf_meshes=False,
+        preserve_concave_shape_path_exprs=(r"(?i).*finger.*",),
+    )
+
+    assert builder.approximate_meshes_calls == []
+
+
+def test_recover_and_simplify_hulls_meshes_when_preserve_patterns_are_empty(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    builder = _FakeMeshBuilder()
+    builder.body_label[0] = "/World/Robot/left_finger"
+    stage = _make_mesh_collision_stage()
+    monkeypatch.setattr(replicate_module, "_enable_intended_mesh_colliders", lambda builder, stage: [])
+
+    replicate_module._recover_and_simplify_source_builders(
+        {"source": builder},
+        stage,
+        authored_bodies=set(),
+        simplify_meshes=True,
+        preserve_sdf_meshes=False,
+        preserve_concave_shape_path_exprs=(),
     )
 
     assert builder.approximate_meshes_calls == [("convex_hull", (0, 1), True)]

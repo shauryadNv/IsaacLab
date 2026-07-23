@@ -37,6 +37,23 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
 
 
+def test_displayport_selective_hydroelastic_only_cooks_mating_colliders():
+    """Selective hydroelastic should keep the gripper on convex point contacts."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionEnvCfg(),
+        {"newton_hydroelastic_selective"},
+    )
+
+    collision_cfg = env_cfg.sim.physics.collision_cfg
+    assert collision_cfg.mesh_sdf_shape_path_exprs == (
+        r".*/collision_mesh",
+        r".*/Body(5|6|8)/Mesh",
+        r".*/colliders/sdf_.*",
+    )
+    assert collision_cfg.preserve_concave_shape_path_exprs == ()
+    assert collision_cfg.sdf_hydroelastic_config.sdf_max_resolution == 256
+
+
 def test_displayport_no_joint_velocity_hides_velocity_from_actor_only():
     """No-joint-velocity training should retain privileged critic velocity."""
     env_cfg = Rizon4sGravDisplayportInsertionNoJointVelEnvCfg()

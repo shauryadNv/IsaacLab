@@ -205,7 +205,11 @@ def _weld_builder_collision_meshes(source_builders: dict[str, ModelBuilder]) -> 
 
 
 def _configure_sdf_shapes(
-    source_builders: dict[str, ModelBuilder], *, max_resolution: int = 64, enable_hydroelastic: bool = False
+    source_builders: dict[str, ModelBuilder],
+    *,
+    max_resolution: int = 64,
+    enable_hydroelastic: bool = False,
+    shape_path_exprs: tuple[str, ...] | None = None,
 ) -> int:
     """Build SDFs on colliding meshes and optionally enable hydroelastic contacts.
 
@@ -220,6 +224,8 @@ def _configure_sdf_shapes(
             and divisible by 8.
         enable_hydroelastic: Whether to mark eligible shapes for hydroelastic
             contacts.
+        shape_path_exprs: Regular expressions selecting imported shape paths.
+            If ``None``, all eligible colliding meshes are configured.
 
     Returns:
         Number of shapes configured for the selected contact mode.
@@ -244,6 +250,9 @@ def _configure_sdf_shapes(
     for builder in source_builders.values():
         for i in range(builder.shape_count):
             if not (int(builder.shape_flags[i]) & collide_bit):
+                continue
+            shape_path = str(builder.shape_label[i])
+            if shape_path_exprs is not None and not any(re.fullmatch(expr, shape_path) for expr in shape_path_exprs):
                 continue
             shape_type = int(builder.shape_type[i])
             source = builder.shape_source[i]
@@ -271,12 +280,18 @@ def _configure_sdf_shapes(
     return configured
 
 
-def _configure_hydroelastic_sdf_shapes(source_builders: dict[str, ModelBuilder], *, max_resolution: int = 64) -> int:
+def _configure_hydroelastic_sdf_shapes(
+    source_builders: dict[str, ModelBuilder],
+    *,
+    max_resolution: int = 64,
+    shape_path_exprs: tuple[str, ...] | None = None,
+) -> int:
     """Build mesh SDFs and mark eligible colliders as hydroelastic."""
     return _configure_sdf_shapes(
         source_builders,
         max_resolution=max_resolution,
         enable_hydroelastic=True,
+        shape_path_exprs=shape_path_exprs,
     )
 
 
@@ -314,6 +329,7 @@ def _recover_and_simplify_source_builders(
     authored_bodies: set[str],
     simplify_meshes: bool,
     preserve_sdf_meshes: bool = False,
+    preserve_concave_shape_path_exprs: tuple[str, ...] = (r"(?i).*finger.*",),
 ) -> None:
     """Recover importer-skipped colliders and convex-hull the rest, in place on each source builder.
 
@@ -336,11 +352,14 @@ def _recover_and_simplify_source_builders(
         keep.update(i for i in range(p.shape_count) if p.body_label[p.shape_body[i]] in authored_bodies)
         if preserve_sdf_meshes:
             keep.update(_find_direct_sdf_mesh_colliders(p, stage))
-        # Keep gripper finger colliders concave (out of the hull) so the contact surface conforms to a
-        # grasped object instead of a convex shell that interpenetrates it. The MuJoCo-contacts preset
-        # convex-hulls at solve time regardless, so this only affects Newton's own (e.g. hydroelastic)
-        # collision pipeline, where it matches the concave PhysX gripper collision.
-        keep.update(i for i in range(p.shape_count) if "finger" in str(p.body_label[p.shape_body[i]]).lower())
+        keep.update(
+            i
+            for i in range(p.shape_count)
+            if any(
+                re.fullmatch(expr, str(p.body_label[p.shape_body[i]])) or re.fullmatch(expr, str(p.shape_label[i]))
+                for expr in preserve_concave_shape_path_exprs
+            )
+        )
         hull_ids = [
             i
             for i in range(p.shape_count)
@@ -427,8 +446,17 @@ def _build_newton_builder_from_mapping(
         ignore_paths=deformable_ignore_paths or None,
         simplify_meshes=False,
     )
+    collision_cfg = getattr(PhysicsManager._cfg, "collision_cfg", None)
+    preserve_concave_shape_path_exprs = getattr(
+        collision_cfg, "preserve_concave_shape_path_exprs", (r"(?i).*finger.*",)
+    )
     _recover_and_simplify_source_builders(
-        source_builders, stage, authored_bodies, simplify_meshes, preserve_sdf_meshes=needs_sdf
+        source_builders,
+        stage,
+        authored_bodies,
+        simplify_meshes,
+        preserve_sdf_meshes=needs_sdf,
+        preserve_concave_shape_path_exprs=preserve_concave_shape_path_exprs,
     )
 
     # Weld duplicate vertices on the remaining concave mesh colliders so the SDF pipeline sees
@@ -438,13 +466,14 @@ def _build_newton_builder_from_mapping(
         welded = _weld_builder_collision_meshes(source_builders)
         if welded:
             logger.info("Welded duplicate vertices on %d mesh collider(s) for the SDF pipeline.", welded)
-        collision_cfg = getattr(PhysicsManager._cfg, "collision_cfg", None)
         mesh_sdf_max_resolution = getattr(collision_cfg, "mesh_sdf_max_resolution", None)
+        mesh_sdf_shape_path_exprs = getattr(collision_cfg, "mesh_sdf_shape_path_exprs", None)
         sdf_hydroelastic_config = getattr(collision_cfg, "sdf_hydroelastic_config", None)
         if sdf_hydroelastic_config is not None:
             marked = _configure_hydroelastic_sdf_shapes(
                 source_builders,
                 max_resolution=mesh_sdf_max_resolution or sdf_hydroelastic_config.sdf_max_resolution,
+                shape_path_exprs=mesh_sdf_shape_path_exprs,
             )
             if marked:
                 logger.info("Enabled hydroelastic SDF contacts on %d shape(s).", marked)
@@ -452,6 +481,7 @@ def _build_newton_builder_from_mapping(
             configured = _configure_sdf_shapes(
                 source_builders,
                 max_resolution=mesh_sdf_max_resolution,
+                shape_path_exprs=mesh_sdf_shape_path_exprs,
             )
             if configured:
                 logger.info("Enabled hard SDF point contacts on %d mesh shape(s).", configured)
