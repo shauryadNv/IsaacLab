@@ -427,6 +427,31 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
+
+    log_success_metrics: bool = True
+    """Whether to log DisplayPort insertion success metrics."""
+
+    success_socket_asset: str = "dp_socket"
+    """Scene asset containing the fixed socket."""
+
+    success_plug_asset: str = "dp_plug"
+    """Scene asset containing the held plug."""
+
+    success_pos_threshold: float = 0.003
+    """Maximum mate-frame origin error [m] counted as success."""
+
+    success_keypoint_scale: float = 0.15
+    """Keypoint diagnostic scale [m]."""
+
+    success_socket_offset: list[float] = MISSING
+    """Socket-local mate-frame position [m]."""
+
+    success_plug_offset: list[float] = MISSING
+    """Plug-local mate-frame position [m]."""
+
+    success_plug_goal_rot_inv: list[float] = MISSING
+    """Inverse goal rotation from the plug mate frame to the socket mate frame."""
+
     sim: SimulationCfg = SimulationCfg(
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -446,3 +471,8 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 33
         self.sim.render_interval = self.decimation
         self.sim.dt = 1.0 / 1000.0
+
+        # Keep the metric geometry identical to the keypoint-tracking reward.
+        self.success_socket_offset = list(SOCKET_INSERTION_OFFSET)
+        self.success_plug_offset = list(PLUG_INSERTION_OFFSET)
+        self.success_plug_goal_rot_inv = list(PLUG_GOAL_ROT_INV)
