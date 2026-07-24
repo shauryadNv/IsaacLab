@@ -118,6 +118,26 @@ workflow:
         export OMP_NUM_THREADS=$(({{num_cpus}} / NUM_GPUS))
         echo "Training ${TOTAL_ENVS} total environments: ${ENVS_PER_RANK} per rank on ${NUM_GPUS} GPUs"
 
+        $PYSH -c "
+        sim_dt = float('{{sim_dt}}')
+        decimation = int('{{decimation}}')
+        num_substeps = int('{{num_substeps}}')
+        collision_decimation = int('{{collision_decimation}}')
+        if sim_dt <= 0.0 or decimation <= 0 or num_substeps <= 0:
+            raise ValueError('sim_dt, decimation, and num_substeps must be positive')
+        if collision_decimation < 0:
+            raise ValueError('collision_decimation must be non-negative')
+        collision_passes = 1
+        if 0 < collision_decimation < num_substeps:
+            collision_passes += (num_substeps - 1) // collision_decimation
+        print(f'Outer physics rate: {1.0 / sim_dt:.1f} Hz')
+        print(f'Solver rate: {num_substeps / sim_dt:.1f} Hz')
+        print(f'Collision passes per outer tick: {collision_passes}')
+        print(f'Effective collision rate: {collision_passes / sim_dt:.1f} Hz')
+        print(f'Policy rate: {1.0 / (sim_dt * decimation):.1f} Hz')
+        print('Triangle-pair capacity per rank: {{max_triangle_pairs}}')
+        "
+
         SOLVER_OVERRIDES=()
         if [[ "{{physics_preset}}" != "newton_kamino_sdf_selective" ]]; then
           SOLVER_OVERRIDES+=("env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}}")
@@ -143,6 +163,7 @@ workflow:
           env.sim.physics.collision_decimation={{collision_decimation}} \
           "${SOLVER_OVERRIDES[@]}" \
           env.sim.physics.collision_cfg.mesh_sdf_max_resolution={{sdf_resolution}} \
+          env.sim.physics.collision_cfg.max_triangle_pairs={{max_triangle_pairs}} \
           env.physics_watchdog_enabled={{physics_watchdog_enabled}} \
           agent.num_steps_per_env={{num_steps_per_env}} \
           agent.max_iterations={{max_iters}} \
@@ -178,12 +199,13 @@ default-values:
   collision_decimation: 0
   update_data_interval: 10
   sdf_resolution: 256
+  max_triangle_pairs: 4194304
   default_shape_gap: 0.01
   robot_contact_offset: 0.005
   plug_contact_offset: 0.00001
   socket_contact_offset: 0.0001
   use_cuda_graph: true
-  physics_watchdog_enabled: false
+  physics_watchdog_enabled: true
   num_steps_per_env: 512
   mem: 100Gi
   storage: 100Gi
