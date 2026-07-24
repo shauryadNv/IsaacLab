@@ -7,7 +7,7 @@ Added
   hydroelastic preset for collision-performance ablations.
 * Added selective point-SDF, collision-filtered, and Kamino presets for
   DisplayPort collision and solver ablations.
-* Added opt-in DisplayPort physics-watchdog metrics and fail-fast checks for
+* Added opt-in DisplayPort physics-watchdog metrics with separately controlled fail-fast checks for
   persistent overtravel, non-finite state, and explosive plug motion.
 
 Fixed

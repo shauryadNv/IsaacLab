@@ -86,8 +86,8 @@ def test_displayport_success_uses_mate_frame_position_threshold():
     torch.testing.assert_close(keypoint_error, position_error)
 
 
-def test_displayport_physics_watchdog_detects_persistent_overtravel():
-    """The watchdog should log and reject sustained travel past the mate plane."""
+def test_displayport_physics_watchdog_separates_telemetry_from_fail_fast():
+    """The watchdog should always log and only reject when fail-fast is enabled."""
     socket_pos = torch.zeros((2, 3), dtype=torch.float32)
     plug_pos = torch.tensor([[-0.004, 0.0, 0.0], [0.010, 0.0, 0.0]], dtype=torch.float32)
 
@@ -109,12 +109,18 @@ def test_displayport_physics_watchdog_detects_persistent_overtravel():
     env._physics_watchdog_consecutive_checks = 2
     env._physics_watchdog_step_count = 0
     env._physics_watchdog_failed_checks = 0
+    env._physics_watchdog_fail_fast = False
     log = {}
 
     env._update_physics_watchdog(log)
 
     torch.testing.assert_close(log["Metrics/physics_watchdog_violation_rate"], torch.tensor(0.5))
     torch.testing.assert_close(log["Metrics/physics_watchdog_min_insertion_depth_m"], torch.tensor(-0.004))
+    env._update_physics_watchdog(log)
+
+    env._physics_watchdog_fail_fast = True
+    env._physics_watchdog_failed_checks = 0
+    env._update_physics_watchdog(log)
     with pytest.raises(RuntimeError, match="persistent instability"):
         env._update_physics_watchdog(log)
 

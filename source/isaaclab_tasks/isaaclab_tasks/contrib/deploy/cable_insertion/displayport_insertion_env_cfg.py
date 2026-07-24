@@ -566,7 +566,10 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
     """Inverse goal rotation from the plug mate frame to the socket mate frame."""
 
     physics_watchdog_enabled: bool = False
-    """Whether to fail fast when the plug state indicates severe simulation instability."""
+    """Whether to publish plug-state stability metrics."""
+
+    physics_watchdog_fail_fast: bool = False
+    """Whether persistent watchdog violations stop the environment."""
 
     physics_watchdog_insertion_axis: tuple[float, float, float] = (1.0, 0.0, 0.0)
     """Insertion direction in the socket mate frame, expressed as a unit vector."""

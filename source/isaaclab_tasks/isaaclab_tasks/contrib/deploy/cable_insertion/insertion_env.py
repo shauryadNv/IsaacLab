@@ -79,6 +79,7 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         self._success_kp_offsets = _keypoint_offsets_6d(self.device) * self._success_keypoint_scale
 
         self._physics_watchdog_enabled = bool(getattr(cfg, "physics_watchdog_enabled", False))
+        self._physics_watchdog_fail_fast = bool(getattr(cfg, "physics_watchdog_fail_fast", False))
         watchdog_axis = torch.tensor(
             getattr(cfg, "physics_watchdog_insertion_axis", (1.0, 0.0, 0.0)),
             device=self.device,
@@ -153,7 +154,7 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         return position_error < self._success_pos_threshold, position_error, keypoint_error
 
     def _update_physics_watchdog(self, log: dict[str, torch.Tensor]) -> None:
-        """Log severe plug-state violations and stop persistently unstable runs."""
+        """Log severe plug-state violations and optionally stop unstable runs."""
         socket_frame_pos, socket_frame_quat, plug_frame_pos, plug_frame_quat = self._compute_mate_frames()
         plug = self.scene[self._success_plug_asset]
         plug_linear_velocity = plug.data.root_link_lin_vel_w.torch
@@ -192,6 +193,9 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         log["Metrics/physics_watchdog_min_insertion_depth_m"] = safe_depth.min()
         log["Metrics/physics_watchdog_max_plug_linear_speed_m_s"] = safe_linear_speed.max()
         log["Metrics/physics_watchdog_max_plug_angular_speed_rad_s"] = safe_angular_speed.max()
+
+        if not self._physics_watchdog_fail_fast:
+            return
 
         self._physics_watchdog_step_count += 1
         if self._physics_watchdog_step_count % self._physics_watchdog_check_interval != 0:

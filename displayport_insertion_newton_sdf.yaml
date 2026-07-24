@@ -165,6 +165,7 @@ workflow:
           env.sim.physics.collision_cfg.mesh_sdf_max_resolution={{sdf_resolution}} \
           env.sim.physics.collision_cfg.max_triangle_pairs={{max_triangle_pairs}} \
           env.physics_watchdog_enabled={{physics_watchdog_enabled}} \
+          env.physics_watchdog_fail_fast={{physics_watchdog_fail_fast}} \
           agent.num_steps_per_env={{num_steps_per_env}} \
           agent.max_iterations={{max_iters}} \
           agent.experiment_name={{exp_name}}
@@ -206,6 +207,7 @@ default-values:
   socket_contact_offset: 0.0001
   use_cuda_graph: true
   physics_watchdog_enabled: true
+  physics_watchdog_fail_fast: false
   num_steps_per_env: 512
   mem: 100Gi
   storage: 100Gi
