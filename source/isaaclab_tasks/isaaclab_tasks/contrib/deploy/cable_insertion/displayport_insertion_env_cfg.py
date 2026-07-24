@@ -294,6 +294,34 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
         num_substeps=2,
         debug_mode=False,
     )
+    newton_hydroelastic_selective_filtered: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            solver="newton",
+            integrator="implicitfast",
+            njmax=4096,
+            nconmax=4096,
+            impratio=10.0,
+            cone="elliptic",
+            iterations=100,
+            ls_iterations=50,
+            use_mujoco_contacts=False,
+            ccd_iterations=35,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(
+            mesh_sdf_shape_path_exprs=_DISPLAYPORT_SDF_SHAPE_PATH_EXPRS,
+            preserve_concave_shape_path_exprs=(),
+            shape_collision_filter_pair_path_exprs=(
+                (_DISPLAYPORT_NON_TIP_ROBOT_SHAPE_EXPR, _DISPLAYPORT_ASSET_SHAPE_EXPR),
+            ),
+            sdf_hydroelastic_config=HydroelasticSDFCfg(
+                sdf_max_resolution=256,
+                reduce_contacts=True,
+                normal_matching=True,
+            ),
+        ),
+        num_substeps=2,
+        debug_mode=False,
+    )
     newton_sdf: NewtonCfg = NewtonCfg(
         solver_cfg=MJWarpSolverCfg(
             solver="newton",

@@ -54,6 +54,22 @@ def test_displayport_selective_hydroelastic_only_cooks_mating_colliders():
     assert collision_cfg.sdf_hydroelastic_config.sdf_max_resolution == 256
 
 
+def test_displayport_filtered_hydroelastic_excludes_non_tip_robot_asset_pairs():
+    """Filtered hydroelastic should preserve fingertip contacts with the plug."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionEnvCfg(),
+        {"newton_hydroelastic_selective_filtered"},
+    )
+
+    pair_exprs = env_cfg.sim.physics.collision_cfg.shape_collision_filter_pair_path_exprs
+    assert pair_exprs == (
+        (
+            r".*/Robot/(?!Grav_gripper/(?:left|right)_finger_tip/).*",
+            r".*/DisplayPort(?:Plug|Socket)/.*",
+        ),
+    )
+
+
 def test_displayport_selective_hard_sdf_only_cooks_mating_colliders():
     """Selective hard SDF should use point contacts and convex fingertips."""
     env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_sdf_selective"})
