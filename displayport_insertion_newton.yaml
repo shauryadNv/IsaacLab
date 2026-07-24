@@ -136,6 +136,7 @@ workflow:
         print(f'Effective collision rate: {collision_passes / sim_dt:.1f} Hz')
         print(f'Policy rate: {1.0 / (sim_dt * decimation):.1f} Hz')
         print('Hydroelastic buffer fraction: {{hydro_buffer_fraction}}')
+        print('Triangle-pair capacity per rank: {{max_triangle_pairs}}')
         "
 
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
@@ -159,6 +160,7 @@ workflow:
           env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
           env.sim.physics.solver_cfg.njmax={{njmax}} \
           env.sim.physics.solver_cfg.nconmax={{nconmax}} \
+          env.sim.physics.collision_cfg.max_triangle_pairs={{max_triangle_pairs}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
           env.physics_watchdog_enabled={{physics_watchdog_enabled}} \
@@ -198,6 +200,7 @@ default-values:
   update_data_interval: 10
   njmax: 4096
   nconmax: 4096
+  max_triangle_pairs: 1000000
   sdf_resolution: 256
   hydro_buffer_fraction: 0.125
   default_shape_gap: 0.01
