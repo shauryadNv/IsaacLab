@@ -26,7 +26,13 @@ keypoint goal reproduces the exact verified mate used by the PhysX task.
 import os
 from dataclasses import MISSING
 
-from isaaclab_newton.physics import HydroelasticSDFCfg, MJWarpSolverCfg, NewtonCfg, NewtonCollisionPipelineCfg
+from isaaclab_newton.physics import (
+    HydroelasticSDFCfg,
+    KaminoSolverCfg,
+    MJWarpSolverCfg,
+    NewtonCfg,
+    NewtonCollisionPipelineCfg,
+)
 from isaaclab_physx.physics import PhysxCfg
 
 import isaaclab.sim as sim_utils
@@ -212,6 +218,14 @@ class DisplayPortSocket(RigidObjectCfg):
 # Environment configuration
 ##
 
+_DISPLAYPORT_SDF_SHAPE_PATH_EXPRS = (
+    r".*/collision_mesh",
+    r".*/Body(5|6|8)/Mesh",
+    r".*/colliders/sdf_.*",
+)
+_DISPLAYPORT_NON_TIP_ROBOT_SHAPE_EXPR = r".*/Robot/(?!Grav_gripper/(?:left|right)_finger_tip/).*"
+_DISPLAYPORT_ASSET_SHAPE_EXPR = r".*/DisplayPort(?:Plug|Socket)/.*"
+
 
 @configclass
 class DisplayportInsertionPhysicsCfg(PresetCfg):
@@ -269,11 +283,7 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
             ccd_iterations=35,
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
-            mesh_sdf_shape_path_exprs=(
-                r".*/collision_mesh",
-                r".*/Body(5|6|8)/Mesh",
-                r".*/colliders/sdf_.*",
-            ),
+            mesh_sdf_shape_path_exprs=_DISPLAYPORT_SDF_SHAPE_PATH_EXPRS,
             preserve_concave_shape_path_exprs=(),
             sdf_hydroelastic_config=HydroelasticSDFCfg(
                 sdf_max_resolution=256,
@@ -303,6 +313,80 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
         ),
         num_substeps=2,
         debug_mode=False,
+    )
+    newton_sdf_selective: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            solver="newton",
+            integrator="implicitfast",
+            njmax=4096,
+            nconmax=4096,
+            impratio=10.0,
+            cone="elliptic",
+            iterations=100,
+            ls_iterations=50,
+            use_mujoco_contacts=False,
+            ccd_iterations=35,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(
+            mesh_sdf_max_resolution=256,
+            mesh_sdf_shape_path_exprs=_DISPLAYPORT_SDF_SHAPE_PATH_EXPRS,
+            preserve_concave_shape_path_exprs=(),
+            reduce_contacts=True,
+        ),
+        num_substeps=2,
+        debug_mode=False,
+    )
+    newton_sdf_selective_filtered: NewtonCfg = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            solver="newton",
+            integrator="implicitfast",
+            njmax=4096,
+            nconmax=4096,
+            impratio=10.0,
+            cone="elliptic",
+            iterations=100,
+            ls_iterations=50,
+            use_mujoco_contacts=False,
+            ccd_iterations=35,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(
+            mesh_sdf_max_resolution=256,
+            mesh_sdf_shape_path_exprs=_DISPLAYPORT_SDF_SHAPE_PATH_EXPRS,
+            preserve_concave_shape_path_exprs=(),
+            shape_collision_filter_pair_path_exprs=(
+                (_DISPLAYPORT_NON_TIP_ROBOT_SHAPE_EXPR, _DISPLAYPORT_ASSET_SHAPE_EXPR),
+            ),
+            reduce_contacts=True,
+        ),
+        num_substeps=2,
+        debug_mode=False,
+    )
+    newton_kamino_sdf_selective: NewtonCfg = NewtonCfg(
+        solver_cfg=KaminoSolverCfg(
+            integrator="moreau",
+            use_collision_detector=False,
+            sparse_jacobian=True,
+            constraints_alpha=0.1,
+            padmm_max_iterations=100,
+            padmm_primal_tolerance=1e-4,
+            padmm_dual_tolerance=1e-4,
+            padmm_compl_tolerance=1e-4,
+            padmm_rho_0=0.05,
+            padmm_eta=1e-5,
+            padmm_use_acceleration=True,
+            padmm_warmstart_mode="containers",
+            padmm_contact_warmstart_method="geom_pair_net_force",
+            padmm_use_graph_conditionals=False,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(
+            mesh_sdf_max_resolution=256,
+            mesh_sdf_shape_path_exprs=_DISPLAYPORT_SDF_SHAPE_PATH_EXPRS,
+            preserve_concave_shape_path_exprs=(),
+            reduce_contacts=True,
+        ),
+        num_substeps=2,
+        debug_mode=False,
+        use_cuda_graph=True,
     )
     physx: PhysxCfg = PhysxCfg(
         gpu_collision_stack_size=2**30,
@@ -480,6 +564,30 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
 
     success_plug_goal_rot_inv: list[float] = MISSING
     """Inverse goal rotation from the plug mate frame to the socket mate frame."""
+
+    physics_watchdog_enabled: bool = False
+    """Whether to fail fast when the plug state indicates severe simulation instability."""
+
+    physics_watchdog_insertion_axis: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    """Insertion direction in the socket mate frame, expressed as a unit vector."""
+
+    physics_watchdog_max_overtravel: float = 0.003
+    """Maximum allowed plug travel past the seated mate plane [m]."""
+
+    physics_watchdog_max_plug_linear_speed: float = 2.0
+    """Maximum allowed plug linear speed [m/s]."""
+
+    physics_watchdog_max_plug_angular_speed: float = 50.0
+    """Maximum allowed plug angular speed [rad/s]."""
+
+    physics_watchdog_max_violation_fraction: float = 0.05
+    """Maximum fraction of environments that may violate a watchdog limit."""
+
+    physics_watchdog_check_interval: int = 8
+    """Number of policy steps between watchdog host-side checks."""
+
+    physics_watchdog_consecutive_checks: int = 3
+    """Number of consecutive failed checks before training is stopped."""
 
     sim: SimulationCfg = SimulationCfg(
         physics_material=sim_utils.RigidBodyMaterialCfg(

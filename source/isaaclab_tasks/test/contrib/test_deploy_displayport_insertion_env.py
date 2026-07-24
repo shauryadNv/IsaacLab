@@ -8,6 +8,7 @@
 from types import SimpleNamespace
 
 import gymnasium as gym
+import pytest
 import torch
 
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
@@ -40,13 +41,23 @@ class _Scene(dict):
         self.num_envs = num_envs
 
 
-def _asset(position: torch.Tensor) -> SimpleNamespace:
+def _asset(
+    position: torch.Tensor,
+    linear_velocity: torch.Tensor | None = None,
+    angular_velocity: torch.Tensor | None = None,
+) -> SimpleNamespace:
     quaternion = torch.zeros((position.shape[0], 4), dtype=torch.float32)
     quaternion[:, 3] = 1.0
+    if linear_velocity is None:
+        linear_velocity = torch.zeros_like(position)
+    if angular_velocity is None:
+        angular_velocity = torch.zeros_like(position)
     return SimpleNamespace(
         data=SimpleNamespace(
             root_link_pos_w=_TensorView(position),
             root_link_quat_w=_TensorView(quaternion),
+            root_link_lin_vel_w=_TensorView(linear_velocity),
+            root_link_ang_vel_w=_TensorView(angular_velocity),
         )
     )
 
@@ -73,6 +84,39 @@ def test_displayport_success_uses_mate_frame_position_threshold():
     assert is_success.tolist() == [True, False]
     torch.testing.assert_close(position_error, torch.tensor([0.002, 0.004]))
     torch.testing.assert_close(keypoint_error, position_error)
+
+
+def test_displayport_physics_watchdog_detects_persistent_overtravel():
+    """The watchdog should log and reject sustained travel past the mate plane."""
+    socket_pos = torch.zeros((2, 3), dtype=torch.float32)
+    plug_pos = torch.tensor([[-0.004, 0.0, 0.0], [0.010, 0.0, 0.0]], dtype=torch.float32)
+
+    env = DisplayportInsertionEnv.__new__(DisplayportInsertionEnv)
+    env._is_closed = True
+    env.scene = _Scene(2, socket=_asset(socket_pos), plug=_asset(plug_pos))
+    env._success_socket_asset = "socket"
+    env._success_plug_asset = "plug"
+    env._success_socket_offset = torch.zeros(3)
+    env._success_plug_offset = torch.zeros(3)
+    env._success_plug_goal_rot_inv = torch.tensor([0.0, 0.0, 0.0, 1.0])
+    env._success_identity_quat = torch.tensor([[0.0, 0.0, 0.0, 1.0]]).repeat(2, 1)
+    env._physics_watchdog_insertion_axis = torch.tensor([1.0, 0.0, 0.0])
+    env._physics_watchdog_max_overtravel = 0.003
+    env._physics_watchdog_max_plug_linear_speed = 2.0
+    env._physics_watchdog_max_plug_angular_speed = 50.0
+    env._physics_watchdog_max_violation_fraction = 0.25
+    env._physics_watchdog_check_interval = 1
+    env._physics_watchdog_consecutive_checks = 2
+    env._physics_watchdog_step_count = 0
+    env._physics_watchdog_failed_checks = 0
+    log = {}
+
+    env._update_physics_watchdog(log)
+
+    torch.testing.assert_close(log["Metrics/physics_watchdog_violation_rate"], torch.tensor(0.5))
+    torch.testing.assert_close(log["Metrics/physics_watchdog_min_insertion_depth_m"], torch.tensor(-0.004))
+    with pytest.raises(RuntimeError, match="persistent instability"):
+        env._update_physics_watchdog(log)
 
 
 def test_displayport_success_config_matches_reward_frames():

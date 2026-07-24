@@ -118,12 +118,17 @@ workflow:
         export OMP_NUM_THREADS=$(({{num_cpus}} / NUM_GPUS))
         echo "Training ${TOTAL_ENVS} total environments: ${ENVS_PER_RANK} per rank on ${NUM_GPUS} GPUs"
 
+        SOLVER_OVERRIDES=()
+        if [[ "{{physics_preset}}" != "newton_kamino_sdf_selective" ]]; then
+          SOLVER_OVERRIDES+=("env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}}")
+        fi
+
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
           /tmp/run_distributed_rank.py \
           scripts/reinforcement_learning/rsl_rl/train.py \
           --task {{task_id}} \
           --num_envs "${ENVS_PER_RANK}" --headless --distributed \
-          presets=newton_sdf \
+          presets={{physics_preset}} \
           env.scene.dp_plug.spawn.usd_path="${PLUG_ASSET}" \
           env.scene.dp_socket.spawn.usd_path="${SOCKET_ASSET}" \
           env.scene.robot.spawn.collision_props.contact_offset={{robot_contact_offset}} \
@@ -136,8 +141,9 @@ workflow:
           env.decimation={{decimation}} \
           env.sim.render_interval={{decimation}} \
           env.sim.physics.collision_decimation={{collision_decimation}} \
-          env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
+          "${SOLVER_OVERRIDES[@]}" \
           env.sim.physics.collision_cfg.mesh_sdf_max_resolution={{sdf_resolution}} \
+          env.physics_watchdog_enabled={{physics_watchdog_enabled}} \
           agent.num_steps_per_env={{num_steps_per_env}} \
           agent.max_iterations={{max_iters}} \
           agent.experiment_name={{exp_name}}
@@ -159,6 +165,7 @@ default-values:
   commit_hash: curiep/newton_dp_collision_ablation
   task_id: IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav
   exp_name: displayport_rizon4s_newton_hard_sdf
+  physics_preset: newton_sdf
   plug_asset: /tmp/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets/display_port_plug_fixed_sdf.usd
   socket_asset: /tmp/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets/display_port_socket_fixed_sdf_split_visuals.usd
   num_gpus: 4
@@ -176,6 +183,7 @@ default-values:
   plug_contact_offset: 0.00001
   socket_contact_offset: 0.0001
   use_cuda_graph: true
+  physics_watchdog_enabled: false
   num_steps_per_env: 512
   mem: 100Gi
   storage: 100Gi

@@ -54,6 +54,43 @@ def test_displayport_selective_hydroelastic_only_cooks_mating_colliders():
     assert collision_cfg.sdf_hydroelastic_config.sdf_max_resolution == 256
 
 
+def test_displayport_selective_hard_sdf_only_cooks_mating_colliders():
+    """Selective hard SDF should use point contacts and convex fingertips."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_sdf_selective"})
+
+    collision_cfg = env_cfg.sim.physics.collision_cfg
+    assert collision_cfg.mesh_sdf_shape_path_exprs == (
+        r".*/collision_mesh",
+        r".*/Body(5|6|8)/Mesh",
+        r".*/colliders/sdf_.*",
+    )
+    assert collision_cfg.mesh_sdf_max_resolution == 256
+    assert collision_cfg.preserve_concave_shape_path_exprs == ()
+    assert collision_cfg.sdf_hydroelastic_config is None
+
+
+def test_displayport_filtered_sdf_excludes_non_tip_robot_asset_pairs():
+    """The filter ablation should preserve fingertip contacts with the plug."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_sdf_selective_filtered"})
+
+    pair_exprs = env_cfg.sim.physics.collision_cfg.shape_collision_filter_pair_path_exprs
+    assert pair_exprs == (
+        (
+            r".*/Robot/(?!Grav_gripper/(?:left|right)_finger_tip/).*",
+            r".*/DisplayPort(?:Plug|Socket)/.*",
+        ),
+    )
+
+
+def test_displayport_kamino_uses_selective_newton_sdf_contacts():
+    """Kamino should consume selective point-SDF contacts from Newton."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_kamino_sdf_selective"})
+
+    assert env_cfg.sim.physics.solver_cfg.use_collision_detector is False
+    assert env_cfg.sim.physics.collision_cfg.mesh_sdf_max_resolution == 256
+    assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
+
+
 def test_displayport_no_joint_velocity_hides_velocity_from_actor_only():
     """No-joint-velocity training should retain privileged critic velocity."""
     env_cfg = Rizon4sGravDisplayportInsertionNoJointVelEnvCfg()

@@ -295,6 +295,56 @@ def _configure_hydroelastic_sdf_shapes(
     )
 
 
+def _configure_shape_collision_filter_pairs(
+    builder: ModelBuilder,
+    path_expr_pairs: tuple[tuple[str, str], ...],
+) -> int:
+    """Disable collisions between shape-path expression pairs.
+
+    Args:
+        builder: Newton model builder to modify before finalization.
+        path_expr_pairs: Pairs of regular expressions evaluated with full-match
+            semantics against imported Newton shape paths.
+
+    Returns:
+        Number of collision-filter pairs added to the builder.
+    """
+    if not path_expr_pairs:
+        return 0
+
+    labels = [str(label) for label in builder.shape_label]
+    worlds = list(builder.shape_world)
+    existing = {
+        (min(int(shape_a), int(shape_b)), max(int(shape_a), int(shape_b)))
+        for shape_a, shape_b in builder.shape_collision_filter_pairs
+    }
+    matches: dict[str, list[int]] = {}
+
+    def matching_indices(expr: str) -> list[int]:
+        if expr not in matches:
+            pattern = re.compile(expr)
+            matches[expr] = [index for index, label in enumerate(labels) if pattern.fullmatch(label)]
+        return matches[expr]
+
+    added = 0
+    for expr_a, expr_b in path_expr_pairs:
+        for shape_a in matching_indices(expr_a):
+            for shape_b in matching_indices(expr_b):
+                if shape_a == shape_b:
+                    continue
+                world_a = int(worlds[shape_a])
+                world_b = int(worlds[shape_b])
+                if world_a >= 0 and world_b >= 0 and world_a != world_b:
+                    continue
+                pair = (min(shape_a, shape_b), max(shape_a, shape_b))
+                if pair in existing:
+                    continue
+                builder.add_shape_collision_filter_pair(*pair)
+                existing.add(pair)
+                added += 1
+    return added
+
+
 def _find_direct_sdf_mesh_colliders(builder: ModelBuilder, stage: Usd.Stage) -> set[int]:
     """Find imported mesh colliders whose USD mesh explicitly requests ``sdf`` collision.
 
@@ -497,6 +547,15 @@ def _build_newton_builder_from_mapping(
         per_world_builder_hooks=NewtonManager._per_world_builder_hooks,
         post_replicate_hooks=NewtonManager._post_replicate_hooks,
     )
+
+    shape_filter_expr_pairs = getattr(collision_cfg, "shape_collision_filter_pair_path_exprs", ())
+    if shape_filter_expr_pairs:
+        filtered = _configure_shape_collision_filter_pairs(builder, shape_filter_expr_pairs)
+        if filtered:
+            logger.info(
+                "Added %d task-specific shape collision filter pair(s).",
+                filtered,
+            )
 
     site_index_map = {label: (idx, None) for label, idx in global_sites.items()}
     site_index_map.update((label, (None, per_world)) for label, per_world in local_site_map.items())

@@ -16,7 +16,7 @@ from collections.abc import Sequence
 import torch
 
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg, VecEnvStepReturn
-from isaaclab.utils.math import combine_frame_transforms
+from isaaclab.utils.math import combine_frame_transforms, quat_apply
 
 
 def _keypoint_offsets_6d(device: str | torch.device) -> torch.Tensor:
@@ -36,6 +36,10 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
       completed environments are reset.
     * ``Metrics/plug_socket_pos_error_m``: Mean mate-frame origin error [m].
     * ``Metrics/plug_socket_keypoint_dist_m``: Mean keypoint error [m].
+    * ``Metrics/physics_watchdog_violation_rate``: Fraction of environments
+      violating an enabled physics-watchdog limit.
+    * ``Metrics/physics_watchdog_min_insertion_depth_m``: Minimum signed plug
+      depth relative to the seated mate plane [m].
 
     Success logging does not modify observations, actions, rewards, or
     terminations.
@@ -74,8 +78,37 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         ).repeat(self.num_envs, 1)
         self._success_kp_offsets = _keypoint_offsets_6d(self.device) * self._success_keypoint_scale
 
-    def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute success, mate-frame position error, and keypoint error."""
+        self._physics_watchdog_enabled = bool(getattr(cfg, "physics_watchdog_enabled", False))
+        watchdog_axis = torch.tensor(
+            getattr(cfg, "physics_watchdog_insertion_axis", (1.0, 0.0, 0.0)),
+            device=self.device,
+            dtype=torch.float32,
+        )
+        watchdog_axis_norm = torch.linalg.vector_norm(watchdog_axis)
+        if not bool(torch.isfinite(watchdog_axis_norm)) or watchdog_axis_norm.item() <= 0.0:
+            raise ValueError("physics_watchdog_insertion_axis must be finite and non-zero.")
+        self._physics_watchdog_insertion_axis = watchdog_axis / watchdog_axis_norm
+        self._physics_watchdog_max_overtravel = float(getattr(cfg, "physics_watchdog_max_overtravel", 0.003))
+        self._physics_watchdog_max_plug_linear_speed = float(
+            getattr(cfg, "physics_watchdog_max_plug_linear_speed", 2.0)
+        )
+        self._physics_watchdog_max_plug_angular_speed = float(
+            getattr(cfg, "physics_watchdog_max_plug_angular_speed", 50.0)
+        )
+        self._physics_watchdog_max_violation_fraction = float(
+            getattr(cfg, "physics_watchdog_max_violation_fraction", 0.05)
+        )
+        self._physics_watchdog_check_interval = int(getattr(cfg, "physics_watchdog_check_interval", 8))
+        self._physics_watchdog_consecutive_checks = int(getattr(cfg, "physics_watchdog_consecutive_checks", 3))
+        if self._physics_watchdog_check_interval <= 0 or self._physics_watchdog_consecutive_checks <= 0:
+            raise ValueError("Physics-watchdog check intervals must be positive.")
+        if not 0.0 <= self._physics_watchdog_max_violation_fraction <= 1.0:
+            raise ValueError("physics_watchdog_max_violation_fraction must be in [0, 1].")
+        self._physics_watchdog_step_count = 0
+        self._physics_watchdog_failed_checks = 0
+
+    def _compute_mate_frames(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute socket and plug mate-frame poses in world coordinates."""
         socket = self.scene[self._success_socket_asset]
         plug = self.scene[self._success_plug_asset]
 
@@ -92,6 +125,11 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
             socket_pos, socket_quat, socket_offset, self._success_identity_quat
         )
         plug_frame_pos, plug_frame_quat = combine_frame_transforms(plug_pos, plug_quat, plug_offset, plug_goal_rot_inv)
+        return socket_frame_pos, socket_frame_quat, plug_frame_pos, plug_frame_quat
+
+    def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute success, mate-frame position error, and keypoint error."""
+        socket_frame_pos, socket_frame_quat, plug_frame_pos, plug_frame_quat = self._compute_mate_frames()
         position_error = torch.linalg.norm(plug_frame_pos - socket_frame_pos, dim=-1)
 
         num_keypoints = self._success_kp_offsets.shape[0]
@@ -114,15 +152,75 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
 
         return position_error < self._success_pos_threshold, position_error, keypoint_error
 
+    def _update_physics_watchdog(self, log: dict[str, torch.Tensor]) -> None:
+        """Log severe plug-state violations and stop persistently unstable runs."""
+        socket_frame_pos, socket_frame_quat, plug_frame_pos, plug_frame_quat = self._compute_mate_frames()
+        plug = self.scene[self._success_plug_asset]
+        plug_linear_velocity = plug.data.root_link_lin_vel_w.torch
+        plug_angular_velocity = plug.data.root_link_ang_vel_w.torch
+
+        insertion_axis = self._physics_watchdog_insertion_axis.unsqueeze(0).expand(self.num_envs, -1)
+        insertion_axis_w = quat_apply(socket_frame_quat, insertion_axis)
+        insertion_depth = torch.sum((plug_frame_pos - socket_frame_pos) * insertion_axis_w, dim=-1)
+        plug_linear_speed = torch.linalg.vector_norm(plug_linear_velocity, dim=-1)
+        plug_angular_speed = torch.linalg.vector_norm(plug_angular_velocity, dim=-1)
+        state_is_finite = torch.isfinite(
+            torch.cat(
+                (
+                    socket_frame_pos,
+                    socket_frame_quat,
+                    plug_frame_pos,
+                    plug_frame_quat,
+                    plug_linear_velocity,
+                    plug_angular_velocity,
+                ),
+                dim=-1,
+            )
+        ).all(dim=-1)
+        violation = (
+            ~state_is_finite
+            | (insertion_depth < -self._physics_watchdog_max_overtravel)
+            | (plug_linear_speed > self._physics_watchdog_max_plug_linear_speed)
+            | (plug_angular_speed > self._physics_watchdog_max_plug_angular_speed)
+        )
+
+        violation_rate = violation.float().mean()
+        safe_depth = torch.nan_to_num(insertion_depth, nan=0.0, posinf=1.0e6, neginf=-1.0e6)
+        safe_linear_speed = torch.nan_to_num(plug_linear_speed, nan=1.0e6, posinf=1.0e6, neginf=1.0e6)
+        safe_angular_speed = torch.nan_to_num(plug_angular_speed, nan=1.0e6, posinf=1.0e6, neginf=1.0e6)
+        log["Metrics/physics_watchdog_violation_rate"] = violation_rate
+        log["Metrics/physics_watchdog_min_insertion_depth_m"] = safe_depth.min()
+        log["Metrics/physics_watchdog_max_plug_linear_speed_m_s"] = safe_linear_speed.max()
+        log["Metrics/physics_watchdog_max_plug_angular_speed_rad_s"] = safe_angular_speed.max()
+
+        self._physics_watchdog_step_count += 1
+        if self._physics_watchdog_step_count % self._physics_watchdog_check_interval != 0:
+            return
+
+        if violation_rate.item() > self._physics_watchdog_max_violation_fraction:
+            self._physics_watchdog_failed_checks += 1
+        else:
+            self._physics_watchdog_failed_checks = 0
+        if self._physics_watchdog_failed_checks >= self._physics_watchdog_consecutive_checks:
+            raise RuntimeError(
+                "DisplayPort physics watchdog detected persistent instability: "
+                f"violation_rate={violation_rate.item():.3f}, "
+                f"min_insertion_depth={safe_depth.min().item():.6f} m, "
+                f"max_linear_speed={safe_linear_speed.max().item():.3f} m/s, "
+                f"max_angular_speed={safe_angular_speed.max().item():.3f} rad/s."
+            )
+
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         """Advance the environment and append instantaneous success metrics."""
         obs_buf, reward_buf, terminated, time_outs, extras = super().step(action)
+        log = extras.setdefault("log", {})
         if self._log_success_metrics:
             is_success, position_error, keypoint_error = self._compute_success()
-            log = extras.setdefault("log", {})
             log["Metrics/success_rate"] = is_success.float().mean()
             log["Metrics/plug_socket_pos_error_m"] = position_error.mean()
             log["Metrics/plug_socket_keypoint_dist_m"] = keypoint_error.mean()
+        if self._physics_watchdog_enabled:
+            self._update_physics_watchdog(log)
         return obs_buf, reward_buf, terminated, time_outs, extras
 
     def _reset_idx(self, env_ids: Sequence[int]):

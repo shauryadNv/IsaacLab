@@ -201,6 +201,19 @@ class NewtonCollisionPipelineCfg:
     Defaults to preserving gripper finger meshes.
     """
 
+    shape_collision_filter_pair_path_exprs: tuple[tuple[str, str], ...] = ()
+    """Shape-path expression pairs whose collisions are disabled.
+
+    Each pair contains two Python regular expressions evaluated with full-match
+    semantics against imported Newton shape paths. Every same-world shape pair
+    matching either expression ordering is added to Newton's collision-filter
+    list before model finalization. This setting is useful for removing known,
+    task-specific collision pairs from the explicit broad phase.
+
+    This setting is consumed while building the Newton model and is not passed
+    to :class:`newton.CollisionPipeline`. Defaults to no additional filtering.
+    """
+
     sdf_hydroelastic_config: HydroelasticSDFCfg | None = None
     """Configuration for SDF-based hydroelastic collision handling.
 
@@ -226,6 +239,7 @@ class NewtonCollisionPipelineCfg:
         cfg_dict.pop("mesh_sdf_max_resolution", None)
         cfg_dict.pop("mesh_sdf_shape_path_exprs", None)
         cfg_dict.pop("preserve_concave_shape_path_exprs", None)
+        cfg_dict.pop("shape_collision_filter_pair_path_exprs", None)
         hydro_cfg = cfg_dict.pop("sdf_hydroelastic_config", None)
         if hydro_cfg is not None:
             hydro_cfg.pop("sdf_max_resolution")

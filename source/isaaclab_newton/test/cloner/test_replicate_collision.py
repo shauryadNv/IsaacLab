@@ -7,7 +7,11 @@ import newton
 import numpy as np
 import pytest
 from isaaclab_newton.cloner import replicate as replicate_module
-from isaaclab_newton.cloner.replicate import _configure_hydroelastic_sdf_shapes, _configure_sdf_shapes
+from isaaclab_newton.cloner.replicate import (
+    _configure_hydroelastic_sdf_shapes,
+    _configure_sdf_shapes,
+    _configure_shape_collision_filter_pairs,
+)
 from isaaclab_newton.physics import HydroelasticSDFCfg, NewtonCollisionPipelineCfg
 
 from pxr import Usd, UsdGeom, UsdPhysics
@@ -154,6 +158,63 @@ def test_sdf_builder_options_are_not_forwarded_to_runtime_pipeline():
 
     assert "mesh_sdf_shape_path_exprs" not in pipeline_args
     assert "preserve_concave_shape_path_exprs" not in pipeline_args
+
+
+def test_shape_collision_filter_options_are_not_forwarded_to_runtime_pipeline():
+    cfg = NewtonCollisionPipelineCfg(
+        shape_collision_filter_pair_path_exprs=((r".*/Robot/link.*", r".*/DisplayPort.*"),),
+    )
+
+    pipeline_args = cfg.to_pipeline_args()
+
+    assert "shape_collision_filter_pair_path_exprs" not in pipeline_args
+
+
+def test_configure_shape_collision_filter_pairs_filters_matching_same_world_shapes():
+    builder = newton.ModelBuilder()
+    builder.begin_world()
+    robot_body = builder.add_body(label="/World/envs/env_0/Robot/link1")
+    plug_body = builder.add_body(label="/World/envs/env_0/DisplayPortPlug")
+    finger_body = builder.add_body(label="/World/envs/env_0/Robot/left_finger_tip")
+    robot_shape = builder.add_shape_box(body=robot_body)
+    plug_shape = builder.add_shape_box(body=plug_body)
+    finger_shape = builder.add_shape_box(body=finger_body)
+    builder.end_world()
+    builder.shape_label[robot_shape] = "/World/envs/env_0/Robot/link1/collisions"
+    builder.shape_label[plug_shape] = "/World/envs/env_0/DisplayPortPlug/colliders/sdf_connector"
+    builder.shape_label[finger_shape] = "/World/envs/env_0/Robot/left_finger_tip/collisions"
+
+    added = _configure_shape_collision_filter_pairs(
+        builder,
+        (
+            (
+                r".*/Robot/(?!left_finger_tip/).*/?collisions",
+                r".*/DisplayPortPlug/.*",
+            ),
+        ),
+    )
+
+    assert added == 1
+    assert builder.shape_collision_filter_pairs == [(robot_shape, plug_shape)]
+
+
+def test_configure_shape_collision_filter_pairs_skips_cross_world_pairs_and_duplicates():
+    builder = newton.ModelBuilder()
+    for env_id in range(2):
+        builder.begin_world()
+        robot_body = builder.add_body(label=f"/World/envs/env_{env_id}/Robot/link1")
+        plug_body = builder.add_body(label=f"/World/envs/env_{env_id}/DisplayPortPlug")
+        robot_shape = builder.add_shape_box(body=robot_body)
+        plug_shape = builder.add_shape_box(body=plug_body)
+        builder.shape_label[robot_shape] = f"/World/envs/env_{env_id}/Robot/link1/collisions"
+        builder.shape_label[plug_shape] = f"/World/envs/env_{env_id}/DisplayPortPlug/collider"
+        builder.end_world()
+
+    expr_pairs = ((r".*/Robot/link1/collisions", r".*/DisplayPortPlug/collider"),)
+
+    assert _configure_shape_collision_filter_pairs(builder, expr_pairs) == 2
+    assert _configure_shape_collision_filter_pairs(builder, expr_pairs) == 0
+    assert builder.shape_collision_filter_pairs == [(0, 1), (2, 3)]
 
 
 @pytest.mark.parametrize("max_resolution", [0, 63])
