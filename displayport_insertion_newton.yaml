@@ -118,6 +118,26 @@ workflow:
         export OMP_NUM_THREADS=$(({{num_cpus}} / NUM_GPUS))
         echo "Training ${TOTAL_ENVS} total environments: ${ENVS_PER_RANK} per rank on ${NUM_GPUS} GPUs"
 
+        $PYSH -c "
+        sim_dt = float('{{sim_dt}}')
+        decimation = int('{{decimation}}')
+        num_substeps = int('{{num_substeps}}')
+        collision_decimation = int('{{collision_decimation}}')
+        if sim_dt <= 0.0 or decimation <= 0 or num_substeps <= 0:
+            raise ValueError('sim_dt, decimation, and num_substeps must be positive')
+        if collision_decimation < 0:
+            raise ValueError('collision_decimation must be non-negative')
+        collision_passes = 1
+        if 0 < collision_decimation < num_substeps:
+            collision_passes += (num_substeps - 1) // collision_decimation
+        print(f'Outer physics rate: {1.0 / sim_dt:.1f} Hz')
+        print(f'Solver rate: {num_substeps / sim_dt:.1f} Hz')
+        print(f'Collision passes per outer tick: {collision_passes}')
+        print(f'Effective collision rate: {collision_passes / sim_dt:.1f} Hz')
+        print(f'Policy rate: {1.0 / (sim_dt * decimation):.1f} Hz')
+        print('Hydroelastic buffer fraction: {{hydro_buffer_fraction}}')
+        "
+
         $PYSH -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
           /tmp/run_distributed_rank.py \
           scripts/reinforcement_learning/rsl_rl/train.py \
@@ -139,6 +159,8 @@ workflow:
           env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
+          env.physics_watchdog_enabled={{physics_watchdog_enabled}} \
+          env.physics_watchdog_fail_fast={{physics_watchdog_fail_fast}} \
           agent.num_steps_per_env={{num_steps_per_env}} \
           agent.max_iterations={{max_iters}} \
           agent.experiment_name={{exp_name}}
@@ -179,6 +201,8 @@ default-values:
   plug_contact_offset: 0.00001
   socket_contact_offset: 0.0001
   use_cuda_graph: true
+  physics_watchdog_enabled: true
+  physics_watchdog_fail_fast: false
   num_steps_per_env: 512
   mem: 100Gi
   storage: 100Gi
