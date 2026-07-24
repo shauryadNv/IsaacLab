@@ -157,6 +157,8 @@ workflow:
           env.sim.render_interval={{decimation}} \
           env.sim.physics.collision_decimation={{collision_decimation}} \
           env.sim.physics.solver_cfg.update_data_interval={{update_data_interval}} \
+          env.sim.physics.solver_cfg.njmax={{njmax}} \
+          env.sim.physics.solver_cfg.nconmax={{nconmax}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.sdf_max_resolution={{sdf_resolution}} \
           env.sim.physics.collision_cfg.sdf_hydroelastic_config.buffer_fraction={{hydro_buffer_fraction}} \
           env.physics_watchdog_enabled={{physics_watchdog_enabled}} \
@@ -194,6 +196,8 @@ default-values:
   num_substeps: 10
   collision_decimation: 0
   update_data_interval: 10
+  njmax: 4096
+  nconmax: 4096
   sdf_resolution: 256
   hydro_buffer_fraction: 0.125
   default_shape_gap: 0.01
