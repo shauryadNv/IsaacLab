@@ -47,7 +47,12 @@ _INSERTION_LENGTH = 0.011
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG  # isort: skip
+from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG, ISAACLAB_ASSETS_DATA_DIR  # isort: skip
+
+
+_CALIBRATED_RIZON4S_GRAV_USD = (
+    f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Flexiv/Rizon4s/Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
+)
 
 
 ##
@@ -308,6 +313,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
+                usd_path=_CALIBRATED_RIZON4S_GRAV_USD,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,

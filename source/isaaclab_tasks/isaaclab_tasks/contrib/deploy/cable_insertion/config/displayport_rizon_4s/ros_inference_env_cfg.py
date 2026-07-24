@@ -74,9 +74,11 @@ class Rizon4sGravDisplayportInsertionROSInferenceEnvCfg(Rizon4sGravDisplayportIn
             "command_velocity_limit_rad_s": FLEXIV_ROBOT_COLLECTION_COMMAND_VELOCITY_LIMIT,
             "command_acceleration_limit_rad_s2": FLEXIV_ROBOT_COLLECTION_COMMAND_ACCELERATION_LIMIT,
             "action_latency_ms": FLEXIV_ACTION_LATENCY_MS,
+            "robot_usd": "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
             "sysid_notes": (
                 "Command-side velocity/acceleration limiting and latency matched to "
-                "Flexiv deployment command-response data. Actuator gains are unchanged."
+                "Flexiv deployment command-response data. Uses the calibrated Rizon4s-063459 "
+                "kinematics USD. Actuator gains are unchanged."
             ),
         }
         self.actions.arm_action = ShapedDelayedRelativeJointPositionActionCfg(
