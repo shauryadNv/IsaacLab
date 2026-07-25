@@ -13,6 +13,11 @@ import torch
 import warp as wp
 
 from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
+from isaaclab.utils.leapp import (
+    QUAT_XYZW_ELEMENT_NAMES,
+    XYZ_ELEMENT_NAMES,
+    InputKindEnum,
+)
 from isaaclab.utils.math import combine_frame_transforms, matrix_from_quat
 
 if TYPE_CHECKING:
@@ -20,6 +25,109 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
     from .events import randomize_gear_type
+
+
+_LEAPP_TRACED_OBSERVATION_INPUTS = "_leapp_traced_observation_inputs"
+_LEAPP_CONSUMED_OBSERVATION_INPUTS = "_leapp_consumed_observation_inputs"
+
+
+def _tensor_data_to_torch(data) -> torch.Tensor:
+    """Return a torch tensor view for Isaac Lab data stored as torch or Warp-backed data."""
+    return data.torch if hasattr(data, "torch") else wp.to_torch(data)
+
+
+def _selected_joint_names(asset, joint_ids) -> list[str] | None:
+    """Return joint names selected by the observation config."""
+    joint_names = getattr(asset, "joint_names", None)
+    if joint_names is None:
+        return None
+    if joint_ids is None or joint_ids == slice(None):
+        return list(joint_names)
+    if isinstance(joint_ids, slice):
+        return list(joint_names[joint_ids])
+    if hasattr(joint_ids, "tolist"):
+        joint_ids = joint_ids.tolist()
+    return [joint_names[int(joint_id)] for joint_id in joint_ids]
+
+
+def _is_leapp_export_env(env) -> bool:
+    """Return whether the observation is running under the LEAPP export proxy."""
+    return type(env).__name__ == "_EnvProxy"
+
+
+def _leapp_real_env(env):
+    """Return the wrapped Isaac Lab env when LEAPP passes an export proxy."""
+    if _is_leapp_export_env(env):
+        return object.__getattribute__(env, "_real_env")
+    return env
+
+
+def _set_leapp_traced_observation_input(env, name: str, tensor: torch.Tensor) -> None:
+    """Store a traced observation tensor for later export-only reuse."""
+    if not _is_leapp_export_env(env):
+        return
+    real_env = _leapp_real_env(env)
+    traced_inputs = getattr(real_env, _LEAPP_TRACED_OBSERVATION_INPUTS, None)
+    if traced_inputs is None:
+        traced_inputs = {}
+        setattr(real_env, _LEAPP_TRACED_OBSERVATION_INPUTS, traced_inputs)
+    traced_inputs[name] = tensor
+    getattr(real_env, _LEAPP_CONSUMED_OBSERVATION_INPUTS, set()).discard(name)
+
+
+def _deploy_object_input_base_name(asset_name: str) -> str:
+    """Return a stable deploy input base name for common socket/plug assets."""
+    for prefix in ("dp_", "gb300_", "factory_"):
+        if asset_name.startswith(prefix):
+            return asset_name[len(prefix) :]
+    return asset_name
+
+
+def joint_pos(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Joint positions for the configured joints, exposed as the LEAPP input boundary."""
+    real_env = _leapp_real_env(env)
+    asset = real_env.scene[asset_cfg.name]
+    selected_joint_pos = _tensor_data_to_torch(asset.data.joint_pos)[:, asset_cfg.joint_ids]
+    joint_names = _selected_joint_names(asset, asset_cfg.joint_ids)
+    if _is_leapp_export_env(env):
+        from leapp import annotate
+        from leapp.utils.tensor_description import TensorSemantics
+
+        selected_joint_pos = annotate.input_tensors(
+            env.unwrapped.spec.id,
+            TensorSemantics(
+                name=f"{asset_cfg.name}_joint_pos",
+                ref=selected_joint_pos,
+                kind=InputKindEnum.JOINT_POSITION,
+                element_names=joint_names,
+                extra={"isaaclab_connection": f"state:{asset_cfg.name}:joint_pos"},
+            ),
+        )
+        _set_leapp_traced_observation_input(env, f"{asset_cfg.name}_joint_pos", selected_joint_pos)
+    return selected_joint_pos
+
+
+def joint_vel(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Joint velocities for the configured joints, exposed as the LEAPP input boundary."""
+    real_env = _leapp_real_env(env)
+    asset = real_env.scene[asset_cfg.name]
+    selected_joint_vel = _tensor_data_to_torch(asset.data.joint_vel)[:, asset_cfg.joint_ids]
+    joint_names = _selected_joint_names(asset, asset_cfg.joint_ids)
+    if _is_leapp_export_env(env):
+        from leapp import annotate
+        from leapp.utils.tensor_description import TensorSemantics
+
+        selected_joint_vel = annotate.input_tensors(
+            env.unwrapped.spec.id,
+            TensorSemantics(
+                name=f"{asset_cfg.name}_joint_vel",
+                ref=selected_joint_vel,
+                kind=InputKindEnum.JOINT_VELOCITY,
+                element_names=joint_names,
+                extra={"isaaclab_connection": f"state:{asset_cfg.name}:joint_vel"},
+            ),
+        )
+    return selected_joint_vel
 
 
 class gear_shaft_pos_w(ManagerTermBase):
@@ -381,14 +489,32 @@ class rigid_object_pos_w(ManagerTermBase):
         asset_cfg: SceneEntityCfg | None = None,
         offset: list | None = None,
     ) -> torch.Tensor:
-        obj_pos = wp.to_torch(self.asset.data.root_pos_w)
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        real_env = _leapp_real_env(env)
+        asset = real_env.scene[self.asset_cfg.name]
+        obj_pos = _tensor_data_to_torch(asset.data.root_pos_w)
+        obj_quat = _tensor_data_to_torch(asset.data.root_quat_w)
 
         if torch.any(self.offset_tensor != 0):
-            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
+            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(real_env.num_envs, 1)
             obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, offset_repeated, self.identity_quat)
 
-        return obj_pos - env.scene.env_origins
+        obj_pos = obj_pos - real_env.scene.env_origins
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
+
+            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_pos"
+            obj_pos = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name=input_name,
+                    ref=obj_pos,
+                    kind=InputKindEnum.BODY_POSITION,
+                    element_names=XYZ_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": f"observation:policy:{input_name}"},
+                ),
+            )
+        return obj_pos
 
 
 class rigid_object_quat_w(ManagerTermBase):
@@ -419,13 +545,26 @@ class rigid_object_quat_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        real_env = _leapp_real_env(env)
+        obj_quat = _tensor_data_to_torch(real_env.scene[self.asset_cfg.name].data.root_quat_w)
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
 
-        w_negative = obj_quat[:, 3] < 0
-        positive_quat = obj_quat.clone()
-        positive_quat[w_negative] = -obj_quat[w_negative]
+            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_quat"
+            obj_quat = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name=input_name,
+                    ref=obj_quat,
+                    kind=InputKindEnum.BODY_ROTATION,
+                    element_names=QUAT_XYZW_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": f"observation:policy:{input_name}"},
+                ),
+            )
 
-        return positive_quat
+        sign = torch.where(obj_quat[:, 3:4] < 0, -1.0, 1.0)
+        return obj_quat * sign
 
 
 def _quat_to_rot_6d(quat: torch.Tensor) -> torch.Tensor:
