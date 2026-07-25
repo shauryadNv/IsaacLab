@@ -297,7 +297,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         # Action configuration for Rizon 4s arm
         self.joint_action_scale = 0.025
         _arm_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
-        self.actions.arm_action = mdp.RelativeJointPositionActionCfg(
+        self.actions.arm_action = mdp.DeployRelativeJointPositionActionCfg(
             asset_name="robot",
             joint_names=_arm_joint_names,
             scale=self.joint_action_scale,

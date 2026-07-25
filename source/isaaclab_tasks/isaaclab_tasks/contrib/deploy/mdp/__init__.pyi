@@ -9,8 +9,12 @@ __all__ = [
     "set_robot_to_grasp_pose",
     "set_robot_to_object_grasp_pose",
     "reset_plug_at_goal_curriculum",
+    "DeployRelativeJointPositionAction",
+    "DeployRelativeJointPositionActionCfg",
     "ResetSampledConstantNoiseModel",
     "ResetSampledConstantNoiseModelCfg",
+    "joint_pos",
+    "joint_vel",
     "gear_pos_w",
     "gear_quat_w",
     "gear_shaft_pos_w",
@@ -41,8 +45,12 @@ from .events import (
     set_robot_to_object_grasp_pose,
     reset_plug_at_goal_curriculum,
 )
+from .actions import DeployRelativeJointPositionAction
+from .actions_cfg import DeployRelativeJointPositionActionCfg
 from .noise_models import ResetSampledConstantNoiseModel, ResetSampledConstantNoiseModelCfg
 from .observations import (
+    joint_pos,
+    joint_vel,
     gear_pos_w,
     gear_quat_w,
     gear_shaft_pos_w,
