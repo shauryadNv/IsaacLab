@@ -17,6 +17,7 @@ import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
 from isaaclab.managers import CommandTerm
 from isaaclab.markers import VisualizationMarkers
+from isaaclab.utils.leapp.leapp_semantics import TWIST3_ELEMENT_NAMES
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -95,7 +96,7 @@ class UniformVelocityCommand(CommandTerm):
         # adds (optional) cmd kind and element names for leapp export
         # during export, semantic data about this command will be used to annotate the command input
         self.cfg.cmd_kind = self.cfg.cmd_kind or "command/body/velocity"
-        self.cfg.element_names = self.cfg.element_names or ["lin_vel_x", "lin_vel_y", "ang_vel_z"]
+        self.cfg.element_names = self.cfg.element_names or TWIST3_ELEMENT_NAMES
 
     def __str__(self) -> str:
         """Return a string representation of the command generator."""

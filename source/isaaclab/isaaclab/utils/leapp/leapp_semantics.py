@@ -48,6 +48,23 @@ QUAT_XYZW_ELEMENT_NAMES: list[str] = ["qx", "qy", "qz", "qw"]
 POSE7_ELEMENT_NAMES: list[str] = ["x", "y", "z", "qx", "qy", "qz", "qw"]
 POSE6_ELEMENT_NAMES: list[str] = ["x", "y", "z", "angular_x", "angular_y", "angular_z"]
 WRENCH6_ELEMENT_NAMES: list[str] = ["fx", "fy", "fz", "tx", "ty", "tz"]
+TWIST3_ELEMENT_NAMES: list[str] = ["lin_vel_x", "lin_vel_y", "ang_vel_z"]
+TWIST6_ELEMENT_NAMES: list[str] = [
+    "lin_vel_x",
+    "lin_vel_y",
+    "lin_vel_z",
+    "ang_vel_x",
+    "ang_vel_y",
+    "ang_vel_z",
+]
+
+_COMMAND_BODY_VELOCITY_KIND = "command/body/velocity"
+_TWIST_ELEMENT_NAME_ALIASES = {
+    ("lin_x", "lin_y", "ang_z"): TWIST3_ELEMENT_NAMES,
+    ("lin_x", "lin_y", "lin_z", "ang_x", "ang_y", "ang_z"): TWIST6_ELEMENT_NAMES,
+    ("linear_x", "linear_y", "angular_z"): TWIST3_ELEMENT_NAMES,
+    ("linear_x", "linear_y", "linear_z", "angular_x", "angular_y", "angular_z"): TWIST6_ELEMENT_NAMES,
+}
 
 
 def select_element_names(names: list[str] | None, indices: Any = None) -> list[str] | None:
@@ -65,6 +82,66 @@ def select_element_names(names: list[str] | None, indices: Any = None) -> list[s
     if isinstance(indices, int):
         return [names[indices]]
     return None
+
+
+def canonicalize_command_element_names(
+    kind: Any,
+    element_names: list[str] | list[list[str]] | None,
+    ref: Any | None = None,
+) -> list[str] | list[list[str]] | None:
+    """Return Deploy-compatible element names for command tensors.
+
+    Isaac ROS Deploy's Twist/TwistStamped converters publish body velocity
+    elements as ``lin_vel_*`` and ``ang_vel_*``.  Older export configs used
+    shorter names such as ``lin_x`` / ``ang_x``.  Canonicalize only the
+    command-body-velocity case so tensor ordering stays unchanged while the
+    exported metadata matches the runtime converter ``TensorSpec``.
+    """
+    if getattr(kind, "value", kind) != _COMMAND_BODY_VELOCITY_KIND:
+        return element_names
+
+    width = None
+    with suppress(AttributeError, IndexError, TypeError):
+        width = int(ref.shape[-1])
+    if width is not None and width not in (3, 6):
+        raise ValueError(f"LEAPP command/body/velocity input must be 3D or 6D, but tensor width is {width}.")
+
+    if element_names is None:
+        if width == 3:
+            return TWIST3_ELEMENT_NAMES
+        if width == 6:
+            return TWIST6_ELEMENT_NAMES
+        return None
+
+    # Command tensors are flat.  Nested names cannot match the current Deploy
+    # Twist converter TensorSpec.
+    if any(isinstance(name, (list, tuple)) for name in element_names):
+        raise ValueError("LEAPP command/body/velocity element names must be a flat list.")
+
+    names_tuple = tuple(element_names)
+    canonical_names = _TWIST_ELEMENT_NAME_ALIASES.get(names_tuple, list(element_names))
+    if len(canonical_names) == 3:
+        expected_names = TWIST3_ELEMENT_NAMES
+    elif len(canonical_names) == 6:
+        expected_names = TWIST6_ELEMENT_NAMES
+    else:
+        raise ValueError(
+            "LEAPP command/body/velocity input must have 3 or 6 element names, "
+            f"but got {len(canonical_names)}."
+        )
+
+    if width is not None and len(canonical_names) != width:
+        raise ValueError(
+            f"LEAPP command/body/velocity input has {len(canonical_names)} element names, "
+            f"but tensor width is {width}."
+        )
+    if canonical_names != expected_names:
+        raise ValueError(
+            "LEAPP command/body/velocity element names must match Isaac ROS Deploy Twist converter names. "
+            f"Got {list(element_names)}; expected {expected_names}."
+        )
+
+    return list(canonical_names)
 
 
 def leapp_tensor_semantics(
