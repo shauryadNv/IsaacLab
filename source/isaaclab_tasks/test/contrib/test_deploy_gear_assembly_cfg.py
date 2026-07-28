@@ -44,12 +44,15 @@ def test_rizon_gear_newton_collision_presets_use_local_sdf_assets():
     hydro_cfg = resolve_presets(Rizon4sGearAssemblyEnvCfg(), {"newton_hydroelastic"})
 
     assert type(default_cfg.sim.physics).__name__ == "PhysxCfg"
+    assert default_cfg.scene.robot.spawn.joint_drive_props is None
     assert mujoco_cfg.sim.physics.solver_cfg.use_mujoco_contacts is True
+    assert mujoco_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is True
     assert "/assets/newton/" in mujoco_cfg.scene.factory_gear_base.spawn.usd_path
 
     for env_cfg in (point_cfg, hydro_cfg):
         assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
         assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 1_500_000
+        assert env_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is True
         for asset_name in (
             "factory_gear_base",
             "factory_gear_small",

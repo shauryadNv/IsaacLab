@@ -45,7 +45,16 @@ def test_displayport_preserves_physx_default_and_exposes_newton_mjwarp():
     newton_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_mjwarp"})
 
     assert type(default_cfg.sim.physics).__name__ == "PhysxCfg"
+    assert default_cfg.scene.robot.spawn.joint_drive_props is None
+    assert default_cfg.scene.robot.actuators["shoulder"].stiffness == 1320.0
+    assert default_cfg.scene.robot.actuators["elbow"].stiffness == 600.0
+    assert default_cfg.scene.robot.actuators["wrist"].stiffness == 216.0
+
     assert newton_cfg.sim.physics.solver_cfg.use_mujoco_contacts is True
+    assert newton_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is True
+    assert newton_cfg.scene.robot.actuators["shoulder"].stiffness == 6000.0
+    assert newton_cfg.scene.robot.actuators["elbow"].stiffness == 4200.0
+    assert newton_cfg.scene.robot.actuators["wrist"].stiffness == 1500.0
     assert newton_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
     assert newton_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
 
