@@ -338,3 +338,58 @@ class gear_quat_w(ManagerTermBase):
         gear_positive_quat[w_negative] = -gear_quat[w_negative]
 
         return gear_positive_quat
+
+
+class rigid_object_pos_w(ManagerTermBase):
+    """Rigid object position in the environment frame, with optional local-frame offset."""
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+
+        if "asset_cfg" not in cfg.params:
+            raise ValueError("'asset_cfg' parameter is required in rigid_object_pos_w configuration.")
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: RigidObject = env.scene[self.asset_cfg.name]
+
+        self.offset_tensor = torch.tensor(cfg.params.get("offset", [0.0, 0.0, 0.0]), device=env.device)
+        self.identity_quat = (
+            torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=env.device, dtype=torch.float32)
+            .repeat(env.num_envs, 1)
+            .contiguous()
+        )
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        offset: list | None = None,
+    ) -> torch.Tensor:
+        obj_pos = self.asset.data.root_pos_w.torch
+        obj_quat = self.asset.data.root_quat_w.torch
+
+        if torch.any(self.offset_tensor != 0):
+            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
+            obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, offset_repeated, self.identity_quat)
+
+        return obj_pos - env.scene.env_origins
+
+
+class rigid_object_quat_w(ManagerTermBase):
+    """Rigid object orientation in the world frame."""
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+
+        if "asset_cfg" not in cfg.params:
+            raise ValueError("'asset_cfg' parameter is required in rigid_object_quat_w configuration.")
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: RigidObject = env.scene[self.asset_cfg.name]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+    ) -> torch.Tensor:
+        obj_quat = self.asset.data.root_quat_w.torch
+        w_negative = obj_quat[:, 3] < 0
+        return torch.where(w_negative.unsqueeze(-1), -obj_quat, obj_quat)
