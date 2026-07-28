@@ -58,8 +58,8 @@ from isaaclab_tasks.utils import PresetCfg, preset
 CABLE_INSERTION_DIR = os.path.dirname(os.path.abspath(__file__))
 DISPLAY_ASSETS_DIR = os.path.join(CABLE_INSERTION_DIR, "display_cable_insertion_assets")
 
-# A 256-world GPU shard peaks near 6.5M broad-phase pairs during randomized resets.
-_DISPLAYPORT_MAX_TRIANGLE_PAIRS = 2**23
+# A 256-world GPU shard peaks near 13.8M broad-phase pairs during initial rollouts.
+_DISPLAYPORT_MAX_TRIANGLE_PAIRS = 2**24
 
 # ---------------------------------------------------------------------------
 # Pure-python quaternion helpers (for module-level constant computation)
