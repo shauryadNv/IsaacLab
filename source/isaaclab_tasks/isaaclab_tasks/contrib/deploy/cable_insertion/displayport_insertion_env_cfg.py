@@ -162,7 +162,7 @@ class DisplayPortPlug(RigidObjectCfg):
             default=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_fixed_sdf.usd"),
             newton_mjwarp=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
             newton_sdf=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
-            newton_hydroelastic=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
+            newton_hydroelastic=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_hydroelastic.usda"),
         ),
         scale=(1.0, 1.0, 1.0),
         activate_contact_sensors=True,
@@ -201,7 +201,7 @@ class DisplayPortSocket(RigidObjectCfg):
             default=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_fixed_sdf_split_visuals.usd"),
             newton_mjwarp=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
             newton_sdf=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
-            newton_hydroelastic=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
+            newton_hydroelastic=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_hydroelastic.usda"),
         ),
         scale=(1.0, 1.0, 1.0),
         activate_contact_sensors=False,
@@ -271,7 +271,6 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
             ccd_iterations=35,
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
-            max_triangle_pairs=4_194_304,
             sdf_hydroelastic_config=HydroelasticSDFCfg(
                 reduce_contacts=True,
                 normal_matching=True,
@@ -295,7 +294,6 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
             reduce_contacts=True,
-            max_triangle_pairs=4_194_304,
         ),
         num_substeps=2,
         debug_mode=False,

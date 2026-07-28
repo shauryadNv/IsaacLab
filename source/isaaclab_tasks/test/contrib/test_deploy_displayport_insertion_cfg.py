@@ -30,9 +30,9 @@ def test_displayport_newton_uses_full_insertion_target_and_physx_grasp():
 
     assert env_cfg.grasp_offset == [0.0025, 0.0, -0.1875]
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is not None
-    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 4_194_304
-    assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
-    assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
+    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 1_000_000
+    assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_hydroelastic.usda")
+    assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_hydroelastic.usda")
     assert env_cfg.observations.policy.socket_pos.params["offset"] == SOCKET_INSERTION_OFFSET
     assert env_cfg.observations.critic.socket_pos.params["offset"] == SOCKET_INSERTION_OFFSET
     assert env_cfg.rewards.plug_socket_keypoint_tracking.params["offset_1"] == SOCKET_INSERTION_OFFSET
@@ -54,7 +54,7 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     """Hard SDF should cook mesh volumes without enabling hydroelastic contact."""
     env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_sdf"})
 
-    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 4_194_304
+    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 1_000_000
     assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
     assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
@@ -64,16 +64,18 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
 def test_displayport_assets_author_newton_sdf_per_active_collider():
     """Newton overlays should author SDF metadata only on active collision meshes."""
     expected_counts = {
-        "display_port_plug_newton_sdf.usda": 1,
-        "display_port_socket_newton_sdf.usda": 5,
+        "display_port_plug_newton_sdf.usda": (1, False),
+        "display_port_socket_newton_sdf.usda": (5, False),
+        "display_port_plug_newton_hydroelastic.usda": (1, True),
+        "display_port_socket_newton_hydroelastic.usda": (5, True),
     }
-    for filename, expected_count in expected_counts.items():
+    for filename, (expected_count, hydroelastic_enabled) in expected_counts.items():
         stage = Usd.Stage.Open(f"{DISPLAY_ASSETS_DIR}/{filename}")
         sdf_prims = [prim for prim in stage.Traverse() if prim.HasAttribute("newton:sdfMaxResolution")]
         assert len(sdf_prims) == expected_count
         assert all(prim.GetAttribute("newton:sdfMaxResolution").Get() == 256 for prim in sdf_prims)
         assert all(abs(prim.GetAttribute("newton:contactGap").Get() - 0.005) < 1.0e-8 for prim in sdf_prims)
-        assert all(prim.GetAttribute("newton:hydroelasticEnabled").Get() for prim in sdf_prims)
+        assert all(prim.GetAttribute("newton:hydroelasticEnabled").Get() is hydroelastic_enabled for prim in sdf_prims)
 
 
 def test_displayport_newton_ik_commands_flange_without_actor_velocity():
