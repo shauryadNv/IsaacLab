@@ -58,6 +58,9 @@ from isaaclab_tasks.utils import PresetCfg, preset
 CABLE_INSERTION_DIR = os.path.dirname(os.path.abspath(__file__))
 DISPLAY_ASSETS_DIR = os.path.join(CABLE_INSERTION_DIR, "display_cable_insertion_assets")
 
+# A 256-world GPU shard peaks near 6.5M broad-phase pairs during randomized resets.
+_DISPLAYPORT_MAX_TRIANGLE_PAIRS = 2**23
+
 # ---------------------------------------------------------------------------
 # Pure-python quaternion helpers (for module-level constant computation)
 # ---------------------------------------------------------------------------
@@ -271,6 +274,7 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
             ccd_iterations=35,
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
+            max_triangle_pairs=_DISPLAYPORT_MAX_TRIANGLE_PAIRS,
             sdf_hydroelastic_config=HydroelasticSDFCfg(
                 reduce_contacts=True,
                 normal_matching=True,
@@ -294,6 +298,7 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
             reduce_contacts=True,
+            max_triangle_pairs=_DISPLAYPORT_MAX_TRIANGLE_PAIRS,
         ),
         num_substeps=2,
         debug_mode=False,

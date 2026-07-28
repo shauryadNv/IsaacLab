@@ -30,7 +30,7 @@ def test_displayport_newton_uses_full_insertion_target_and_physx_grasp():
 
     assert env_cfg.grasp_offset == [0.0025, 0.0, -0.1875]
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is not None
-    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 1_000_000
+    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 2**23
     assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_hydroelastic.usda")
     assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_hydroelastic.usda")
     assert env_cfg.observations.policy.socket_pos.params["offset"] == SOCKET_INSERTION_OFFSET
@@ -54,7 +54,7 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     """Hard SDF should cook mesh volumes without enabling hydroelastic contact."""
     env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_sdf"})
 
-    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 1_000_000
+    assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 2**23
     assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
     assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
