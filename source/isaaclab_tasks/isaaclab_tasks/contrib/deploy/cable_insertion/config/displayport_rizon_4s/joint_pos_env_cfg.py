@@ -19,6 +19,7 @@ from isaaclab_physx.sim.schemas import (
     PhysxRigidBodyPropertiesCfg,
 )
 
+import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -37,6 +38,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     compute_socket_root,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.events import ResetPlugAtGoalCurriculum
+from isaaclab_tasks.utils import PresetCfg, preset
 
 # ---------------------------------------------------------------------------
 # Flexiv workspace layout (DisplayPort insertion station)
@@ -51,6 +53,17 @@ _GEOMETRY_POS = (0.475, 0.125, 0.06)
 _SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)  # opening faces +Z (top-down insertion)
 _PLUG_CLEARANCE_Z = 0.068
 _INSERTION_LENGTH = 0.011
+
+
+def _newton_actuator_gain(default: float, newton: float) -> PresetCfg:
+    """Select the validated actuator gain for each physics backend."""
+    return preset(
+        default=default,
+        newton_mjwarp=newton,
+        newton_sdf=newton,
+        newton_hydroelastic=newton,
+    )
+
 
 _SOCKET_ROOT = compute_socket_root(_GEOMETRY_POS, _SOCKET_ROT)
 _PLUG_ROOT, _PLUG_ROT = compute_plug_pose(
@@ -302,6 +315,12 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
+                joint_drive_props=preset(
+                    default=None,
+                    newton_mjwarp=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                    newton_sdf=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                    newton_hydroelastic=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                ),
                 rigid_props=PhysxRigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,
@@ -335,6 +354,16 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                 rot=(0.0, 0.0, 0.0, 1.0),
             ),
         )
+
+        # PhysX disables gravity per robot body. Newton instead uses solver-native gravity
+        # compensation and the validated bare-arm gains so measured-relative actions do not
+        # accumulate load-induced tracking error.
+        self.scene.robot.actuators["shoulder"].stiffness = _newton_actuator_gain(1320.0, 6000.0)
+        self.scene.robot.actuators["shoulder"].damping = _newton_actuator_gain(72.0, 108.5)
+        self.scene.robot.actuators["elbow"].stiffness = _newton_actuator_gain(600.0, 4200.0)
+        self.scene.robot.actuators["elbow"].damping = _newton_actuator_gain(35.0, 90.7)
+        self.scene.robot.actuators["wrist"].stiffness = _newton_actuator_gain(216.0, 1500.0)
+        self.scene.robot.actuators["wrist"].damping = _newton_actuator_gain(29.0, 54.2)
 
         # Newton needs physical PD targets on the driven and follower joints so
         # the Grav linkage remains closed around the plug under contact load.

@@ -12,6 +12,7 @@ from isaaclab_physx.sim.schemas import (
     PhysxRigidBodyPropertiesCfg,
 )
 
+import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -27,6 +28,7 @@ from isaaclab_tasks.contrib.deploy.mdp.noise_models import (
     ResetSampledConstantNoiseModelCfg,
     ResetSampledQuaternionNoiseModelCfg,
 )
+from isaaclab_tasks.utils import preset
 
 ##
 # Pre-defined configs
@@ -291,6 +293,12 @@ class Rizon4sGearAssemblyEnvCfg(GearAssemblyEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
+                joint_drive_props=preset(
+                    default=None,
+                    newton_mjwarp=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                    newton_sdf=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                    newton_hydroelastic=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                ),
                 rigid_props=PhysxRigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,
