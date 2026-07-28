@@ -9,6 +9,7 @@ Added
 Fixed
 ^^^^^
 
-* Fixed Newton point-SDF presets to avoid allocating hydroelastic contact reducers.
+* Fixed Newton point-SDF presets to avoid allocating hydroelastic contact reducers and
+  sized the gear collision-pair buffer for 256 environments per GPU.
 * Fixed gear assembly reset and reward targets to use the selected gear shaft
   and a physical gripper grasp.

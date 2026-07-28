@@ -36,6 +36,9 @@ CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(CONFIG_DIR, "assets")
 NEWTON_GEAR_ASSETS_DIR = os.path.join(ASSETS_DIR, "newton")
 
+# A 256-world GPU shard peaks near 1.1M broad-phase pairs during randomized resets.
+_GEAR_MAX_TRIANGLE_PAIRS = 1_500_000
+
 
 def _gear_usd_path(default_usd_path: str, asset_name: str) -> PresetCfg:
     """Create a gear USD path preset with Newton-specific collision assets.
@@ -113,6 +116,7 @@ class GearAssemblyPhysicsCfg(PresetCfg):
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
             reduce_contacts=True,
+            max_triangle_pairs=_GEAR_MAX_TRIANGLE_PAIRS,
         ),
         num_substeps=2,
         debug_mode=False,
@@ -135,6 +139,7 @@ class GearAssemblyPhysicsCfg(PresetCfg):
             ccd_iterations=35,
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
+            max_triangle_pairs=_GEAR_MAX_TRIANGLE_PAIRS,
             sdf_hydroelastic_config=HydroelasticSDFCfg(
                 reduce_contacts=True,
                 normal_matching=True,
