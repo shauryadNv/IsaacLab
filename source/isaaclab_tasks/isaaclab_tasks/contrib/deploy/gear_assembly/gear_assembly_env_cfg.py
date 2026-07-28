@@ -45,13 +45,13 @@ def _gear_usd_path(default_usd_path: str, asset_name: str) -> PresetCfg:
         asset_name: Gear asset directory and USD stem.
 
     Returns:
-        Preset that resolves to a package-local Newton SDF asset for Newton collision presets.
+        Preset that resolves to package-local point-SDF or hydroelastic assets for Newton collision presets.
     """
     return preset(
         default=default_usd_path,
         newton_mjwarp=os.path.join(NEWTON_GEAR_ASSETS_DIR, asset_name, f"{asset_name}.usda"),
         newton_sdf=os.path.join(NEWTON_GEAR_ASSETS_DIR, asset_name, f"{asset_name}.usda"),
-        newton_hydroelastic=os.path.join(NEWTON_GEAR_ASSETS_DIR, asset_name, f"{asset_name}.usda"),
+        newton_hydroelastic=os.path.join(NEWTON_GEAR_ASSETS_DIR, asset_name, f"{asset_name}_hydroelastic.usda"),
     )
 
 
@@ -113,7 +113,6 @@ class GearAssemblyPhysicsCfg(PresetCfg):
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
             reduce_contacts=True,
-            max_triangle_pairs=4_194_304,
         ),
         num_substeps=2,
         debug_mode=False,
@@ -136,7 +135,6 @@ class GearAssemblyPhysicsCfg(PresetCfg):
             ccd_iterations=35,
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
-            max_triangle_pairs=4_194_304,
             sdf_hydroelastic_config=HydroelasticSDFCfg(
                 reduce_contacts=True,
                 normal_matching=True,

@@ -49,7 +49,7 @@ def test_rizon_gear_newton_collision_presets_use_local_sdf_assets():
 
     for env_cfg in (point_cfg, hydro_cfg):
         assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
-        assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 4_194_304
+        assert env_cfg.sim.physics.collision_cfg.max_triangle_pairs == 1_000_000
         for asset_name in (
             "factory_gear_base",
             "factory_gear_small",
@@ -62,6 +62,8 @@ def test_rizon_gear_newton_collision_presets_use_local_sdf_assets():
 
     assert point_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
     assert hydro_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is not None
+    assert point_cfg.scene.factory_gear_small.spawn.usd_path.endswith("factory_gear_small.usda")
+    assert hydro_cfg.scene.factory_gear_small.spawn.usd_path.endswith("factory_gear_small_hydroelastic.usda")
 
 
 def test_rizon_gear_uses_shaft_targets_relative_actions_and_physical_gripper():
@@ -103,11 +105,12 @@ def test_rizon_gear_assets_author_newton_sdf_per_collider():
         "factory_gear_medium",
         "factory_gear_large",
     ):
-        usd_path = f"{NEWTON_GEAR_ASSETS_DIR}/{asset_name}/{asset_name}.usda"
-        stage = Usd.Stage.Open(usd_path)
-        sdf_prims = [prim for prim in stage.Traverse() if prim.HasAttribute("newton:sdfMaxResolution")]
+        for suffix, hydroelastic_enabled in (("", False), ("_hydroelastic", True)):
+            usd_path = f"{NEWTON_GEAR_ASSETS_DIR}/{asset_name}/{asset_name}{suffix}.usda"
+            stage = Usd.Stage.Open(usd_path)
+            sdf_prims = [prim for prim in stage.Traverse() if prim.HasAttribute("newton:sdfMaxResolution")]
 
-        assert len(sdf_prims) == 1
-        assert sdf_prims[0].GetAttribute("newton:sdfMaxResolution").Get() == 128
-        assert sdf_prims[0].GetAttribute("newton:hydroelasticEnabled").Get() is True
-        assert sdf_prims[0].GetAttribute("physics:approximation").Get() == "sdf"
+            assert len(sdf_prims) == 1
+            assert sdf_prims[0].GetAttribute("newton:sdfMaxResolution").Get() == 128
+            assert sdf_prims[0].GetAttribute("newton:hydroelasticEnabled").Get() is hydroelastic_enabled
+            assert sdf_prims[0].GetAttribute("physics:approximation").Get() == "sdf"
