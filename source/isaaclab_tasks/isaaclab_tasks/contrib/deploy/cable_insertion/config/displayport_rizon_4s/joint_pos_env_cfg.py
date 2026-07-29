@@ -140,6 +140,20 @@ class EventCfg:
         },
     )
 
+    robot_joint_friction = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
+            ),
+            "friction_distribution_params": (0.0, 0.15),
+            "operation": "add",
+            "distribution": "uniform",
+        },
+    )
+
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
 
     randomize_socket_pose = EventTerm(
