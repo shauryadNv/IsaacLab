@@ -223,7 +223,7 @@ class ObservationsCfg:
             func=mdp.rigid_object_pos_w,
             params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET},
             noise=ResetSampledConstantNoiseModelCfg(
-                noise_cfg=UniformNoiseCfg(n_min=-0.01, n_max=0.01, operation="add")
+                noise_cfg=UniformNoiseCfg(n_min=0.0, n_max=0.0, operation="add")
             ),
         )
         socket_quat = ObsTerm(
