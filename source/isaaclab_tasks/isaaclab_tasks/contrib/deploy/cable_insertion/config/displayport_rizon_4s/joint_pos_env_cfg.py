@@ -140,6 +140,21 @@ class EventCfg:
         },
     )
 
+    robot_pd_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
+            ),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
+
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
 
     randomize_socket_pose = EventTerm(
