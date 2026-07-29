@@ -317,21 +317,26 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
                 joint_drive_props=preset(
                     default=None,
-                    newton_mjwarp=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
-                    newton_sdf=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
-                    newton_hydroelastic=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=True),
+                    newton_mjwarp=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
+                    newton_sdf=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
+                    newton_hydroelastic=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
                 ),
-                rigid_props=PhysxRigidBodyPropertiesCfg(
-                    disable_gravity=True,
-                    max_depenetration_velocity=5.0,
-                    linear_damping=0.0,
-                    angular_damping=0.0,
-                    max_linear_velocity=1000.0,
-                    max_angular_velocity=3666.0,
-                    enable_gyroscopic_forces=True,
-                    solver_position_iteration_count=4,
-                    solver_velocity_iteration_count=1,
-                    max_contact_impulse=1e32,
+                rigid_props=preset(
+                    default=PhysxRigidBodyPropertiesCfg(
+                        disable_gravity=True,
+                        max_depenetration_velocity=5.0,
+                        linear_damping=0.0,
+                        angular_damping=0.0,
+                        max_linear_velocity=1000.0,
+                        max_angular_velocity=3666.0,
+                        enable_gyroscopic_forces=True,
+                        solver_position_iteration_count=4,
+                        solver_velocity_iteration_count=1,
+                        max_contact_impulse=1e32,
+                    ),
+                    newton_mjwarp=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
+                    newton_sdf=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
+                    newton_hydroelastic=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
                 ),
                 articulation_props=PhysxArticulationRootPropertiesCfg(
                     enabled_self_collisions=False,
@@ -355,9 +360,9 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             ),
         )
 
-        # PhysX disables gravity per robot body. Newton instead uses solver-native gravity
-        # compensation and the validated bare-arm gains so measured-relative actions do not
-        # accumulate load-induced tracking error.
+        # PhysX excludes each robot body from gravity. Newton MJWarp applies full passive body
+        # gravity compensation without routing it through actuator force limits. The plug remains
+        # under world gravity in both backends.
         self.scene.robot.actuators["shoulder"].stiffness = _newton_actuator_gain(1320.0, 6000.0)
         self.scene.robot.actuators["shoulder"].damping = _newton_actuator_gain(72.0, 108.5)
         self.scene.robot.actuators["elbow"].stiffness = _newton_actuator_gain(600.0, 4200.0)

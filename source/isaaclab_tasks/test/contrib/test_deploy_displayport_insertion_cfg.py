@@ -51,12 +51,26 @@ def test_displayport_preserves_physx_default_and_exposes_newton_mjwarp():
     assert default_cfg.scene.robot.actuators["wrist"].stiffness == 216.0
 
     assert newton_cfg.sim.physics.solver_cfg.use_mujoco_contacts is True
-    assert newton_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is True
+    assert newton_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is False
     assert newton_cfg.scene.robot.actuators["shoulder"].stiffness == 6000.0
     assert newton_cfg.scene.robot.actuators["elbow"].stiffness == 4200.0
     assert newton_cfg.scene.robot.actuators["wrist"].stiffness == 1500.0
     assert newton_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
     assert newton_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
+
+
+def test_displayport_newton_disables_robot_gravity_passively():
+    """Newton should cancel gravity on robot bodies without using actuator forces."""
+    for preset_name in ("newton_mjwarp", "newton_sdf", "newton_hydroelastic"):
+        env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {preset_name})
+        rigid_props = env_cfg.scene.robot.spawn.rigid_props
+        joint_drive_props = env_cfg.scene.robot.spawn.joint_drive_props
+
+        assert type(rigid_props).__name__ == "MujocoRigidBodyPropertiesCfg"
+        assert rigid_props.gravcomp == 1.0
+        assert rigid_props.disable_gravity is None
+        assert joint_drive_props.actuatorgravcomp is False
+        assert env_cfg.scene.dp_plug.spawn.rigid_props.disable_gravity is False
 
 
 def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
