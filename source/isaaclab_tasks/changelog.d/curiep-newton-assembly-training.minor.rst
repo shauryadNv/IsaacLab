@@ -18,3 +18,6 @@ Fixed
 * Fixed Newton Flexiv DisplayPort insertion accumulating gravity-induced arm
   drift by applying passive body gravity compensation while preserving gravity
   on the plug and preserving the PhysX configuration.
+* Fixed DisplayPort point-SDF and hydroelastic contact loss at 256 environments
+  per GPU by sizing their collision buffers from measured randomized-rollout
+  peaks.
