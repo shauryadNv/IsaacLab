@@ -41,6 +41,16 @@ class HydroelasticSDFCfg:
     Defaults to ``1.0`` (same as Newton's default).
     """
 
+    buffer_mult_broad: int = 1
+    """Multiplier for the hydroelastic broad-phase buffer.
+
+    Increase this value when Newton reports a hydroelastic broad-phase overflow.
+    Unlike :attr:`buffer_fraction`, this changes only the broad-phase allocation
+    and leaves the iso-surface and contact buffers unchanged.
+
+    Defaults to ``1`` (same as Newton's default).
+    """
+
     normal_matching: bool = True
     """Whether to rotate reduced contact normals to align with aggregate force direction.
 

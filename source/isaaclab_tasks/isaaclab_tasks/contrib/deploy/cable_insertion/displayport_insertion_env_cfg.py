@@ -58,8 +58,11 @@ from isaaclab_tasks.utils import PresetCfg, preset
 CABLE_INSERTION_DIR = os.path.dirname(os.path.abspath(__file__))
 DISPLAY_ASSETS_DIR = os.path.join(CABLE_INSERTION_DIR, "display_cable_insertion_assets")
 
-# A 256-world GPU shard peaks near 13.8M broad-phase pairs during initial rollouts.
-_DISPLAYPORT_MAX_TRIANGLE_PAIRS = 2**24
+# A 256-world GPU shard reached 25.8M point-SDF triangle pairs and 26.5M
+# hydroelastic broad-phase block pairs during randomized rollouts.
+_DISPLAYPORT_MAX_TRIANGLE_PAIRS = 2**25
+_DISPLAYPORT_HYDRO_BUFFER_FRACTION = 0.125
+_DISPLAYPORT_HYDRO_BUFFER_MULT_BROAD = 8
 
 # ---------------------------------------------------------------------------
 # Pure-python quaternion helpers (for module-level constant computation)
@@ -277,6 +280,8 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
             max_triangle_pairs=_DISPLAYPORT_MAX_TRIANGLE_PAIRS,
             sdf_hydroelastic_config=HydroelasticSDFCfg(
                 reduce_contacts=True,
+                buffer_fraction=_DISPLAYPORT_HYDRO_BUFFER_FRACTION,
+                buffer_mult_broad=_DISPLAYPORT_HYDRO_BUFFER_MULT_BROAD,
                 normal_matching=True,
             ),
         ),
