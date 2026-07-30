@@ -16,7 +16,7 @@ from isaaclab.test.mock_interfaces.assets.mock_articulation import MockArticulat
 from isaaclab.utils import math as math_utils
 from isaaclab.utils.leapp import utils as leapp_utils
 from isaaclab.utils.leapp.export_annotator import ExportPatcher
-from isaaclab.utils.leapp.leapp_semantics import InputKindEnum
+from isaaclab.utils.leapp.leapp_semantics import InputKindEnum, TWIST6_ELEMENT_NAMES
 from isaaclab.utils.leapp.proxy import _DataProxy, _EnvProxy
 
 
@@ -102,3 +102,57 @@ def test_projected_gravity_observation_exports_root_quat_w_input(monkeypatch: py
     assert semantics.name == "robot_root_quat_w"
     assert semantics.kind == InputKindEnum.BODY_ROTATION
     assert semantics.extra == {"isaaclab_connection": "state:robot:root_quat_w"}
+
+
+def test_generated_body_velocity_command_exports_deploy_twist_names(monkeypatch: pytest.MonkeyPatch):
+    """Test legacy body-velocity command names are exported with Deploy Twist names."""
+    annotated_inputs = _capture_leapp_inputs(monkeypatch)
+    command_tensor = torch.zeros(2, 6, dtype=torch.float32)
+
+    def generated_commands(env, command_name=None, **kwargs):
+        return command_tensor
+
+    command_cfg = SimpleNamespace(
+        cmd_kind="command/body/velocity",
+        element_names=["lin_x", "lin_y", "lin_z", "ang_x", "ang_y", "ang_z"],
+    )
+    command_manager = SimpleNamespace(get_term=lambda name: SimpleNamespace(cfg=command_cfg))
+    env = SimpleNamespace(command_manager=command_manager)
+    term_cfg = SimpleNamespace(params={"command_name": "target_twist"})
+
+    patcher = ExportPatcher(export_method="onnx-dynamo")
+    patcher.task_name = "Isaac-Test-Task"
+
+    result = patcher._wrap_generated_commands(generated_commands, term_cfg)(env)
+
+    assert result is command_tensor
+    assert len(annotated_inputs) == 1
+    task_name, semantics = annotated_inputs[0]
+    assert task_name == "Isaac-Test-Task"
+    assert semantics.name == "target_twist"
+    assert semantics.kind == "command/body/velocity"
+    assert semantics.element_names == [TWIST6_ELEMENT_NAMES]
+    assert semantics.extra == {"isaaclab_connection": "command:target_twist"}
+
+
+def test_generated_body_velocity_command_rejects_non_deploy_twist_names(monkeypatch: pytest.MonkeyPatch):
+    """Test unknown body-velocity command names fail before exporting unusable YAML."""
+    _capture_leapp_inputs(monkeypatch)
+    command_tensor = torch.zeros(2, 6, dtype=torch.float32)
+
+    def generated_commands(env, command_name=None, **kwargs):
+        return command_tensor
+
+    command_cfg = SimpleNamespace(
+        cmd_kind="command/body/velocity",
+        element_names=["vx", "vy", "vz", "wx", "wy", "wz"],
+    )
+    command_manager = SimpleNamespace(get_term=lambda name: SimpleNamespace(cfg=command_cfg))
+    env = SimpleNamespace(command_manager=command_manager)
+    term_cfg = SimpleNamespace(params={"command_name": "target_twist"})
+
+    patcher = ExportPatcher(export_method="onnx-dynamo")
+    patcher.task_name = "Isaac-Test-Task"
+
+    with pytest.raises(ValueError, match="command/body/velocity element names"):
+        patcher._wrap_generated_commands(generated_commands, term_cfg)(env)

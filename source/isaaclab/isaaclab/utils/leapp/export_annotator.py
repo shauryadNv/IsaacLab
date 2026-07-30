@@ -45,7 +45,7 @@ from leapp.utils.tensor_description import TensorSemantics
 from isaaclab.assets.articulation.base_articulation import BaseArticulation
 from isaaclab.managers import ManagerTermBase
 
-from .leapp_semantics import select_element_names
+from .leapp_semantics import canonicalize_command_element_names, select_element_names
 from .proxy import _ArticulationWriteProxy, _DataProxy, _EnvProxy, _ManagerTermProxy
 from .utils import (
     TracedProxyArray,
@@ -540,11 +540,17 @@ class ExportPatcher:
             command_cfg = None
             with suppress(AttributeError, KeyError):
                 command_cfg = env.command_manager.get_term(leapp_input_name).cfg
+            kind = getattr(command_cfg, "cmd_kind", None)
+            element_names = canonicalize_command_element_names(
+                kind,
+                getattr(command_cfg, "element_names", None),
+                result,
+            )
             sem = TensorSemantics(
                 name=leapp_input_name,
                 ref=result,
-                kind=getattr(command_cfg, "cmd_kind", None),
-                element_names=getattr(command_cfg, "element_names", None),
+                kind=kind,
+                element_names=element_names,
                 extra=build_command_connection(leapp_input_name),
             )
             return annotate.input_tensors(task_name, sem)
