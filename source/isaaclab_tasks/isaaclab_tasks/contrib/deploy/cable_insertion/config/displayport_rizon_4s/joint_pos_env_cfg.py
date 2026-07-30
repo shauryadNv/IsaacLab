@@ -75,7 +75,12 @@ _PLUG_ROOT, _PLUG_ROT = compute_plug_pose(
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG  # isort: skip
+from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG, ISAACLAB_ASSETS_DATA_DIR  # isort: skip
+
+
+_CALIBRATED_RIZON4S_GRAV_USD = (
+    f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Flexiv/Rizon4s/Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
+)
 
 
 ##
@@ -447,3 +452,12 @@ class Rizon4sGravDisplayportInsertionNoJointVelEnvCfg(Rizon4sGravDisplayportInse
         # disables it in the manager-based ObservationManager. The critic group
         # still includes joint_vel.
         self.observations.policy.joint_vel = None
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg(Rizon4sGravDisplayportInsertionNoJointVelEnvCfg):
+    """Velocity-free DisplayPort task using calibrated Rizon 4S kinematics."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.robot.spawn.usd_path = _CALIBRATED_RIZON4S_GRAV_USD
