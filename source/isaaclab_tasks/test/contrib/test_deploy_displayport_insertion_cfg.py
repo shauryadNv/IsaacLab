@@ -5,6 +5,8 @@
 
 """Tests for the Deploy DisplayPort insertion environment configuration."""
 
+from pathlib import Path
+
 from pxr import Usd
 
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
@@ -14,6 +16,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
+    Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionEnvCfg,
     Rizon4sGravDisplayportInsertionNoJointVelEnvCfg,
 )
@@ -121,6 +124,40 @@ def test_displayport_no_joint_velocity_hides_velocity_from_actor_only():
 
     assert env_cfg.observations.policy.joint_vel is None
     assert env_cfg.observations.critic.joint_vel is not None
+
+
+def test_displayport_calibrated_robot_preserves_newton_training_configuration():
+    """Calibrated kinematics should change only the robot USD in the Newton task."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg(),
+        {"newton_sdf"},
+    )
+
+    robot_usd_path = Path(env_cfg.scene.robot.spawn.usd_path)
+    curriculum = env_cfg.events.reset_plug_curriculum.params
+
+    assert robot_usd_path.name == "Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
+    assert robot_usd_path.is_file()
+    robot_stage = Usd.Stage.Open(str(robot_usd_path))
+    required_prim_paths = (
+        "/Rizon4s/base_link",
+        "/Rizon4s/link7",
+        "/Rizon4s/flange",
+        "/Rizon4s/joints/joint1",
+        "/Rizon4s/joints/joint7",
+        "/Rizon4s/Grav_gripper/gripper_base",
+        "/Rizon4s/Grav_gripper/left_finger_tip",
+        "/Rizon4s/Grav_gripper/right_finger_tip",
+    )
+    assert robot_stage.GetDefaultPrim().GetPath() == "/Rizon4s"
+    assert all(robot_stage.GetPrimAtPath(path).IsValid() for path in required_prim_paths)
+    assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
+    assert env_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is False
+    assert type(env_cfg.actions.arm_action).__name__ == "RelativeJointPositionActionCfg"
+    assert env_cfg.observations.policy.joint_vel is None
+    assert env_cfg.observations.critic.joint_vel is not None
+    assert curriculum["at_goal_prob"] == 0.8
+    assert curriculum["at_goal_prob_final"] == 0.0
 
 
 def test_displayport_play_mode_uses_approach_resets():

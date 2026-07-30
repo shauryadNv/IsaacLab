@@ -142,6 +142,7 @@ def test_displayport_task_variants_use_success_logging_environment():
     task_ids = (
         "IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav",
         "IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-NoJointVel",
+        "IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-NoJointVel",
         "IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Newton-IK",
     )
 
