@@ -16,6 +16,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionEnvCfg,
     Rizon4sGravDisplayportInsertionNoJointVelEnvCfg,
@@ -158,6 +159,42 @@ def test_displayport_calibrated_robot_preserves_newton_training_configuration():
     assert env_cfg.observations.critic.joint_vel is not None
     assert curriculum["at_goal_prob"] == 0.8
     assert curriculum["at_goal_prob_final"] == 0.0
+
+
+def test_displayport_socket_observation_uses_reset_sampled_ten_millimeter_noise():
+    """The actor should observe one reset-sampled socket-position offset per episode."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg()
+
+    noise_model = env_cfg.observations.policy.socket_pos.noise
+    assert type(noise_model).__name__ == "ResetSampledConstantNoiseModelCfg"
+    assert noise_model.noise_cfg.n_min == -0.01
+    assert noise_model.noise_cfg.n_max == 0.01
+    assert noise_model.noise_cfg.operation == "add"
+    assert env_cfg.observations.critic.socket_pos.noise is None
+
+
+def test_displayport_calibrated_domain_randomization_targets_arm_joints():
+    """The calibrated DR task should randomize only joint1 through joint7 at reset."""
+    baseline_cfg = Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg()
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg()
+
+    assert baseline_cfg.events.randomize_arm_joint_friction is None
+    assert baseline_cfg.events.randomize_arm_pd_gains is None
+
+    friction = env_cfg.events.randomize_arm_joint_friction
+    assert friction.mode == "reset"
+    assert friction.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
+    assert friction.params["friction_distribution_params"] == (0.0, 0.15)
+    assert friction.params["operation"] == "add"
+    assert friction.params["distribution"] == "uniform"
+
+    gains = env_cfg.events.randomize_arm_pd_gains
+    assert gains.mode == "reset"
+    assert gains.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
+    assert gains.params["stiffness_distribution_params"] == (0.8, 1.2)
+    assert gains.params["damping_distribution_params"] == (0.8, 1.2)
+    assert gains.params["operation"] == "scale"
+    assert gains.params["distribution"] == "uniform"
 
 
 def test_displayport_play_mode_uses_approach_resets():
