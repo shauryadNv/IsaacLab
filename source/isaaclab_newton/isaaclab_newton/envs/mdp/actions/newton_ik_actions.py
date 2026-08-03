@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import torch
 import warp as wp
-from newton import JointType
+from newton import JointType, ModelBuilder
 from newton import Model as NewtonModel
 from newton.selection import ArticulationView
 
@@ -182,7 +182,9 @@ class NewtonInverseKinematicsAction(ActionTerm):
         # The proto builder is keyed by the bare clone source; the articulation
         # lives at the asset suffix below it (e.g. ".../env_0" + "/Robot").
         self._source_path = source_path + asset_suffix
-        prototype_model = NewtonManager._cl_protos[source_path].finalize(device=NewtonManager.get_model().device)
+        prototype_model = self._build_kinematic_prototype(
+            NewtonManager._cl_protos[source_path], device=NewtonManager.get_model().device
+        )
         prototype_view = ArticulationView(
             prototype_model,
             self._source_path,
@@ -372,6 +374,25 @@ class NewtonInverseKinematicsAction(ActionTerm):
         if layout.slice is not None:
             return list(range(layout.slice.start, layout.slice.stop))
         return [int(index) for index in layout.indices.numpy().tolist()]
+
+    @staticmethod
+    def _build_kinematic_prototype(source_builder: ModelBuilder, device: wp.DeviceLike) -> NewtonModel:
+        """Build an independent, collision-free model for inverse kinematics."""
+        prototype_builder = ModelBuilder(up_axis=source_builder.up_axis)
+        prototype_builder.add_builder(source_builder)
+
+        # ``add_builder`` intentionally shares geometry objects with its source.
+        # Finalizing those objects again would invalidate collision resources held
+        # by the live simulation model. IK only needs the body and joint topology,
+        # so remove collision geometry from the independent prototype first.
+        for name, value in vars(prototype_builder).items():
+            if name.startswith("shape_") and isinstance(value, list):
+                value.clear()
+        prototype_builder.body_shapes.clear()
+        prototype_builder.body_shapes.update({body_idx: [] for body_idx in range(prototype_builder.body_count)})
+        prototype_builder.shape_collision_filter_pairs.clear()
+
+        return prototype_builder.finalize(device=device)
 
     def _action_coordinate_names(self) -> list[str]:
         names: list[str] = []
