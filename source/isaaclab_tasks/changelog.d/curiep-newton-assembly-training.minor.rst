@@ -21,3 +21,5 @@ Fixed
 * Fixed DisplayPort point-SDF and hydroelastic contact loss at 256 environments
   per GPU by sizing their collision buffers from measured randomized-rollout
   peaks.
+* Fixed DisplayPort hydroelastic iso-surface contact loss by sizing its
+  refinement buffer from measured randomized-rollout peaks.

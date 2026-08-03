@@ -51,6 +51,17 @@ class HydroelasticSDFCfg:
     Defaults to ``1`` (same as Newton's default).
     """
 
+    buffer_mult_iso: int = 1
+    """Multiplier for the hydroelastic iso-surface extraction buffers.
+
+    Increase this value when Newton reports an iso subblock or iso voxel
+    overflow. Unlike :attr:`buffer_fraction`, this changes only the
+    iso-surface allocation and leaves the broad-phase and contact buffers
+    unchanged.
+
+    Defaults to ``1`` (same as Newton's default).
+    """
+
     normal_matching: bool = True
     """Whether to rotate reduced contact normals to align with aggregate force direction.
 

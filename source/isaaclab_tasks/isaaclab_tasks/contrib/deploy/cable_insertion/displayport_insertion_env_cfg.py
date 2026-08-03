@@ -59,10 +59,12 @@ CABLE_INSERTION_DIR = os.path.dirname(os.path.abspath(__file__))
 DISPLAY_ASSETS_DIR = os.path.join(CABLE_INSERTION_DIR, "display_cable_insertion_assets")
 
 # A 256-world GPU shard reached 25.8M point-SDF triangle pairs and 26.5M
-# hydroelastic broad-phase block pairs during randomized rollouts.
+# hydroelastic broad-phase block pairs during randomized rollouts. Its
+# hydroelastic L1 iso-refinement stage reached 8.0M entries.
 _DISPLAYPORT_MAX_TRIANGLE_PAIRS = 2**25
 _DISPLAYPORT_HYDRO_BUFFER_FRACTION = 0.125
 _DISPLAYPORT_HYDRO_BUFFER_MULT_BROAD = 8
+_DISPLAYPORT_HYDRO_BUFFER_MULT_ISO = 2
 
 # ---------------------------------------------------------------------------
 # Pure-python quaternion helpers (for module-level constant computation)
@@ -282,6 +284,7 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
                 reduce_contacts=True,
                 buffer_fraction=_DISPLAYPORT_HYDRO_BUFFER_FRACTION,
                 buffer_mult_broad=_DISPLAYPORT_HYDRO_BUFFER_MULT_BROAD,
+                buffer_mult_iso=_DISPLAYPORT_HYDRO_BUFFER_MULT_ISO,
                 normal_matching=True,
             ),
         ),
