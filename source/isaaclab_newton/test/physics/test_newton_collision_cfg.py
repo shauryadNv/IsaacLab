@@ -8,12 +8,13 @@
 from isaaclab_newton.physics import HydroelasticSDFCfg, NewtonCollisionPipelineCfg
 
 
-def test_hydroelastic_broad_buffer_multiplier_reaches_newton():
-    """The broad-phase multiplier should be forwarded to Newton unchanged."""
+def test_hydroelastic_buffer_multipliers_reach_newton():
+    """The per-stage buffer multipliers should be forwarded to Newton unchanged."""
     cfg = NewtonCollisionPipelineCfg(
         sdf_hydroelastic_config=HydroelasticSDFCfg(
             buffer_fraction=0.125,
             buffer_mult_broad=8,
+            buffer_mult_iso=2,
         )
     )
 
@@ -21,3 +22,4 @@ def test_hydroelastic_broad_buffer_multiplier_reaches_newton():
 
     assert hydro_cfg.buffer_fraction == 0.125
     assert hydro_cfg.buffer_mult_broad == 8
+    assert hydro_cfg.buffer_mult_iso == 2
