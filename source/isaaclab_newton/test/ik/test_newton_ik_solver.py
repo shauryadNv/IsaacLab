@@ -9,6 +9,7 @@ import isaaclab_newton.ik.newton_ik_objectives as objectives_module
 import isaaclab_newton.ik.newton_ik_solver as ik_solver_module
 import torch
 import warp as wp
+from isaaclab_newton.envs.mdp.actions.newton_ik_actions import NewtonInverseKinematicsAction
 from isaaclab_newton.ik.newton_ik_objectives import NewtonIKBuildContext, NewtonIKObjective, NewtonIKPoseObjective
 from isaaclab_newton.ik.newton_ik_objectives_cfg import (
     NewtonIKJointLimitObjectiveCfg,
@@ -17,6 +18,7 @@ from isaaclab_newton.ik.newton_ik_objectives_cfg import (
 )
 from isaaclab_newton.ik.newton_ik_solver import NewtonIKSolver
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
+from newton import ModelBuilder
 
 from isaaclab.utils.configclass import configclass
 
@@ -185,3 +187,17 @@ def test_custom_objective_cfg_is_built_and_wired(monkeypatch):
 
     assert "custom" in solver.objectives_by_name
     assert _CustomObjective.SENTINEL in solver.solver.kwargs["objectives"]
+
+
+def test_ik_prototype_is_collision_free_and_preserves_source_builder():
+    source_builder = ModelBuilder()
+    body_idx = source_builder.add_body(mass=1.0, label="robot_base")
+    source_builder.add_shape_box(body_idx, hx=0.1, hy=0.1, hz=0.1)
+
+    action = object.__new__(NewtonInverseKinematicsAction)
+    prototype_model = action._build_kinematic_prototype(source_builder, device="cpu")
+
+    assert source_builder.shape_count == 1
+    assert prototype_model.shape_count == 0
+    assert prototype_model.body_count == source_builder.body_count
+    assert all(len(shape_ids) == 0 for shape_ids in prototype_model.body_shapes.values())
