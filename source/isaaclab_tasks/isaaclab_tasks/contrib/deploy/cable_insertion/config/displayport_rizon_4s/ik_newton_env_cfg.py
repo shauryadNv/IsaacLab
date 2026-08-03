@@ -12,6 +12,25 @@ from isaaclab.utils.configclass import configclass
 from . import joint_pos_env_cfg
 
 
+def _flange_ik_action() -> NewtonInverseKinematicsActionCfg:
+    """Create the relative flange-pose action shared by DisplayPort IK tasks."""
+    return NewtonInverseKinematicsActionCfg(
+        asset_name="robot",
+        joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
+        controller=NewtonIKSolverCfg(optimizer="lm", jacobian_mode="analytic", iterations=24),
+        clip={".*": (-0.5, 0.5)},
+        objectives=[
+            NewtonIKPoseObjectiveCfg(
+                body_name="flange",
+                command_type="pose",
+                use_relative_mode=True,
+                scale=0.01,
+            ),
+            NewtonIKJointLimitObjectiveCfg(weight=0.1),
+        ],
+    )
+
+
 @configclass
 class Rizon4sGravDisplayportInsertionIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGravDisplayportInsertionNoJointVelEnvCfg):
     """DisplayPort insertion with a relative Newton IK action for the Rizon 4s flange.
@@ -31,18 +50,16 @@ class Rizon4sGravDisplayportInsertionIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGra
         super().__post_init__()
 
         # Solve a bounded flange-frame delta pose each policy step.
-        self.actions.arm_action = NewtonInverseKinematicsActionCfg(
-            asset_name="robot",
-            joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
-            controller=NewtonIKSolverCfg(optimizer="lm", jacobian_mode="analytic", iterations=24),
-            clip={".*": (-0.5, 0.5)},
-            objectives=[
-                NewtonIKPoseObjectiveCfg(
-                    body_name="flange",
-                    command_type="pose",
-                    use_relative_mode=True,
-                    scale=0.01,
-                ),
-                NewtonIKJointLimitObjectiveCfg(weight=0.1),
-            ],
-        )
+        self.actions.arm_action = _flange_ik_action()
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg(
+    joint_pos_env_cfg.Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg
+):
+    """Calibrated, domain-randomized DisplayPort task with relative Newton IK actions."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action = _flange_ik_action()
