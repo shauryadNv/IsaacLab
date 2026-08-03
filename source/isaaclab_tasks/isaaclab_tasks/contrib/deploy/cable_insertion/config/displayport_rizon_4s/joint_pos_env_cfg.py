@@ -97,6 +97,8 @@ _GRAV_GRIPPER_MIMIC_GEARING = {
     "right_outer_finger_joint": -1.0,
 }
 
+_ARM_JOINT_NAMES = [f"joint{joint_id}" for joint_id in range(1, 8)]
+
 
 def set_finger_joint_pos_grav(
     joint_pos: torch.Tensor,
@@ -166,6 +168,9 @@ class EventCfg:
     )
 
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
+
+    randomize_arm_joint_friction: EventTerm | None = None
+    randomize_arm_pd_gains: EventTerm | None = None
 
     randomize_socket_pose = EventTerm(
         func=mdp.reset_root_state_uniform,
@@ -461,3 +466,36 @@ class Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg(Rizon4sGravDispl
     def __post_init__(self):
         super().__post_init__()
         self.scene.robot.spawn.usd_path = _CALIBRATED_RIZON4S_GRAV_USD
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg
+):
+    """Calibrated velocity-free task with arm actuator domain randomization."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        arm_cfg = SceneEntityCfg("robot", joint_names=_ARM_JOINT_NAMES)
+        self.events.randomize_arm_joint_friction = EventTerm(
+            func=mdp.randomize_joint_parameters,
+            mode="reset",
+            params={
+                "asset_cfg": arm_cfg,
+                "friction_distribution_params": (0.0, 0.15),
+                "operation": "add",
+                "distribution": "uniform",
+            },
+        )
+        self.events.randomize_arm_pd_gains = EventTerm(
+            func=mdp.randomize_actuator_gains,
+            mode="reset",
+            params={
+                "asset_cfg": arm_cfg,
+                "stiffness_distribution_params": (0.8, 1.2),
+                "damping_distribution_params": (0.8, 1.2),
+                "operation": "scale",
+                "distribution": "uniform",
+            },
+        )
