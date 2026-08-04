@@ -11,6 +11,7 @@ plug is grasped at reset and the goal is the verified seated mate.
 """
 
 import math
+import os
 
 import torch
 
@@ -26,12 +27,18 @@ from isaaclab.utils import configclass
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp as mdp
 import isaaclab_tasks.manager_based.manipulation.deploy.mdp.terminations as cable_terminations
 from isaaclab_tasks.manager_based.manipulation.deploy.cable_insertion.displayport_insertion_env_cfg import (
+    DISPLAY_ASSETS_DIR,
     PLUG_GOAL_ROT,
     PLUG_INSERTION_OFFSET,
     SOCKET_INSERTION_OFFSET,
     DisplayportInsertionEnvCfg,
     compute_plug_pose,
     compute_socket_root,
+)
+
+_RIZON4S_CALIBRATED_USD_PATH = os.path.join(
+    DISPLAY_ASSETS_DIR,
+    "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
 )
 
 # ---------------------------------------------------------------------------
@@ -86,6 +93,8 @@ def _exp_curriculum_params(mode: str) -> dict:
     table = {
         "disabled":          dict(at_goal_prob=0.0, at_goal_prob_final=None, anneal_end_iter=None),
         "fixed80":           dict(at_goal_prob=0.8, at_goal_prob_final=None, anneal_end_iter=None),
+        "fixed50":           dict(at_goal_prob=0.5, at_goal_prob_final=None, anneal_end_iter=None),
+        "fixed20":           dict(at_goal_prob=0.2, at_goal_prob_final=None, anneal_end_iter=None),
         "anneal_80_0_1000":  dict(at_goal_prob=0.8, at_goal_prob_final=0.0,  anneal_end_iter=1000.0),
         "anneal_80_20_1000": dict(at_goal_prob=0.8, at_goal_prob_final=0.2,  anneal_end_iter=1000.0),
         "anneal_80_20_500":  dict(at_goal_prob=0.8, at_goal_prob_final=0.2,  anneal_end_iter=500.0),
@@ -521,6 +530,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
+                # usd_path=_RIZON4S_CALIBRATED_USD_PATH,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,

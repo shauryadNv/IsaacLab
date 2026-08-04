@@ -160,8 +160,12 @@ class TaskSpaceObservationsCfg:
 # --- EXP TOGGLES START ---
 EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
 EXP_SOCKET_ORN_DEG = 2.0                    # socket orientation randomization, +/- deg on roll/pitch/yaw
-EXP_CURRICULUM = "anneal_80_0_500"          # disabled|fixed80|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
+# modes: disabled|fixed80|fixed50|fixed20|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
+EXP_CURRICULUM = "anneal_80_0_500"
 EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
+EXP_RAND = "none"          # none|friction|pd|both -- robot joint-friction and/or PD-gain domain randomization
+EXP_CALIB_USD = False      # True => spawn the calibrated Rizon4s USD instead of the stock one
+EXP_OBS_NOISE_M = 0.0      # socket-position observation noise [m] applied at inference (0.0=none, 0.005=5mm)
 # --- EXP TOGGLES END ---
 
 _EXP_CURR = _exp_curriculum_params(EXP_CURRICULUM)
@@ -210,6 +214,38 @@ class TaskSpaceEventCfg:
             "dynamic_friction_range": (0.75, 0.75),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 16,
+        },
+    )
+
+    # Robot joint-friction / PD-gain domain randomization. Defined here but gated by
+    # EXP_RAND in the ROS-inference __post_init__ (disabled unless selected). Ranges
+    # mirror the joint-space friction (refimage58) and PD-gain (refimage59) runs.
+    robot_joint_friction = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
+            ),
+            "friction_distribution_params": (0.0, 0.15),
+            "operation": "add",
+            "distribution": "uniform",
+        },
+    )
+
+    robot_pd_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
+            ),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+            "distribution": "uniform",
         },
     )
 
