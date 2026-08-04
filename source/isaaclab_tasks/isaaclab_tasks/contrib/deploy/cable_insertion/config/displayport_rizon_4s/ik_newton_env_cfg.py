@@ -54,6 +54,18 @@ class Rizon4sGravDisplayportInsertionIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGra
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg(
+    joint_pos_env_cfg.Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg
+):
+    """Calibrated DisplayPort task with relative Newton IK actions."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action = _flange_ik_action()
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg(
     joint_pos_env_cfg.Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg
 ):

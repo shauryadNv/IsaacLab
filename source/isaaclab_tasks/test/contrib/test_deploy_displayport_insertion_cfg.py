@@ -14,6 +14,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.a
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.ik_newton_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
@@ -137,6 +138,21 @@ def test_displayport_calibrated_domain_randomized_newton_ik_preserves_training_c
     assert env_cfg.events.randomize_arm_joint_friction is not None
     assert env_cfg.events.randomize_arm_pd_gains is not None
     assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
+
+
+def test_displayport_calibrated_newton_ik_omits_domain_randomization():
+    """The calibrated IK task should preserve nominal arm dynamics."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg(),
+        {"newton_sdf"},
+    )
+    pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+    assert Path(env_cfg.scene.robot.spawn.usd_path).name == "Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
+    assert pose_objective.body_name == "flange"
+    assert env_cfg.observations.policy.joint_vel is None
+    assert env_cfg.events.randomize_arm_joint_friction is None
+    assert env_cfg.events.randomize_arm_pd_gains is None
 
 
 def test_displayport_no_joint_velocity_hides_velocity_from_actor_only():
