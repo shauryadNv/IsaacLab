@@ -7,6 +7,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from pxr import Usd
 
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
@@ -18,6 +20,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
+    _GEOMETRY_POS,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionEnvCfg,
@@ -195,6 +198,14 @@ def test_displayport_calibrated_robot_preserves_newton_training_configuration():
     assert env_cfg.observations.critic.joint_vel is not None
     assert curriculum["at_goal_prob"] == 0.8
     assert curriculum["at_goal_prob_final"] == 0.0
+
+
+def test_displayport_training_uses_seventy_millimeter_socket_mate_height():
+    """The nominal socket mate point should be 70 mm above the robot-base origin."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg()
+
+    assert _GEOMETRY_POS == (0.475, 0.125, 0.07)
+    assert env_cfg.scene.dp_socket.init_state.pos == pytest.approx((0.475, 0.125, 0.0325))
 
 
 def test_displayport_socket_observation_uses_reset_sampled_ten_millimeter_noise():

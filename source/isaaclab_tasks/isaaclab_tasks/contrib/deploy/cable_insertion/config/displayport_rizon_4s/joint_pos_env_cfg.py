@@ -49,7 +49,7 @@ from isaaclab_tasks.utils import PresetCfg, preset
 #
 # The station pose matches the validated PhysX training configuration; only the
 # collision backend and task action adapter vary between presets.
-_GEOMETRY_POS = (0.475, 0.125, 0.06)
+_GEOMETRY_POS = (0.475, 0.125, 0.07)
 _SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)  # opening faces +Z (top-down insertion)
 _PLUG_CLEARANCE_Z = 0.068
 _INSERTION_LENGTH = 0.011
