@@ -18,6 +18,8 @@ from isaaclab.utils.leapp import (
     XYZ_ELEMENT_NAMES,
     InputKindEnum,
 )
+
+ROT6D_ELEMENT_NAMES: list[str] = ["r00", "r01", "r02", "r10", "r11", "r12"]
 from isaaclab.utils.math import combine_frame_transforms, matrix_from_quat
 
 if TYPE_CHECKING:
@@ -610,8 +612,25 @@ class rigid_object_rot_6d_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
-        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
-        return _quat_to_rot_6d(obj_quat)
+        real_env = _leapp_real_env(env)
+        obj_quat = _tensor_data_to_torch(real_env.scene[self.asset_cfg.name].data.root_quat_w)
+        rot_6d = _quat_to_rot_6d(obj_quat)
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
+
+            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_rot_6d"
+            rot_6d = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name=input_name,
+                    ref=rot_6d,
+                    kind=None,
+                    element_names=ROT6D_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": f"observation:policy:{input_name}"},
+                ),
+            )
+        return rot_6d
 
 
 class eef_pos_w(ManagerTermBase):
@@ -659,14 +678,32 @@ class eef_pos_w(ManagerTermBase):
         body_name: str | None = None,
         offset: list | None = None,
     ) -> torch.Tensor:
-        body_pos = wp.to_torch(self.robot.data.body_pos_w)[:, self.body_idx, :]
+        real_env = _leapp_real_env(env)
+        robot = real_env.scene[self.asset_cfg.name]
+        body_pos = _tensor_data_to_torch(robot.data.body_pos_w)[:, self.body_idx, :]
 
         if torch.any(self.offset_tensor != 0):
-            body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
-            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
-            body_pos, _ = combine_frame_transforms(body_pos, body_quat, offset_repeated, self.identity_quat)
+            body_quat = _tensor_data_to_torch(robot.data.body_quat_w)[:, self.body_idx, :]
+            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(real_env.num_envs, 1)
+            identity_quat = self.identity_quat[: real_env.num_envs]
+            body_pos, _ = combine_frame_transforms(body_pos, body_quat, offset_repeated, identity_quat)
 
-        return body_pos - env.scene.env_origins
+        body_pos = body_pos - real_env.scene.env_origins
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
+
+            body_pos = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name="eef_pos",
+                    ref=body_pos,
+                    kind=InputKindEnum.BODY_POSITION,
+                    element_names=XYZ_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": "observation:policy:eef_pos"},
+                ),
+            )
+        return body_pos
 
 
 class eef_rot_6d_w(ManagerTermBase):
@@ -701,5 +738,22 @@ class eef_rot_6d_w(ManagerTermBase):
         asset_cfg: SceneEntityCfg | None = None,
         body_name: str | None = None,
     ) -> torch.Tensor:
-        body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
-        return _quat_to_rot_6d(body_quat)
+        real_env = _leapp_real_env(env)
+        robot = real_env.scene[self.asset_cfg.name]
+        body_quat = _tensor_data_to_torch(robot.data.body_quat_w)[:, self.body_idx, :]
+        rot_6d = _quat_to_rot_6d(body_quat)
+        if _is_leapp_export_env(env):
+            from leapp import annotate
+            from leapp.utils.tensor_description import TensorSemantics
+
+            rot_6d = annotate.input_tensors(
+                env.unwrapped.spec.id,
+                TensorSemantics(
+                    name="eef_rot_6d",
+                    ref=rot_6d,
+                    kind=None,
+                    element_names=ROT6D_ELEMENT_NAMES,
+                    extra={"isaaclab_connection": "observation:policy:eef_rot_6d"},
+                ),
+            )
+        return rot_6d

@@ -52,6 +52,37 @@ _RIZON4S_CALIBRATED_USD_PATH = os.path.join(
     "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
 )
 
+
+def _exp_curriculum_params(mode: str) -> dict:
+    """Map an ``EXP_CURRICULUM`` mode string to ``reset_plug_at_goal_curriculum`` parameters.
+
+    Args:
+        mode: Curriculum mode string. One of: ``disabled``, ``fixed80``, ``fixed50``,
+            ``fixed20``, ``anneal_80_0_1000``, ``anneal_80_20_1000``,
+            ``anneal_80_20_500``, ``anneal_80_0_500``.
+
+    Returns:
+        Dict with keys ``at_goal_prob``, ``at_goal_prob_final``, and ``anneal_end_iter``
+        suitable for passing to :func:`~isaaclab_tasks.contrib.deploy.mdp.reset_plug_at_goal_curriculum`.
+
+    Raises:
+        ValueError: If ``mode`` is not a recognized curriculum name.
+    """
+    table = {
+        "disabled": dict(at_goal_prob=0.0, at_goal_prob_final=None, anneal_end_iter=None),
+        "fixed80": dict(at_goal_prob=0.8, at_goal_prob_final=None, anneal_end_iter=None),
+        "fixed50": dict(at_goal_prob=0.5, at_goal_prob_final=None, anneal_end_iter=None),
+        "fixed20": dict(at_goal_prob=0.2, at_goal_prob_final=None, anneal_end_iter=None),
+        "anneal_80_0_1000": dict(at_goal_prob=0.8, at_goal_prob_final=0.0, anneal_end_iter=1000.0),
+        "anneal_80_20_1000": dict(at_goal_prob=0.8, at_goal_prob_final=0.2, anneal_end_iter=1000.0),
+        "anneal_80_20_500": dict(at_goal_prob=0.8, at_goal_prob_final=0.2, anneal_end_iter=500.0),
+        "anneal_80_0_500": dict(at_goal_prob=0.8, at_goal_prob_final=0.0, anneal_end_iter=500.0),
+    }
+    if mode not in table:
+        raise ValueError(f"Unknown EXP_CURRICULUM mode: {mode!r}. Options: {list(table)}")
+    return table[mode]
+
+
 ##
 # Pre-defined configs
 ##
