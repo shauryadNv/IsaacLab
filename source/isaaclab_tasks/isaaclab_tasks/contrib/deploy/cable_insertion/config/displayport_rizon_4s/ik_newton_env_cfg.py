@@ -12,7 +12,11 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 
+import isaaclab_tasks.contrib.deploy.mdp as deploy_mdp
+
 from . import joint_pos_env_cfg
+
+_TCP_OBSERVATION_OFFSET = (0.0, 0.0, 0.1925)
 
 
 def _flange_ik_action() -> NewtonInverseKinematicsActionCfg:
@@ -41,6 +45,19 @@ def _use_flange_pose_actor_observation(env_cfg) -> None:
     env_cfg.observations.policy.flange_pose = ObsTerm(
         func=mdp.body_pose_w,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["flange"])},
+    )
+
+
+def _use_tcp_pose_actor_observation(env_cfg) -> None:
+    """Replace actor joint state with a TCP-like pose offset from the flange."""
+    env_cfg.observations.policy.joint_pos = None
+    env_cfg.observations.policy.joint_vel = None
+    env_cfg.observations.policy.tcp_pose = ObsTerm(
+        func=deploy_mdp.body_pose_w_with_offset,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=["flange"]),
+            "offset": _TCP_OBSERVATION_OFFSET,
+        },
     )
 
 
@@ -122,3 +139,15 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObs
         super().__post_init__()
 
         _use_flange_pose_actor_observation(self)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg
+):
+    """Calibrated, randomized Newton IK task with a TCP-offset actor observation."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _use_tcp_pose_actor_observation(self)

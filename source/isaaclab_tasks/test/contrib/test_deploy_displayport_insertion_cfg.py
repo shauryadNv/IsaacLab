@@ -11,12 +11,14 @@ from pxr import Usd
 
 from isaaclab.envs import mdp
 
+import isaaclab_tasks.contrib.deploy.mdp as deploy_mdp
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
     Rizon4sGravDisplayportInsertionRNNPPORunnerCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.ik_newton_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObsEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg,
@@ -151,6 +153,23 @@ def test_displayport_calibrated_dr_flange_observation_preserves_randomization():
 
     assert env_cfg.observations.policy.joint_pos is None
     assert env_cfg.observations.policy.flange_pose is not None
+    assert env_cfg.events.randomize_arm_joint_friction is not None
+    assert env_cfg.events.randomize_arm_pd_gains is not None
+
+
+def test_displayport_calibrated_dr_tcp_observation_offsets_only_actor_pose():
+    """The TCP observation should use a local offset while the action controls the flange origin."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg()
+    policy = env_cfg.observations.policy
+    pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+    assert policy.joint_pos is None
+    assert policy.joint_vel is None
+    assert policy.tcp_pose.func is deploy_mdp.body_pose_w_with_offset
+    assert policy.tcp_pose.params["asset_cfg"].body_names == ["flange"]
+    assert policy.tcp_pose.params["offset"] == (0.0, 0.0, 0.1925)
+    assert pose_objective.body_name == "flange"
+    assert pose_objective.body_offset_pos == (0.0, 0.0, 0.0)
     assert env_cfg.events.randomize_arm_joint_friction is not None
     assert env_cfg.events.randomize_arm_pd_gains is not None
 
