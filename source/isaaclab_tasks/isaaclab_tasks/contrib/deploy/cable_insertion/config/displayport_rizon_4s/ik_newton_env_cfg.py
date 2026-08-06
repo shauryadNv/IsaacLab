@@ -7,6 +7,9 @@ from isaaclab_newton.envs.mdp.actions.newton_ik_actions_cfg import NewtonInverse
 from isaaclab_newton.ik.newton_ik_objectives_cfg import NewtonIKJointLimitObjectiveCfg, NewtonIKPoseObjectiveCfg
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
 
+from isaaclab.envs import mdp
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 
 from . import joint_pos_env_cfg
@@ -28,6 +31,16 @@ def _flange_ik_action() -> NewtonInverseKinematicsActionCfg:
             ),
             NewtonIKJointLimitObjectiveCfg(weight=0.1),
         ],
+    )
+
+
+def _use_flange_pose_actor_observation(env_cfg) -> None:
+    """Replace actor joint state with the flange pose in the environment frame."""
+    env_cfg.observations.policy.joint_pos = None
+    env_cfg.observations.policy.joint_vel = None
+    env_cfg.observations.policy.flange_pose = ObsTerm(
+        func=mdp.body_pose_w,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["flange"])},
     )
 
 
@@ -54,6 +67,16 @@ class Rizon4sGravDisplayportInsertionIKNewtonEnvCfg(joint_pos_env_cfg.Rizon4sGra
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg(Rizon4sGravDisplayportInsertionIKNewtonEnvCfg):
+    """Newton IK task whose actor observes flange pose instead of arm joint state."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _use_flange_pose_actor_observation(self)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg(
     joint_pos_env_cfg.Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg
 ):
@@ -66,6 +89,18 @@ class Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg(
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionCalibratedIKNewtonFlangeObsEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg
+):
+    """Calibrated Newton IK task whose actor observes the flange pose."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _use_flange_pose_actor_observation(self)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg(
     joint_pos_env_cfg.Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg
 ):
@@ -75,3 +110,15 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg(
         super().__post_init__()
 
         self.actions.arm_action = _flange_ik_action()
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObsEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg
+):
+    """Calibrated, randomized Newton IK task whose actor observes flange pose."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _use_flange_pose_actor_observation(self)

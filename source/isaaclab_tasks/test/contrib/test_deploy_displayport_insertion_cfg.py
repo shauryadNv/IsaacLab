@@ -9,13 +9,17 @@ from pathlib import Path
 
 from pxr import Usd
 
+from isaaclab.envs import mdp
+
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
     Rizon4sGravDisplayportInsertionRNNPPORunnerCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.ik_newton_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObsEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
+    Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg,
@@ -120,6 +124,35 @@ def test_displayport_newton_ik_commands_flange_without_actor_velocity():
     assert pose_objective.use_relative_mode is True
     assert pose_objective.scale == 0.01
     assert env_cfg.observations.policy.joint_vel is None
+
+
+def test_displayport_newton_ik_flange_observation_replaces_actor_joint_state():
+    """The flange-observation task should expose task state without actor joint state."""
+    env_cfg = Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg()
+    policy = env_cfg.observations.policy
+    pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+    assert policy.joint_pos is None
+    assert policy.joint_vel is None
+    assert policy.flange_pose.func is mdp.body_pose_w
+    assert policy.flange_pose.params["asset_cfg"].name == "robot"
+    assert policy.flange_pose.params["asset_cfg"].body_names == ["flange"]
+    assert policy.socket_pos is not None
+    assert policy.socket_quat is not None
+    assert env_cfg.observations.critic.joint_pos is not None
+    assert env_cfg.observations.critic.joint_vel is not None
+    assert pose_objective.body_name == "flange"
+    assert pose_objective.body_offset_pos == (0.0, 0.0, 0.0)
+
+
+def test_displayport_calibrated_dr_flange_observation_preserves_randomization():
+    """The calibrated flange-observation task should retain arm domain randomization."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObsEnvCfg()
+
+    assert env_cfg.observations.policy.joint_pos is None
+    assert env_cfg.observations.policy.flange_pose is not None
+    assert env_cfg.events.randomize_arm_joint_friction is not None
+    assert env_cfg.events.randomize_arm_pd_gains is not None
 
 
 def test_displayport_calibrated_domain_randomized_newton_ik_preserves_training_configuration():
