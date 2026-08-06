@@ -10,6 +10,7 @@ __all__ = [
     "set_robot_to_grasp_pose",
     "set_robot_to_object_grasp_pose",
     "reset_plug_at_goal_curriculum",
+    "ramp_action_rate_weight",
     "ResetSampledConstantNoiseModel",
     "ResetSampledConstantNoiseModelCfg",
     "gear_pos_w",
@@ -54,6 +55,7 @@ from .delayed_joint_actions_cfg import (
     FlexivDynamicsAwareRelativeJointPositionActionCfg,
 )
 from .actions_cfg import DeployRelativeJointPositionActionCfg
+from .curriculums import ramp_action_rate_weight
 from .events import (
     randomize_gear_type,
     randomize_gears_and_base_pose,

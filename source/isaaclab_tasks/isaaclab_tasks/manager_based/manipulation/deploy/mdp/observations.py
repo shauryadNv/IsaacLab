@@ -480,9 +480,8 @@ class gear_quat_w(ManagerTermBase):
 
         # Ensure w component is positive (q and -q represent the same rotation)
         # Pick one canonical form to reduce observation variation seen by the policy
-        w_negative = gear_quat[:, 3] < 0
-        gear_positive_quat = gear_quat.clone()
-        gear_positive_quat[w_negative] = -gear_quat[w_negative]
+        w_negative = gear_quat[:, 3:4] < 0
+        gear_positive_quat = torch.where(w_negative, -gear_quat, gear_quat)
 
         return gear_positive_quat
 

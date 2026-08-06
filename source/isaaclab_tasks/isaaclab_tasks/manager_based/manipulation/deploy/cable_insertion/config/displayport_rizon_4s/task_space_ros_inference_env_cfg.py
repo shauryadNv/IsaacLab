@@ -20,7 +20,14 @@ from isaaclab_tasks.manager_based.manipulation.deploy.cable_insertion.displaypor
     compute_socket_root,
 )
 
-from .task_space_env_cfg import _ACTION_SCALE, Rizon4sTaskSpaceDisplayportInsertionEnvCfg
+from .joint_pos_env_cfg import _RIZON4S_CALIBRATED_USD_PATH
+from .task_space_env_cfg import (
+    EXP_CALIB_USD,
+    EXP_OBS_NOISE_M,
+    EXP_RAND,
+    _ACTION_SCALE,
+    Rizon4sTaskSpaceDisplayportInsertionEnvCfg,
+)
 
 # ---------------------------------------------------------------------------
 # Hubble Lab socket/plug positions (same as joint-space ROS inference)
@@ -133,5 +140,17 @@ class Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSpaceDis
             math.degrees(pose_range["yaw"][1]),
         ]
 
-        # No observation noise in task-space production config
-        self.fixed_asset_pos_obs_noise_level = [0.0, 0.0, 0.0]
+        # --- Experiment toggles (EXP_RAND / EXP_CALIB_USD / EXP_OBS_NOISE_M) ---
+        # Robot joint-friction / PD-gain domain randomization: keep only the selected
+        # terms; disable the rest (the terms are always declared in TaskSpaceEventCfg).
+        if EXP_RAND not in ("friction", "both"):
+            self.events.robot_joint_friction = None
+        if EXP_RAND not in ("pd", "both"):
+            self.events.robot_pd_gains = None
+
+        # Optionally spawn the calibrated Rizon4s USD instead of the stock one.
+        if EXP_CALIB_USD:
+            self.scene.robot.spawn.usd_path = _RIZON4S_CALIBRATED_USD_PATH
+
+        # Socket-position observation noise [m] (0.0 = none; production default).
+        self.fixed_asset_pos_obs_noise_level = [EXP_OBS_NOISE_M, EXP_OBS_NOISE_M, EXP_OBS_NOISE_M]
