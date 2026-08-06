@@ -16,6 +16,7 @@ __all__ = [
     "gear_shaft_pos_w",
     "gear_shaft_quat_w",
     "rigid_object_pos_w",
+    "body_pose_w_with_offset",
     "rigid_object_quat_w",
     "keypoint_command_error",
     "keypoint_command_error_exp",
@@ -39,7 +40,7 @@ from .events import (
     set_robot_to_object_grasp_pose,
 )
 from .noise_models import ResetSampledConstantNoiseModel, ResetSampledConstantNoiseModelCfg
-from .observations import gear_pos_w, gear_quat_w, gear_shaft_pos_w, gear_shaft_quat_w, rigid_object_pos_w, rigid_object_quat_w
+from .observations import body_pose_w_with_offset, gear_pos_w, gear_quat_w, gear_shaft_pos_w, gear_shaft_quat_w, rigid_object_pos_w, rigid_object_quat_w
 from .rewards import (
     keypoint_command_error,
     keypoint_command_error_exp,

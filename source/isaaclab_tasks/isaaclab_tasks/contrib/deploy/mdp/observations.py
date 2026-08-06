@@ -15,7 +15,7 @@ from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCf
 from isaaclab.utils.math import combine_frame_transforms
 
 if TYPE_CHECKING:
-    from isaaclab.assets import RigidObject
+    from isaaclab.assets import Articulation, RigidObject
     from isaaclab.envs import ManagerBasedRLEnv
 
     from .events import randomize_gear_type
@@ -372,6 +372,51 @@ class rigid_object_pos_w(ManagerTermBase):
             obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, offset_repeated, self.identity_quat)
 
         return obj_pos - env.scene.env_origins
+
+
+class body_pose_w_with_offset(ManagerTermBase):
+    """Articulation body pose with a body-local translation offset [m]."""
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+
+        if "asset_cfg" not in cfg.params:
+            raise ValueError("asset_cfg is required in body_pose_w_with_offset configuration.")
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: Articulation = env.scene[self.asset_cfg.name]
+
+        offset = torch.as_tensor(cfg.params.get("offset", (0.0, 0.0, 0.0)), device=env.device, dtype=torch.float32)
+        if offset.shape != (3,):
+            raise ValueError(f"offset must contain exactly three values, got shape {tuple(offset.shape)}.")
+        self.offset = offset.view(1, 1, 3)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        offset: tuple[float, float, float] | list[float] | None = None,
+    ) -> torch.Tensor:
+        """Return offset body poses in the environment frame.
+
+        Args:
+            env: Environment containing the articulation.
+            asset_cfg: Articulation and selected bodies configured for this term.
+            offset: Translation in each selected body local frame [m].
+
+        Returns:
+            Flattened poses with shape ``(num_envs, 7 * num_bodies)``. Each
+            pose is ordered as position [m] followed by quaternion.
+        """
+        pose = self.asset.data.body_pose_w.torch[:, self.asset_cfg.body_ids, :7].clone()
+        if pose.ndim == 2:
+            pose = pose.unsqueeze(1)
+
+        offset_batch = self.offset.expand(pose.shape[0], pose.shape[1], -1)
+        offset_quat = torch.zeros((*offset_batch.shape[:-1], 4), device=env.device, dtype=pose.dtype)
+        offset_quat[..., 3] = 1.0
+        pose[..., :3], _ = combine_frame_transforms(pose[..., :3], pose[..., 3:7], offset_batch, offset_quat)
+        pose[..., :3] -= env.scene.env_origins.unsqueeze(1)
+        return pose.reshape(env.num_envs, -1)
 
 
 class rigid_object_quat_w(ManagerTermBase):
