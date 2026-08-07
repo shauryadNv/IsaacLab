@@ -360,7 +360,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
 
         # Passive/mimic joints in the gripper - set to zero stiffness/damping
         self.scene.robot.actuators["gripper_passive"] = ImplicitActuatorCfg(
-            joint_names_expr=[".*_knuckle_joint"],
+            joint_names_expr=[".*_knuckle_joint", ".*_outer_finger_joint"],
             effort_limit_sim=1.0,
             velocity_limit_sim=1.0,
             stiffness=0.0,
