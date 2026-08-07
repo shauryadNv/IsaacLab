@@ -164,7 +164,7 @@ EXP_SOCKET_ORN_DEG = 2.0                    # socket orientation randomization, 
 EXP_CURRICULUM = "anneal_80_0_500"
 EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
 EXP_RAND = "none"          # none|friction|pd|both
-EXP_CALIB_USD = False      # True => calibrated Rizon4s USD
+EXP_CALIB_USD = True      # True => calibrated Rizon4s USD
 EXP_OBS_NOISE_M = 0.005      # socket-pos obs noise [m]
 # --- EXP TOGGLES END ---
 
