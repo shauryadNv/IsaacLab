@@ -11,6 +11,8 @@ __all__ = [
     "reset_plug_at_goal_curriculum",
     "DeployRelativeJointPositionAction",
     "DeployRelativeJointPositionActionCfg",
+    "DeployOperationalSpaceControllerAction",
+    "DeployOperationalSpaceControllerActionCfg",
     "ResetSampledConstantNoiseModel",
     "ResetSampledConstantNoiseModelCfg",
     "joint_pos",
@@ -45,8 +47,8 @@ from .events import (
     set_robot_to_object_grasp_pose,
     reset_plug_at_goal_curriculum,
 )
-from .actions import DeployRelativeJointPositionAction
-from .actions_cfg import DeployRelativeJointPositionActionCfg
+from .actions import DeployOperationalSpaceControllerAction, DeployRelativeJointPositionAction
+from .actions_cfg import DeployOperationalSpaceControllerActionCfg, DeployRelativeJointPositionActionCfg
 from .noise_models import ResetSampledConstantNoiseModel, ResetSampledConstantNoiseModelCfg
 from .observations import (
     joint_pos,

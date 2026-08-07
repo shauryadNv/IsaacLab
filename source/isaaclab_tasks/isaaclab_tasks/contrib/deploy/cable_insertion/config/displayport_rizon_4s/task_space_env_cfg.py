@@ -15,7 +15,6 @@ import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
-from isaaclab.envs.mdp.actions.actions_cfg import OperationalSpaceControllerActionCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -80,11 +79,18 @@ class TaskSpaceObservationsCfg:
         )
         socket_kp_pos = ObsTerm(
             func=mdp.rigid_object_pos_w,
-            params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET},
+            params={
+                "asset_cfg": SceneEntityCfg("dp_socket"),
+                "offset": SOCKET_INSERTION_OFFSET,
+                "leapp_input_name": "socket_kp_pos",
+            },
         )
         socket_kp_rot_6d = ObsTerm(
             func=mdp.rigid_object_rot_6d_w,
-            params={"asset_cfg": SceneEntityCfg("dp_socket")},
+            params={
+                "asset_cfg": SceneEntityCfg("dp_socket"),
+                "leapp_input_name": "socket_kp_rot_6d",
+            },
         )
 
         def __post_init__(self):
@@ -322,7 +328,8 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
 
         self.observations = TaskSpaceObservationsCfg()
 
-        self.actions.arm_action = OperationalSpaceControllerActionCfg(
+        # LEAPP-aware OSC action: exports scaled 6-D pose_rel (not joint efforts).
+        self.actions.arm_action = mdp.DeployOperationalSpaceControllerActionCfg(
             asset_name="robot",
             joint_names=_ARM_JOINTS,
             body_name="flange",

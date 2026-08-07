@@ -12,11 +12,16 @@ from typing import TYPE_CHECKING
 import warp as wp
 
 from isaaclab.envs.mdp.actions.joint_actions import RelativeJointPositionAction
+from isaaclab.envs.mdp.actions.task_space_actions import OperationalSpaceControllerAction
+from isaaclab.utils.leapp.leapp_semantics import POSE6_ELEMENT_NAMES
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
-    from .actions_cfg import DeployRelativeJointPositionActionCfg
+    from .actions_cfg import (
+        DeployOperationalSpaceControllerActionCfg,
+        DeployRelativeJointPositionActionCfg,
+    )
 
 _LEAPP_TRACED_OBSERVATION_INPUTS = "_leapp_traced_observation_inputs"
 _LEAPP_CONSUMED_OBSERVATION_INPUTS = "_leapp_consumed_observation_inputs"
@@ -118,3 +123,45 @@ class DeployRelativeJointPositionAction(RelativeJointPositionAction):
 
         current_actions = self.processed_actions + current_joint_pos
         self._asset.set_joint_position_target_index(target=current_actions, joint_ids=self._joint_ids)
+
+
+class DeployOperationalSpaceControllerAction(OperationalSpaceControllerAction):
+    """OSC action that exports scaled pose_rel deltas during LEAPP export.
+
+    On-robot task-space deploy runs Cartesian impedance / OSC *outside* the policy.
+    The exported LEAPP graph must therefore emit the policy's scaled 6-D flange
+    delta (``pose_rel``), not the intermediate joint-effort writes that OSC uses
+    inside the simulator.
+
+    During export the term still applies OSC through the real articulation so
+    simulation keeps moving, but annotated asset writes are skipped so
+    ``processed_actions`` is captured as ``arm_action``.
+    """
+
+    def __init__(self, cfg: DeployOperationalSpaceControllerActionCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+        # Consumed by LEAPP ``_collect_processed_action_fallbacks`` when this term
+        # deliberately avoids annotated joint-effort writes during export.
+        self._leapp_processed_action_element_names = list(POSE6_ELEMENT_NAMES)
+        self._leapp_processed_action_kind = None
+        self._leapp_processed_action_extra = {
+            "isaaclab_connection": "action:arm_action:pose_rel",
+            "target_types": list(cfg.controller_cfg.target_types),
+            "position_scale": float(cfg.position_scale),
+            "orientation_scale": float(cfg.orientation_scale),
+        }
+
+    def apply_actions(self):
+        asset = self._asset
+        if type(asset).__name__ != "_ArticulationWriteProxy":
+            super().apply_actions()
+            return
+
+        # Drive the simulator via the underlying articulation so joint-effort
+        # writes are not captured as LEAPP outputs (those would be 7-D torques).
+        real_asset = object.__getattribute__(asset, "_real_asset")
+        self._asset = real_asset
+        try:
+            super().apply_actions()
+        finally:
+            self._asset = asset

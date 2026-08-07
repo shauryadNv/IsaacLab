@@ -650,18 +650,23 @@ class ExportPatcher:
             if processed is None:
                 continue
             if isinstance(processed, torch.Tensor):
-                logger.warning(
-                    "Action term '%s' did not write to any asset directly. Falling back to processed_actions as the"
-                    " export output.\nIf you wish to add semantic data to this policy, you need to manually annotate it"
-                    " with output_tensors.",
-                    term_name,
-                )
+                element_names = getattr(term, "_leapp_processed_action_element_names", None)
+                kind = getattr(term, "_leapp_processed_action_kind", None)
+                extra = getattr(term, "_leapp_processed_action_extra", None)
+                if element_names is None and kind is None:
+                    logger.warning(
+                        "Action term '%s' did not write to any asset directly. Falling back to processed_actions as the"
+                        " export output.\nIf you wish to add semantic data to this policy, you need to manually annotate"
+                        " it with output_tensors.",
+                        term_name,
+                    )
                 tensors.append(
                     TensorSemantics(
                         name=term_name,
                         ref=processed.clone(),
-                        kind=None,
-                        element_names=None,
+                        kind=kind,
+                        element_names=element_names,
+                        extra=extra,
                     )
                 )
                 fallback_terms.add(term_name)

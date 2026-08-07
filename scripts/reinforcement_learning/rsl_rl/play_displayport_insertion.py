@@ -38,12 +38,23 @@ LEAPP-exported policy (ONNX + deploy YAML). Pass a YAML path or the export direc
 
     ./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play_displayport_insertion.py \\
         --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-NoJointVel-ROS-Inference-v0 \\
-        --leapp_model logs/rsl_rl/dp_exps/displayport_default_model900 \\
+        --leapp_model logs/rsl_rl/dp_exps/<run>/exported \\
         --num_envs 1 \\
-        --socket_pos 0.476 0.127 0.07 \\
-        --max_steps 200 \\
-        --log_dir logs/dp_inference_runs \\
-        --visualizer kit
+        --max_steps 200
+
+Task-space LEAPP export + play:
+
+.. code-block:: bash
+
+    ./isaaclab.sh -p scripts/reinforcement_learning/leapp/rsl_rl/export.py \\
+        --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-ROS-Inference-v0 \\
+        --checkpoint <path/to/model_XXX.pt>
+
+    ./isaaclab.sh -p scripts/reinforcement_learning/rsl_rl/play_displayport_insertion.py \\
+        --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-ROS-Inference-v0 \\
+        --leapp_model <export_dir> \\
+        --num_envs 1 \\
+        --max_steps 200
 
 Open-loop replay of a real (or sim) ``policy_io`` CSV:
 
@@ -613,19 +624,45 @@ def _seed_cli_from_replay(traj: ReplayTrajectory):
         print(f"[INFO] --observed_socket_rot seeded from CSV: {args_cli.observed_socket_rot}")
 
 
+def _is_task_space_policy_env(env) -> bool:
+    """Return whether the env uses task-space (OSC / pose_rel) arm actions."""
+    base = env.unwrapped
+    if getattr(base.cfg, "policy_action_space", None) == "task":
+        return True
+    try:
+        term = base.action_manager.get_term("arm_action")
+    except Exception:
+        return False
+    return type(term).__name__ in (
+        "OperationalSpaceControllerAction",
+        "DeployOperationalSpaceControllerAction",
+    )
+
+
 def _action_scale(env) -> float:
-    """Relative joint action scale used by the env (default 0.025)."""
+    """Relative action scale used by the env (default 0.025)."""
     base = env.unwrapped
     cfg_scale = getattr(base.cfg, "joint_action_scale", None)
     if cfg_scale is not None:
         return float(cfg_scale)
+    action_scale = getattr(base.cfg, "action_scale", None)
+    if isinstance(action_scale, (list, tuple)) and action_scale:
+        return float(action_scale[0])
+    if isinstance(action_scale, (int, float)):
+        return float(action_scale)
     try:
         term = base.action_manager.get_term("arm_action")
-        scale = getattr(term, "_scale", None)
-        if scale is not None:
-            s = _as_numpy_1d(scale)
-            if s is not None and s.size:
-                return float(s.reshape(-1)[0])
+        for attr in ("_scale", "_position_scale"):
+            scale = getattr(term, attr, None)
+            if scale is not None:
+                s = _as_numpy_1d(scale)
+                if s is not None and s.size:
+                    return float(s.reshape(-1)[0])
+                if isinstance(scale, (int, float)):
+                    return float(scale)
+        cfg = getattr(term, "cfg", None)
+        if cfg is not None and getattr(cfg, "position_scale", None) is not None:
+            return float(cfg.position_scale)
     except Exception:
         pass
     return 0.025
@@ -653,6 +690,27 @@ def _absolute_targets_to_relative_actions(
         rel = np.clip(rel, -clip_actions, clip_actions)
     actions = torch.zeros((base.num_envs, env.num_actions), device=base.device, dtype=torch.float32)
     actions[:, :num_arm] = torch.as_tensor(rel, device=base.device, dtype=torch.float32)
+    return actions
+
+
+def _scaled_pose_rel_to_raw_actions(
+    env,
+    scaled_1d: np.ndarray,
+    clip_actions: float | None,
+) -> torch.Tensor:
+    """Convert LEAPP scaled pose_rel outputs back to OSC raw action inputs.
+
+    Export captures ``processed_actions = raw * scale``, so play must unscale
+    before ``env.step`` (which scales again inside the action term).
+    """
+    base = env.unwrapped
+    num_act = int(scaled_1d.shape[0])
+    scale = _action_scale(env)
+    raw = scaled_1d / scale
+    if clip_actions is not None:
+        raw = np.clip(raw, -clip_actions, clip_actions)
+    actions = torch.zeros((base.num_envs, env.num_actions), device=base.device, dtype=torch.float32)
+    actions[:, :num_act] = torch.as_tensor(raw, device=base.device, dtype=torch.float32)
     return actions
 
 
@@ -689,13 +747,15 @@ class LeappDisplayportPolicy:
     """Run a LEAPP-exported DisplayPort policy against a ManagerBased gym env.
 
     LEAPP packages observation preprocessing, LSTM state, and action decoding into
-    an ONNX graph that emits **absolute** arm joint targets. This adapter:
+    an ONNX graph. This adapter:
 
-    1. Reads ``robot_joint_pos`` / ``socket_pos`` / ``socket_quat`` from the live
-       scene and observation terms (so ``--observed_socket_*`` overrides apply).
+    1. Reads structured LEAPP inputs from the live scene / observation terms
+       (joint-space: ``robot_joint_pos`` / ``socket_*``; task-space: ``eef_*`` /
+       ``socket_kp_*``).
     2. Runs ``InferenceManager.run_policy``.
-    3. Converts absolute targets back to relative action-manager inputs so the
-       existing ``env.step`` / logging path stays unchanged.
+    3. Converts graph outputs back to action-manager inputs:
+       - joint-space: absolute joint targets → relative joint actions
+       - task-space: scaled pose_rel deltas → raw OSC actions
     """
 
     def __init__(self, env, leapp_yaml: Path, clip_actions: float | None = None):
@@ -711,6 +771,7 @@ class LeappDisplayportPolicy:
         self.clip_actions = clip_actions
         self.yaml_path = Path(leapp_yaml)
         self.inference = InferenceManager(str(self.yaml_path))
+        self.task_space = _is_task_space_policy_env(env)
 
         with open(self.yaml_path, encoding="utf-8") as f:
             desc = yaml.safe_load(f)
@@ -732,6 +793,7 @@ class LeappDisplayportPolicy:
 
         print(f"[INFO] LEAPP policy loaded from: {self.yaml_path}")
         print(f"[INFO] LEAPP node='{self.node_name}', inputs={self.input_names}")
+        print(f"[INFO] LEAPP action space={'task' if self.task_space else 'joint'}")
 
     def _resolve_arm_joint_ids(self) -> list[int] | None:
         robot = self.base.scene["robot"]
@@ -766,21 +828,38 @@ class LeappDisplayportPolicy:
         if self._joint_ids is not None:
             joint_pos = joint_pos[:, self._joint_ids]
 
+        # Map LEAPP tensor names → policy observation term names / live state.
+        obs_term_aliases = {
+            "socket_pos": "socket_pos",
+            "socket_quat": "socket_quat",
+            "eef_pos": "eef_pos",
+            "eef_rot_6d": "eef_rot_6d",
+            "socket_kp_pos": "socket_kp_pos",
+            "socket_kp_rot_6d": "socket_kp_rot_6d",
+            # Legacy aliases if an older export used non-_kp socket 6D names.
+            "socket_rot_6d": "socket_kp_rot_6d",
+        }
+
         values: dict[str, torch.Tensor] = {}
         for name in self.input_names:
             if name in ("robot_joint_pos", "arm_dof_pos", "joint_pos"):
                 values[name] = joint_pos
-            elif name in ("socket_pos",):
-                values[name] = self._read_observation_term("socket_pos")
-            elif name in ("socket_quat",):
-                values[name] = self._read_observation_term("socket_quat")
+            elif name in obs_term_aliases:
+                term_name = obs_term_aliases[name]
+                # Prefer the LEAPP input name when it matches a live obs term.
+                try:
+                    values[name] = self._read_observation_term(name)
+                except KeyError:
+                    values[name] = self._read_observation_term(term_name)
             elif name.startswith("actor_state_"):
                 # Feedback tensors are owned by InferenceManager; omit from external inputs.
                 continue
             else:
                 raise KeyError(
                     f"Unsupported LEAPP input '{name}' for DisplayPort play. "
-                    "Expected robot_joint_pos / socket_pos / socket_quat (plus LSTM feedback)."
+                    "Expected joint-space (robot_joint_pos / socket_pos / socket_quat) "
+                    "or task-space (eef_pos / eef_rot_6d / socket_kp_pos / socket_kp_rot_6d), "
+                    "plus LSTM feedback."
                 )
 
         return {f"{self.node_name}/{name}": tensor for name, tensor in values.items()}
@@ -805,6 +884,8 @@ class LeappDisplayportPolicy:
         if abs_np is None:
             raise RuntimeError("Failed to read LEAPP arm_action tensor.")
         self.last_absolute_targets = abs_np.copy()
+        if self.task_space:
+            return _scaled_pose_rel_to_raw_actions(self.env, abs_np, self.clip_actions)
         return _absolute_targets_to_relative_actions(self.env, abs_np, self.clip_actions)
 
     def reset(self, dones=None):

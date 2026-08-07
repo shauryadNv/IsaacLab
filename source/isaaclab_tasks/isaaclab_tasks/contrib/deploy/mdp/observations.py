@@ -478,6 +478,7 @@ class rigid_object_pos_w(ManagerTermBase):
 
         offset = cfg.params.get("offset", [0.0, 0.0, 0.0])
         self.offset_tensor = torch.tensor(offset, device=env.device, dtype=torch.float32)
+        self.leapp_input_name: str | None = cfg.params.get("leapp_input_name")
 
         self.identity_quat = (
             torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=env.device, dtype=torch.float32)
@@ -490,6 +491,7 @@ class rigid_object_pos_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
         offset: list | None = None,
+        leapp_input_name: str | None = None,
     ) -> torch.Tensor:
         real_env = _leapp_real_env(env)
         asset = real_env.scene[self.asset_cfg.name]
@@ -505,7 +507,11 @@ class rigid_object_pos_w(ManagerTermBase):
             from leapp import annotate
             from leapp.utils.tensor_description import TensorSemantics
 
-            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_pos"
+            input_name = (
+                leapp_input_name
+                or self.leapp_input_name
+                or f"{_deploy_object_input_base_name(self.asset_cfg.name)}_pos"
+            )
             obj_pos = annotate.input_tensors(
                 env.unwrapped.spec.id,
                 TensorSemantics(
@@ -541,11 +547,13 @@ class rigid_object_quat_w(ManagerTermBase):
             raise ValueError("'asset_cfg' parameter is required in rigid_object_quat_w configuration.")
         self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
         self.asset: RigidObject = env.scene[self.asset_cfg.name]
+        self.leapp_input_name: str | None = cfg.params.get("leapp_input_name")
 
     def __call__(
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
+        leapp_input_name: str | None = None,
     ) -> torch.Tensor:
         real_env = _leapp_real_env(env)
         obj_quat = _tensor_data_to_torch(real_env.scene[self.asset_cfg.name].data.root_quat_w)
@@ -553,7 +561,11 @@ class rigid_object_quat_w(ManagerTermBase):
             from leapp import annotate
             from leapp.utils.tensor_description import TensorSemantics
 
-            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_quat"
+            input_name = (
+                leapp_input_name
+                or self.leapp_input_name
+                or f"{_deploy_object_input_base_name(self.asset_cfg.name)}_quat"
+            )
             obj_quat = annotate.input_tensors(
                 env.unwrapped.spec.id,
                 TensorSemantics(
@@ -606,11 +618,13 @@ class rigid_object_rot_6d_w(ManagerTermBase):
             raise ValueError("'asset_cfg' parameter is required in rigid_object_rot_6d_w configuration.")
         self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
         self.asset: RigidObject = env.scene[self.asset_cfg.name]
+        self.leapp_input_name: str | None = cfg.params.get("leapp_input_name")
 
     def __call__(
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
+        leapp_input_name: str | None = None,
     ) -> torch.Tensor:
         real_env = _leapp_real_env(env)
         obj_quat = _tensor_data_to_torch(real_env.scene[self.asset_cfg.name].data.root_quat_w)
@@ -619,7 +633,11 @@ class rigid_object_rot_6d_w(ManagerTermBase):
             from leapp import annotate
             from leapp.utils.tensor_description import TensorSemantics
 
-            input_name = f"{_deploy_object_input_base_name(self.asset_cfg.name)}_rot_6d"
+            input_name = (
+                leapp_input_name
+                or self.leapp_input_name
+                or f"{_deploy_object_input_base_name(self.asset_cfg.name)}_rot_6d"
+            )
             rot_6d = annotate.input_tensors(
                 env.unwrapped.spec.id,
                 TensorSemantics(

@@ -52,6 +52,10 @@ class Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSpaceDis
     - Aligns robot mounting pose with a vertical (table-top) Flexiv Rizon 4S
       installation matching the joint-space ROS inference config.
     - Overrides plug and socket initial poses for a fixed / deterministic setup.
+    - Is the recommended env id for LEAPP export of task-space policies
+      (``Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-ROS-Inference-v0``).
+      Export emits scaled 6-D ``pose_rel`` as ``arm_action`` with inputs
+      ``eef_pos``, ``eef_rot_6d``, ``socket_kp_pos``, ``socket_kp_rot_6d``.
     """
 
     def __post_init__(self):
