@@ -8,3 +8,5 @@
 from isaaclab.utils.module import lazy_export
 
 lazy_export()
+
+from .curriculums import ramp_action_rate_weight  # noqa: F401
