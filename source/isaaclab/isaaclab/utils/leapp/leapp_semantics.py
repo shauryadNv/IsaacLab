@@ -126,14 +126,12 @@ def canonicalize_command_element_names(
         expected_names = TWIST6_ELEMENT_NAMES
     else:
         raise ValueError(
-            "LEAPP command/body/velocity input must have 3 or 6 element names, "
-            f"but got {len(canonical_names)}."
+            f"LEAPP command/body/velocity input must have 3 or 6 element names, but got {len(canonical_names)}."
         )
 
     if width is not None and len(canonical_names) != width:
         raise ValueError(
-            f"LEAPP command/body/velocity input has {len(canonical_names)} element names, "
-            f"but tensor width is {width}."
+            f"LEAPP command/body/velocity input has {len(canonical_names)} element names, but tensor width is {width}."
         )
     if canonical_names != expected_names:
         raise ValueError(

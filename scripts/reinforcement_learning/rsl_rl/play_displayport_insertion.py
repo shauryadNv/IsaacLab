@@ -81,8 +81,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import importlib.metadata as metadata
+import json
 import os
 import re
 import sys
@@ -110,6 +110,8 @@ from isaaclab.utils.assets import retrieve_file_path
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation, RigidObject
 
+# local imports
+from isaaclab_rl.entrypoints.backends import cli_args_rsl_rl as cli_args
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
@@ -121,8 +123,6 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
 from isaaclab_tasks.utils import get_checkpoint_path, setup_preset_cli
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
-# local imports
-from isaaclab_rl.entrypoints.backends import cli_args_rsl_rl as cli_args
 from success_utils import SuccessTracker  # isort: skip
 
 _DEFAULT_TASK = "Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-NoJointVel-ROS-Inference-v0"
@@ -134,9 +134,7 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=_DEFAULT_TASK, help="Registered gym task id.")
-parser.add_argument(
-    "--agent", type=str, default="rsl_rl_cfg_entry_point", help="RL agent configuration entry point."
-)
+parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="RL agent configuration entry point.")
 parser.add_argument("--seed", type=int, default=None, help="Environment seed.")
 parser.add_argument(
     "--use_pretrained_checkpoint", action="store_true", help="Use the published Nucleus pretrained checkpoint."
@@ -232,9 +230,7 @@ parser.add_argument(
     "--log_dir",
     type=str,
     default=None,
-    help=(
-        "Directory for run logs. Default: <checkpoint_or_leapp_dir>/inference_logs/<timestamp>."
-    ),
+    help=("Directory for run logs. Default: <checkpoint_or_leapp_dir>/inference_logs/<timestamp>."),
 )
 parser.add_argument("--no_print", action="store_true", help="Disable per-step terminal printing.")
 parser.add_argument(
@@ -534,10 +530,7 @@ def load_replay_trajectory(path: str | Path, num_arm_joints: int = 7) -> ReplayT
         deltas = _stack(safety_keys[:num_arm_joints])
         targets = measured + deltas
         source = "joint_pos+safety_cmd"
-        print(
-            "[INFO] Replay CSV uses real-style safety_cmd deltas; "
-            "absolute targets = measured_joint + safety_cmd."
-        )
+        print("[INFO] Replay CSV uses real-style safety_cmd deltas; absolute targets = measured_joint + safety_cmd.")
     elif len(act_keys) >= num_arm_joints:
         candidate = _stack(act_keys[:num_arm_joints])
         # Guard against older sim logs where action_* held raw normalized output.
@@ -687,9 +680,7 @@ def resolve_leapp_model_yaml(path: str | Path) -> Path:
         return yaml_files[0]
     if deploy_candidates:
         names = ", ".join(p.name for p in deploy_candidates)
-        raise ValueError(
-            f"Multiple deploy YAML files under {model_path}: {names}. Pass the YAML path explicitly."
-        )
+        raise ValueError(f"Multiple deploy YAML files under {model_path}: {names}. Pass the YAML path explicitly.")
     names = ", ".join(p.name for p in yaml_files)
     raise ValueError(f"Multiple YAML files under {model_path}: {names}. Pass the YAML path explicitly.")
 
@@ -806,9 +797,7 @@ class LeappDisplayportPolicy:
             # Fall back to the first tensor that looks like an arm command.
             candidates = [k for k in self.last_outputs if k.endswith("/arm_action") or "action" in k.split("/")[-1]]
             if not candidates:
-                raise KeyError(
-                    f"LEAPP outputs missing arm_action. Keys: {list(self.last_outputs.keys())}"
-                )
+                raise KeyError(f"LEAPP outputs missing arm_action. Keys: {list(self.last_outputs.keys())}")
             abs_key = candidates[0]
 
         absolute = self.last_outputs[abs_key]
@@ -1318,6 +1307,7 @@ class InferenceLogger:
             writer.writerows(self.rows)
         print(f"[INFO] Wrote {len(self.rows)} steps to {self.csv_path}")
 
+
 def _disable_randomization(env_cfg):
     """Make resets deterministic for debugging / replay."""
     zero_range = {
@@ -1648,10 +1638,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                             dim = int(rnn.size) if rnn is not None else int(np.asarray(lstm_h).size)
                             print(f"[INFO] Logging recurrent state as rnn_* (dim={dim}).")
                         else:
-                            print(
-                                "[WARNING] Policy has no accessible LSTM hidden state; "
-                                "rnn_* will not be written."
-                            )
+                            print("[WARNING] Policy has no accessible LSTM hidden state; rnn_* will not be written.")
                         lstm_logged_once = True
 
                     # Snapshot the state the policy/replay actually saw, before the action lands.
