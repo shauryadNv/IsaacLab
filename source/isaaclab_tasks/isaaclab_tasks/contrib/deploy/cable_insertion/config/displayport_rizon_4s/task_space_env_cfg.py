@@ -95,21 +95,26 @@ class TaskSpaceObservationsCfg:
         # Observe the gripper TCP pose (flange + _TCP_OFFSET), not the raw flange.
         eef_pos = ObsTerm(
             func=mdp.eef_pos_w,
-            params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange", "offset": _TCP_OFFSET},
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "body_name": "flange",
+                "offset": _TCP_OFFSET,
+                "max_noise_m": 0.0,
+            },
         )
         # TCP shares the flange orientation (pure-translation offset), so the 6D
         # rotation is read directly from the flange body.
         eef_rot_6d = ObsTerm(
             func=mdp.eef_rot_6d_w,
-            params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange"},
+            params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange", "max_angle_rad": 0.0},
         )
         socket_kp_pos = ObsTerm(
             func=mdp.rigid_object_pos_w,
-            params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET},
+            params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET, "max_noise_m": 0.0},
         )
         socket_kp_rot_6d = ObsTerm(
             func=mdp.rigid_object_rot_6d_w,
-            params={"asset_cfg": SceneEntityCfg("dp_socket")},
+            params={"asset_cfg": SceneEntityCfg("dp_socket"), "max_angle_rad": 0.0},
         )
 
         def __post_init__(self):

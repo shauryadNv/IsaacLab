@@ -392,6 +392,7 @@ class rigid_object_pos_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
         offset: list | None = None,
+        max_noise_m: float | None = None,
     ) -> torch.Tensor:
         obj_pos = wp.to_torch(self.asset.data.root_pos_w)
         obj_quat = wp.to_torch(self.asset.data.root_quat_w)
@@ -526,6 +527,7 @@ class rigid_object_rot_6d_w(ManagerTermBase):
         self,
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
+        max_angle_rad: float | None = None,
     ) -> torch.Tensor:
         obj_quat = wp.to_torch(self.asset.data.root_quat_w)
         return _quat_to_rot_6d(obj_quat)
@@ -628,6 +630,7 @@ class eef_pos_w(ManagerTermBase):
         asset_cfg: SceneEntityCfg | None = None,
         body_name: str | None = None,
         offset: list | None = None,
+        max_noise_m: float | None = None,
     ) -> torch.Tensor:
         body_pos = wp.to_torch(self.robot.data.body_pos_w)[:, self.body_idx, :]
 
@@ -715,6 +718,7 @@ class eef_rot_6d_w(ManagerTermBase):
         env: ManagerBasedRLEnv,
         asset_cfg: SceneEntityCfg | None = None,
         body_name: str | None = None,
+        max_angle_rad: float | None = None,
     ) -> torch.Tensor:
         body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
         return _quat_to_rot_6d(body_quat)
