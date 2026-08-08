@@ -7,19 +7,31 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch
 import warp as wp
 
 from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
-from isaaclab.utils.math import combine_frame_transforms, matrix_from_quat
+from isaaclab.utils.math import combine_frame_transforms, matrix_from_quat, quat_from_angle_axis, quat_mul
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation, RigidObject
     from isaaclab.envs import ManagerBasedRLEnv
 
     from .events import randomize_gear_type
+
+
+def _num_selected_envs(env_ids: Sequence[int] | slice | torch.Tensor | None, num_envs: int) -> int:
+    """Return the number of environments selected by an env-id index."""
+    if env_ids is None:
+        return num_envs
+    if isinstance(env_ids, slice):
+        return len(range(*env_ids.indices(num_envs)))
+    if isinstance(env_ids, torch.Tensor):
+        return int(env_ids.numel())
+    return len(env_ids)
 
 
 class gear_shaft_pos_w(ManagerTermBase):
@@ -391,6 +403,50 @@ class rigid_object_pos_w(ManagerTermBase):
         return obj_pos - env.scene.env_origins
 
 
+class rigid_object_pos_w_with_reset_uniform_noise(rigid_object_pos_w):
+    """Rigid object position with reset-sampled uniform position noise.
+
+    Samples an independent Cartesian position offset for each environment at reset
+    and holds that offset fixed until the next reset. This models a per-episode
+    pose-observation bias such as perception or calibration error.
+
+    Args:
+        max_noise_m: Maximum absolute position perturbation [m] sampled independently
+            for each axis. Defaults to ``0.0``.
+
+    Returns:
+        Noisy object position tensor in the environment frame, shape ``[num_envs, 3]`` [m].
+    """
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.max_noise_m = float(cfg.params.get("max_noise_m", 0.0))
+        if self.max_noise_m < 0.0:
+            raise ValueError("'max_noise_m' must be non-negative.")
+        self._pos_noise = torch.zeros((env.num_envs, 3), device=env.device, dtype=torch.float32)
+        self.reset()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        num_resets = _num_selected_envs(env_ids, self.num_envs)
+        if self.max_noise_m == 0.0:
+            self._pos_noise[env_ids] = 0.0
+            return
+        self._pos_noise[env_ids] = torch.empty((num_resets, 3), device=self.device).uniform_(
+            -self.max_noise_m, self.max_noise_m
+        )
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        offset: list | None = None,
+        max_noise_m: float | None = None,
+    ) -> torch.Tensor:
+        return super().__call__(env, asset_cfg=asset_cfg, offset=offset) + self._pos_noise
+
+
 class rigid_object_quat_w(ManagerTermBase):
     """Rigid object orientation in the world frame.
 
@@ -475,6 +531,59 @@ class rigid_object_rot_6d_w(ManagerTermBase):
         return _quat_to_rot_6d(obj_quat)
 
 
+class rigid_object_rot_6d_w_with_reset_axis_angle_noise(rigid_object_rot_6d_w):
+    """Rigid object 6D rotation with reset-sampled axis-angle orientation noise.
+
+    Samples one bounded random rotation per environment at reset and applies it to
+    the observed object quaternion before converting to the 6D representation. The
+    perturbation remains fixed until the next reset, matching a slowly varying
+    calibration or perception orientation bias rather than frame-to-frame feature
+    jitter.
+
+    Args:
+        max_angle_rad: Maximum absolute angular perturbation [rad]. The perturbation
+            axis is sampled uniformly from random 3D directions and the angle is
+            sampled uniformly from ``[-max_angle_rad, max_angle_rad]``.
+
+    Returns:
+        Noisy 6D rotation tensor, shape ``[num_envs, 6]``.
+    """
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.max_angle_rad = float(cfg.params.get("max_angle_rad", 0.0))
+        if self.max_angle_rad < 0.0:
+            raise ValueError("'max_angle_rad' must be non-negative.")
+        self._noise_quat = torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.float32)
+        self._noise_quat[:, 3] = 1.0
+        self.reset()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        num_resets = _num_selected_envs(env_ids, self.num_envs)
+        if self.max_angle_rad == 0.0:
+            self._noise_quat[env_ids, :3] = 0.0
+            self._noise_quat[env_ids, 3] = 1.0
+            return
+        axis = torch.randn((num_resets, 3), device=self.device, dtype=torch.float32)
+        axis = torch.nn.functional.normalize(axis, p=2.0, dim=-1, eps=1e-12)
+        angle = torch.empty(num_resets, device=self.device, dtype=torch.float32).uniform_(
+            -self.max_angle_rad, self.max_angle_rad
+        )
+        self._noise_quat[env_ids] = quat_from_angle_axis(angle, axis)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        max_angle_rad: float | None = None,
+    ) -> torch.Tensor:
+        obj_quat = wp.to_torch(self.asset.data.root_quat_w)
+        noisy_obj_quat = quat_mul(self._noise_quat, obj_quat)
+        return _quat_to_rot_6d(noisy_obj_quat)
+
+
 class eef_pos_w(ManagerTermBase):
     """End-effector position in the environment frame.
 
@@ -530,6 +639,51 @@ class eef_pos_w(ManagerTermBase):
         return body_pos - env.scene.env_origins
 
 
+class eef_pos_w_with_reset_uniform_noise(eef_pos_w):
+    """End-effector position with reset-sampled uniform position noise.
+
+    Samples an independent Cartesian position offset for each environment at reset and
+    holds that offset fixed until the next reset. This is useful for modeling a
+    per-episode EEF pose bias such as calibration or kinematic state-estimation error.
+
+    Args:
+        max_noise_m: Maximum absolute position perturbation [m] sampled independently
+            for each axis. Defaults to ``0.0``.
+
+    Returns:
+        Noisy EEF position tensor, shape ``[num_envs, 3]`` [m].
+    """
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.max_noise_m = float(cfg.params.get("max_noise_m", 0.0))
+        if self.max_noise_m < 0.0:
+            raise ValueError("'max_noise_m' must be non-negative.")
+        self._pos_noise = torch.zeros((env.num_envs, 3), device=env.device, dtype=torch.float32)
+        self.reset()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        num_resets = _num_selected_envs(env_ids, self.num_envs)
+        if self.max_noise_m == 0.0:
+            self._pos_noise[env_ids] = 0.0
+            return
+        self._pos_noise[env_ids] = torch.empty((num_resets, 3), device=self.device).uniform_(
+            -self.max_noise_m, self.max_noise_m
+        )
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        body_name: str | None = None,
+        offset: list | None = None,
+        max_noise_m: float | None = None,
+    ) -> torch.Tensor:
+        return super().__call__(env, asset_cfg=asset_cfg, body_name=body_name, offset=offset) + self._pos_noise
+
+
 class eef_rot_6d_w(ManagerTermBase):
     """End-effector 6D rotation in the world frame (Zhou et al.).
 
@@ -564,3 +718,57 @@ class eef_rot_6d_w(ManagerTermBase):
     ) -> torch.Tensor:
         body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
         return _quat_to_rot_6d(body_quat)
+
+
+class eef_rot_6d_w_with_reset_axis_angle_noise(eef_rot_6d_w):
+    """End-effector 6D rotation with reset-sampled axis-angle orientation noise.
+
+    Samples one bounded random rotation per environment at reset and applies it to
+    the observed EEF quaternion before converting to the 6D representation. The
+    perturbation remains fixed until the next reset, matching a slowly varying
+    calibration or kinematic orientation bias rather than frame-to-frame feature
+    jitter.
+
+    Args:
+        max_angle_rad: Maximum absolute angular perturbation [rad]. The perturbation
+            axis is sampled uniformly from random 3D directions and the angle is
+            sampled uniformly from ``[-max_angle_rad, max_angle_rad]``.
+
+    Returns:
+        Noisy 6D rotation tensor, shape ``[num_envs, 6]``.
+    """
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self.max_angle_rad = float(cfg.params.get("max_angle_rad", 0.0))
+        if self.max_angle_rad < 0.0:
+            raise ValueError("'max_angle_rad' must be non-negative.")
+        self._noise_quat = torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.float32)
+        self._noise_quat[:, 3] = 1.0
+        self.reset()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        if env_ids is None:
+            env_ids = slice(None)
+        num_resets = _num_selected_envs(env_ids, self.num_envs)
+        if self.max_angle_rad == 0.0:
+            self._noise_quat[env_ids, :3] = 0.0
+            self._noise_quat[env_ids, 3] = 1.0
+            return
+        axis = torch.randn((num_resets, 3), device=self.device, dtype=torch.float32)
+        axis = torch.nn.functional.normalize(axis, p=2.0, dim=-1, eps=1e-12)
+        angle = torch.empty(num_resets, device=self.device, dtype=torch.float32).uniform_(
+            -self.max_angle_rad, self.max_angle_rad
+        )
+        self._noise_quat[env_ids] = quat_from_angle_axis(angle, axis)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        body_name: str | None = None,
+        max_angle_rad: float | None = None,
+    ) -> torch.Tensor:
+        body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
+        noisy_body_quat = quat_mul(self._noise_quat, body_quat)
+        return _quat_to_rot_6d(noisy_body_quat)

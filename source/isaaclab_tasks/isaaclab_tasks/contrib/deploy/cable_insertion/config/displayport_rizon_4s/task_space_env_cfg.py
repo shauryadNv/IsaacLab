@@ -166,6 +166,9 @@ EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1
 EXP_RAND = "both"          # none|friction|pd|both -- robot joint-friction and/or PD-gain domain randomization
 EXP_CALIB_USD = True      # True => spawn the calibrated Rizon4s USD instead of the stock one
 EXP_OBS_NOISE_M = 0.0      # socket-position observation noise [m] applied at inference (0.0=none, 0.005=5mm)
+EXP_SOCKET_ROT_OBS_NOISE_RAD = 0.0  # socket orientation observation bias [rad], sampled as axis-angle
+EXP_EEF_POS_OBS_NOISE_M = 0.0  # EEF TCP position observation bias [m] (0.0=none; set from measured FK error)
+EXP_EEF_ROT_OBS_NOISE_RAD = 0.0  # EEF orientation observation bias [rad], sampled as axis-angle
 # --- EXP TOGGLES END ---
 
 
@@ -439,6 +442,24 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
 
         # ----- Observations: task-space with 6D rotation -----
         self.observations = TaskSpaceObservationsCfg()
+        self.observations.policy.enable_corruption = (
+            EXP_OBS_NOISE_M > 0.0
+            or EXP_SOCKET_ROT_OBS_NOISE_RAD > 0.0
+            or EXP_EEF_POS_OBS_NOISE_M > 0.0
+            or EXP_EEF_ROT_OBS_NOISE_RAD > 0.0
+        )
+        if EXP_OBS_NOISE_M > 0.0:
+            self.observations.policy.socket_kp_pos.func = mdp.rigid_object_pos_w_with_reset_uniform_noise
+            self.observations.policy.socket_kp_pos.params["max_noise_m"] = EXP_OBS_NOISE_M
+        if EXP_SOCKET_ROT_OBS_NOISE_RAD > 0.0:
+            self.observations.policy.socket_kp_rot_6d.func = mdp.rigid_object_rot_6d_w_with_reset_axis_angle_noise
+            self.observations.policy.socket_kp_rot_6d.params["max_angle_rad"] = EXP_SOCKET_ROT_OBS_NOISE_RAD
+        if EXP_EEF_POS_OBS_NOISE_M > 0.0:
+            self.observations.policy.eef_pos.func = mdp.eef_pos_w_with_reset_uniform_noise
+            self.observations.policy.eef_pos.params["max_noise_m"] = EXP_EEF_POS_OBS_NOISE_M
+        if EXP_EEF_ROT_OBS_NOISE_RAD > 0.0:
+            self.observations.policy.eef_rot_6d.func = mdp.eef_rot_6d_w_with_reset_axis_angle_noise
+            self.observations.policy.eef_rot_6d.params["max_angle_rad"] = EXP_EEF_ROT_OBS_NOISE_RAD
 
         # ----- Actions: Operational Space Controller -----
         self.actions.arm_action = OperationalSpaceControllerActionCfg(
@@ -587,4 +608,12 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg_PLAY(Rizon4sTaskSpaceDisplaypor
         super().__post_init__()
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5
+        self.observations.policy.eef_pos.func = mdp.eef_pos_w
+        self.observations.policy.eef_pos.params.pop("max_noise_m", None)
+        self.observations.policy.eef_rot_6d.func = mdp.eef_rot_6d_w
+        self.observations.policy.eef_rot_6d.params.pop("max_angle_rad", None)
+        self.observations.policy.socket_kp_pos.func = mdp.rigid_object_pos_w
+        self.observations.policy.socket_kp_pos.params.pop("max_noise_m", None)
+        self.observations.policy.socket_kp_rot_6d.func = mdp.rigid_object_rot_6d_w
+        self.observations.policy.socket_kp_rot_6d.params.pop("max_angle_rad", None)
         self.observations.policy.enable_corruption = False
