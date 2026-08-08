@@ -87,21 +87,21 @@ from isaaclab_assets import FLEXIV_RIZON4S_GRAV_GRIPPER_CFG  # isort: skip
 
 @configclass
 class TaskSpaceObservationsCfg:
-    """Task-space observations with 6D rotation representation."""
+    """Task-space observations with quaternion rotations."""
 
     @configclass
     class PolicyCfg(ObsGroup):
-        """Actor observations: EEF pose + socket keypoint frame (18 dims)."""
+        """Actor observations: EEF pose + socket keypoint frame (14 dims)."""
 
         # Observe the gripper TCP pose (flange + _TCP_OFFSET), not the raw flange.
         eef_pos = ObsTerm(
             func=mdp.eef_pos_w,
             params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange", "offset": _TCP_OFFSET},
         )
-        # TCP shares the flange orientation (pure-translation offset), so the 6D
-        # rotation is read directly from the flange body.
-        eef_rot_6d = ObsTerm(
-            func=mdp.eef_rot_6d_w,
+        # TCP shares the flange orientation (pure-translation offset), so the
+        # quaternion is read directly from the flange body.
+        eef_quat = ObsTerm(
+            func=mdp.eef_quat_w,
             params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange"},
         )
         socket_kp_pos = ObsTerm(
@@ -109,8 +109,8 @@ class TaskSpaceObservationsCfg:
             params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET},
             noise=UniformNoiseCfg(n_min=0.0, n_max=0.0, operation="add"),
         )
-        socket_kp_rot_6d = ObsTerm(
-            func=mdp.rigid_object_rot_6d_w,
+        socket_kp_quat = ObsTerm(
+            func=mdp.rigid_object_quat_w,
             params={"asset_cfg": SceneEntityCfg("dp_socket")},
         )
 
@@ -120,7 +120,7 @@ class TaskSpaceObservationsCfg:
 
     @configclass
     class CriticCfg(ObsGroup):
-        """Critic observations: joint state + both keypoint frames (32 dims)."""
+        """Critic observations: joint state + both keypoint frames (28 dims)."""
 
         joint_pos = ObsTerm(
             func=mdp.joint_pos,
@@ -134,16 +134,16 @@ class TaskSpaceObservationsCfg:
             func=mdp.rigid_object_pos_w,
             params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET},
         )
-        socket_kp_rot_6d = ObsTerm(
-            func=mdp.rigid_object_rot_6d_w,
+        socket_kp_quat = ObsTerm(
+            func=mdp.rigid_object_quat_w,
             params={"asset_cfg": SceneEntityCfg("dp_socket")},
         )
         plug_kp_pos = ObsTerm(
             func=mdp.rigid_object_pos_w,
             params={"asset_cfg": SceneEntityCfg("dp_plug"), "offset": PLUG_INSERTION_OFFSET},
         )
-        plug_kp_rot_6d = ObsTerm(
-            func=mdp.rigid_object_rot_6d_w,
+        plug_kp_quat = ObsTerm(
+            func=mdp.rigid_object_quat_w,
             params={"asset_cfg": SceneEntityCfg("dp_plug")},
         )
 

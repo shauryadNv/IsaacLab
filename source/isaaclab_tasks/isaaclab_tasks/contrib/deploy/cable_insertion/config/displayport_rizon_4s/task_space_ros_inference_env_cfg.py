@@ -53,7 +53,7 @@ class Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSpaceDis
     This configuration:
 
     - Exposes variables needed by Isaac Manipulator for on-robot inference
-      with task-space (OSC) control and 6D rotation observations.
+      with task-space (OSC) control and quaternion rotation observations.
     - Aligns robot mounting pose with a vertical (table-top) Flexiv Rizon 4s
       installation (matching the joint-space ROS inference config).
     - Overrides plug and socket initial poses for a fixed/deterministic setup.
@@ -63,7 +63,7 @@ class Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSpaceDis
         super().__post_init__()
 
         # Variables used by Isaac Manipulator for on-robot inference
-        self.obs_order = ["eef_pos", "eef_rot_6d", "socket_kp_pos", "socket_kp_rot_6d"]
+        self.obs_order = ["eef_pos", "eef_quat", "socket_kp_pos", "socket_kp_quat"]
         self.policy_action_space = "task"
         self.arm_joint_names = [
             "joint1",
@@ -76,10 +76,10 @@ class Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSpaceDis
         ]
         # 6-DOF task-space actions (3 pos + 3 axis-angle rot)
         self.action_space = 6
-        # Critic: 7 jpos + 7 jvel + 3 socket_pos + 6 socket_rot6d + 3 plug_pos + 6 plug_rot6d = 32
-        self.state_space = 32
-        # Actor: 3 eef_pos + 6 eef_rot6d + 3 socket_pos + 6 socket_rot6d = 18
-        self.observation_space = 18
+        # Critic: 7 jpos + 7 jvel + 3 socket_pos + 4 socket_quat + 3 plug_pos + 4 plug_quat = 28
+        self.state_space = 28
+        # Actor: 3 eef_pos + 4 eef_quat + 3 socket_pos + 4 socket_quat = 14
+        self.observation_space = 14
 
         self.action_scale = [_ACTION_SCALE] * self.action_space
 
