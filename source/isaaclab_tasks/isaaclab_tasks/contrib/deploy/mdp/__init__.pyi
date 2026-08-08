@@ -19,6 +19,7 @@ __all__ = [
     "rigid_object_quat_w",
     "rigid_object_rot_6d_w",
     "eef_pos_w",
+    "eef_quat_w",
     "eef_rot_6d_w",
     "keypoint_command_error",
     "keypoint_command_error_exp",
@@ -51,6 +52,7 @@ from .observations import (
     rigid_object_quat_w,
     rigid_object_rot_6d_w,
     eef_pos_w,
+    eef_quat_w,
     eef_rot_6d_w,
 )
 from .rewards import (

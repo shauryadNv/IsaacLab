@@ -530,6 +530,48 @@ class eef_pos_w(ManagerTermBase):
         return body_pos - env.scene.env_origins
 
 
+class eef_quat_w(ManagerTermBase):
+    """End-effector orientation in the world frame.
+
+    Gets the quaternion of a specified body on a robot articulation. The
+    quaternion is canonicalized so that the ``w`` component is positive,
+    reducing observation variation seen by the policy.
+
+    Args:
+        asset_cfg: The robot articulation configuration. Required.
+        body_name: Name of the end-effector body link. Required.
+
+    Returns:
+        End-effector orientation as a quaternion ``(x, y, z, w)``, shape ``[num_envs, 4]``.
+    """
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        if "asset_cfg" not in cfg.params:
+            raise ValueError("'asset_cfg' parameter is required in eef_quat_w configuration.")
+        if "body_name" not in cfg.params:
+            raise ValueError("'body_name' parameter is required in eef_quat_w configuration.")
+
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.robot: Articulation = env.scene[self.asset_cfg.name]
+        self.body_name: str = cfg.params["body_name"]
+        self.body_idx = self.robot.find_bodies(self.body_name)[0][0]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        body_name: str | None = None,
+    ) -> torch.Tensor:
+        body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
+
+        w_negative = body_quat[:, 3] < 0
+        positive_quat = body_quat.clone()
+        positive_quat[w_negative] = -body_quat[w_negative]
+
+        return positive_quat
+
+
 class eef_rot_6d_w(ManagerTermBase):
     """End-effector 6D rotation in the world frame (Zhou et al.).
 
