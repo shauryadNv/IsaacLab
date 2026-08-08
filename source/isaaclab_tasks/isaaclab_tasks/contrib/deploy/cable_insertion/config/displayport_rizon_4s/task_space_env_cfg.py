@@ -93,10 +93,10 @@ class TaskSpaceObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Actor observations: EEF pose + socket keypoint frame (14 dims)."""
 
-        # Observe the gripper TCP pose (flange + _TCP_OFFSET), not the raw flange.
+        # Observe the raw flange pose, matching the OSC-controlled body.
         eef_pos = ObsTerm(
             func=mdp.eef_pos_w,
-            params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange", "offset": _TCP_OFFSET},
+            params={"asset_cfg": SceneEntityCfg("robot"), "body_name": "flange"},
         )
         # TCP shares the flange orientation (pure-translation offset), so the
         # quaternion is read directly from the flange body.
