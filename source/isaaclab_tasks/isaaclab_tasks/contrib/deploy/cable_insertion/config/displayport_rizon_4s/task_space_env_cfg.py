@@ -22,6 +22,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg
 
 import isaaclab_tasks.contrib.deploy.mdp as mdp
 import isaaclab_tasks.contrib.deploy.mdp.terminations as cable_terminations
@@ -106,6 +107,7 @@ class TaskSpaceObservationsCfg:
         socket_kp_pos = ObsTerm(
             func=mdp.rigid_object_pos_w,
             params={"asset_cfg": SceneEntityCfg("dp_socket"), "offset": SOCKET_INSERTION_OFFSET},
+            noise=UniformNoiseCfg(n_min=0.0, n_max=0.0, operation="add"),
         )
         socket_kp_rot_6d = ObsTerm(
             func=mdp.rigid_object_rot_6d_w,
