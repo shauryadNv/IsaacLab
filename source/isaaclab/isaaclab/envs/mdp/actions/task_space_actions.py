@@ -427,6 +427,10 @@ class OperationalSpaceControllerAction(ActionTerm):
         self._damping_ratio_idx = None
         self._resolve_command_indexes()
 
+        # Per-episode controller-response randomization. Defaults are identity, so this is inert unless configured.
+        self._validate_action_response_cfg()
+        self._init_action_response_buffers()
+
         # Nullspace position control joint targets
         self._nullspace_joint_pos_target = None
         self._resolve_nullspace_joint_pos_targets()
@@ -566,7 +570,10 @@ class OperationalSpaceControllerAction(ActionTerm):
         Args:
             env_ids (Sequence[int] | None): The environment indices to reset. If ``None``, all environments are reset.
         """
-        self._raw_actions[env_ids] = 0.0
+        index_env_ids = slice(None) if env_ids is None else env_ids
+        self._raw_actions[index_env_ids] = 0.0
+        self._processed_actions[index_env_ids] = 0.0
+        self._reset_action_response_randomization(index_env_ids)
         if self._contact_sensor is not None:
             self._contact_sensor.reset(env_ids)
         if self._task_frame_transformer is not None:
@@ -640,6 +647,212 @@ class OperationalSpaceControllerAction(ActionTerm):
             self._nullspace_joint_pos_target = self._asset.data.default_joint_pos.torch[:, self._joint_ids]
         else:
             raise ValueError("Invalid value for nullspace joint pos targets.")
+
+    def _validate_action_response_cfg(self):
+        """Validates action-response and OSC gain randomization ranges."""
+        self._validate_uniform_range(
+            "action_response_position_gain_range",
+            self.cfg.action_response_position_gain_range,
+            lower_bound=0.0,
+        )
+        self._validate_uniform_range(
+            "action_response_orientation_gain_range",
+            self.cfg.action_response_orientation_gain_range,
+            lower_bound=0.0,
+        )
+        self._validate_uniform_range(
+            "action_response_delay_steps_range",
+            self.cfg.action_response_delay_steps_range,
+            lower_bound=0,
+            integral=True,
+        )
+        self._validate_uniform_range(
+            "action_response_smoothing_alpha_range",
+            self.cfg.action_response_smoothing_alpha_range,
+            lower_bound=0.0,
+            upper_bound=1.0,
+        )
+        self._validate_uniform_range(
+            "osc_stiffness_gain_range",
+            self.cfg.osc_stiffness_gain_range,
+            lower_bound=0.0,
+        )
+        self._validate_uniform_range(
+            "osc_damping_ratio_gain_range",
+            self.cfg.osc_damping_ratio_gain_range,
+            lower_bound=0.0,
+        )
+
+        action_response_enabled = (
+            not self._range_matches(self.cfg.action_response_position_gain_range, (1.0, 1.0))
+            or not self._range_matches(self.cfg.action_response_orientation_gain_range, (1.0, 1.0))
+            or not self._range_matches(self.cfg.action_response_delay_steps_range, (0, 0))
+            or not self._range_matches(self.cfg.action_response_smoothing_alpha_range, (1.0, 1.0))
+            or self.cfg.action_response_max_abs_position_delta is not None
+            or self.cfg.action_response_max_abs_orientation_delta is not None
+        )
+        self._action_response_randomization_enabled = action_response_enabled
+        if action_response_enabled and self._pose_rel_idx is None:
+            raise ValueError("Action-response randomization is only supported for OSC target type 'pose_rel'.")
+
+        osc_gain_randomization_enabled = (
+            not self._range_matches(self.cfg.osc_stiffness_gain_range, (1.0, 1.0))
+            or not self._range_matches(self.cfg.osc_damping_ratio_gain_range, (1.0, 1.0))
+        )
+        self._osc_gain_randomization_enabled = osc_gain_randomization_enabled
+        if osc_gain_randomization_enabled and self.cfg.controller_cfg.impedance_mode != "fixed":
+            raise ValueError("OSC gain randomization is only supported with fixed impedance mode.")
+
+        if self.cfg.action_response_max_abs_position_delta is not None:
+            if self.cfg.action_response_max_abs_position_delta < 0.0:
+                raise ValueError("action_response_max_abs_position_delta must be non-negative.")
+        if self.cfg.action_response_max_abs_orientation_delta is not None:
+            if self.cfg.action_response_max_abs_orientation_delta < 0.0:
+                raise ValueError("action_response_max_abs_orientation_delta must be non-negative.")
+
+    def _init_action_response_buffers(self):
+        """Initializes per-environment buffers for action-response randomization."""
+        max_delay_steps = int(self.cfg.action_response_delay_steps_range[1])
+        self._action_response_history_len = max(max_delay_steps + 1, 1)
+        self._action_response_history_index = 0
+        self._action_response_position_gain = torch.ones(self.num_envs, 1, device=self.device)
+        self._action_response_orientation_gain = torch.ones(self.num_envs, 1, device=self.device)
+        self._action_response_smoothing_alpha = torch.ones(self.num_envs, 1, device=self.device)
+        self._action_response_delay_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._action_response_history = torch.zeros(
+            self._action_response_history_len, self.num_envs, 6, device=self.device
+        )
+        self._action_response_previous = torch.zeros(self.num_envs, 6, device=self.device)
+
+        self._osc_stiffness_gain = torch.ones(self.num_envs, 1, device=self.device)
+        self._osc_damping_ratio_gain = torch.ones(self.num_envs, 1, device=self.device)
+        self._base_motion_p_gains_task = self._osc._motion_p_gains_task.clone()
+        self._base_motion_damping_ratio_task = torch.as_tensor(
+            self.cfg.controller_cfg.motion_damping_ratio_task, dtype=torch.float, device=self.device
+        ).reshape(1, -1)
+
+        self._reset_action_response_randomization(slice(None))
+
+    def _reset_action_response_randomization(self, env_ids: Sequence[int] | slice):
+        """Samples per-episode action-response parameters and clears delayed/smoothed state."""
+        env_ids_tensor = self._env_ids_to_tensor(env_ids)
+        if env_ids_tensor.numel() == 0:
+            return
+
+        if self._action_response_randomization_enabled:
+            self._action_response_position_gain[env_ids_tensor] = self._sample_uniform_range(
+                self.cfg.action_response_position_gain_range, env_ids_tensor.numel()
+            )
+            self._action_response_orientation_gain[env_ids_tensor] = self._sample_uniform_range(
+                self.cfg.action_response_orientation_gain_range, env_ids_tensor.numel()
+            )
+            self._action_response_smoothing_alpha[env_ids_tensor] = self._sample_uniform_range(
+                self.cfg.action_response_smoothing_alpha_range, env_ids_tensor.numel()
+            )
+            delay_min, delay_max = self.cfg.action_response_delay_steps_range
+            self._action_response_delay_steps[env_ids_tensor] = torch.randint(
+                int(delay_min), int(delay_max) + 1, (env_ids_tensor.numel(),), device=self.device
+            )
+            self._action_response_history[:, env_ids_tensor] = 0.0
+            self._action_response_previous[env_ids_tensor] = 0.0
+
+        if self._osc_gain_randomization_enabled:
+            self._osc_stiffness_gain[env_ids_tensor] = self._sample_uniform_range(
+                self.cfg.osc_stiffness_gain_range, env_ids_tensor.numel()
+            )
+            self._osc_damping_ratio_gain[env_ids_tensor] = self._sample_uniform_range(
+                self.cfg.osc_damping_ratio_gain_range, env_ids_tensor.numel()
+            )
+            self._apply_osc_gain_randomization(env_ids_tensor)
+
+    def _apply_action_response_randomization(self):
+        """Applies gain, delay, smoothing, and optional saturation to processed ``pose_rel`` commands."""
+        if self._pose_rel_idx is None or not self._action_response_randomization_enabled:
+            return
+
+        pose_rel = self._processed_actions[:, self._pose_rel_idx : self._pose_rel_idx + 6].clone()
+        pose_rel[:, :3] *= self._action_response_position_gain
+        pose_rel[:, 3:6] *= self._action_response_orientation_gain
+
+        self._action_response_history[self._action_response_history_index] = pose_rel
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        delayed_history_idx = (
+            self._action_response_history_index - self._action_response_delay_steps
+        ) % self._action_response_history_len
+        delayed_pose_rel = self._action_response_history[delayed_history_idx, env_ids]
+        self._action_response_history_index = (
+            self._action_response_history_index + 1
+        ) % self._action_response_history_len
+
+        alpha = self._action_response_smoothing_alpha
+        realized_pose_rel = alpha * delayed_pose_rel + (1.0 - alpha) * self._action_response_previous
+        if self.cfg.action_response_max_abs_position_delta is not None:
+            max_position_delta = float(self.cfg.action_response_max_abs_position_delta)
+            realized_pose_rel[:, :3] = realized_pose_rel[:, :3].clamp(-max_position_delta, max_position_delta)
+        if self.cfg.action_response_max_abs_orientation_delta is not None:
+            max_orientation_delta = float(self.cfg.action_response_max_abs_orientation_delta)
+            realized_pose_rel[:, 3:6] = realized_pose_rel[:, 3:6].clamp(-max_orientation_delta, max_orientation_delta)
+
+        self._action_response_previous[:] = realized_pose_rel
+        self._processed_actions[:, self._pose_rel_idx : self._pose_rel_idx + 6] = realized_pose_rel
+
+    def _apply_osc_gain_randomization(self, env_ids: torch.Tensor):
+        """Applies sampled fixed-OSC stiffness and damping-ratio scaling for selected environments."""
+        base_stiffness_diag = torch.diagonal(
+            self._base_motion_p_gains_task[env_ids], dim1=-2, dim2=-1
+        )
+        stiffness_diag = base_stiffness_diag * self._osc_stiffness_gain[env_ids]
+        damping_ratio = self._base_motion_damping_ratio_task * self._osc_damping_ratio_gain[env_ids]
+
+        self._osc._motion_p_gains_task[env_ids] = torch.diag_embed(stiffness_diag)
+        self._osc._motion_d_gains_task[env_ids] = torch.diag_embed(2.0 * stiffness_diag.sqrt() * damping_ratio)
+
+    def _env_ids_to_tensor(self, env_ids: Sequence[int] | slice) -> torch.Tensor:
+        """Converts environment indices to a device tensor."""
+        all_env_ids = torch.arange(self.num_envs, device=self.device)
+        if isinstance(env_ids, slice):
+            return all_env_ids[env_ids]
+        if isinstance(env_ids, torch.Tensor):
+            return env_ids.to(device=self.device, dtype=torch.long)
+        return torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+
+    def _sample_uniform_range(self, value: tuple[float, float], count: int) -> torch.Tensor:
+        """Samples ``count`` values uniformly from a scalar range."""
+        low, high = value
+        low = float(low)
+        high = float(high)
+        return low + (high - low) * torch.rand(count, 1, device=self.device)
+
+    @staticmethod
+    def _validate_uniform_range(
+        name: str,
+        value: Sequence[float] | Sequence[int],
+        *,
+        lower_bound: float | int | None = None,
+        upper_bound: float | int | None = None,
+        integral: bool = False,
+    ):
+        """Validates a two-element uniform sampling range."""
+        if len(value) != 2:
+            raise ValueError(f"{name} must have exactly two entries.")
+        low, high = value
+        if integral:
+            if int(low) != low or int(high) != high:
+                raise ValueError(f"{name} must contain integer values.")
+            low, high = int(low), int(high)
+        else:
+            low, high = float(low), float(high)
+        if low > high:
+            raise ValueError(f"{name} lower bound must be <= upper bound.")
+        if lower_bound is not None and low < lower_bound:
+            raise ValueError(f"{name} lower bound must be >= {lower_bound}.")
+        if upper_bound is not None and high > upper_bound:
+            raise ValueError(f"{name} upper bound must be <= {upper_bound}.")
+
+    @staticmethod
+    def _range_matches(value: Sequence[float] | Sequence[int], expected: tuple[float, float] | tuple[int, int]) -> bool:
+        """Returns true when a two-element range matches an expected pair."""
+        return len(value) == 2 and value[0] == expected[0] and value[1] == expected[1]
 
     def _compute_dynamic_quantities(self):
         """Computes the dynamic quantities for operational space control.
@@ -769,30 +982,41 @@ class OperationalSpaceControllerAction(ActionTerm):
         # Store the raw actions. Please note that the actions contain task space targets
         # (in the order of the target_types), and possibly the impedance parameters depending on impedance_mode.
         self._raw_actions[:] = actions
-        # Initialize the processed actions with raw actions.
-        self._processed_actions[:] = self._raw_actions
-        # Go through the command types one by one, and apply the pre-processing if needed.
-        if self._pose_abs_idx is not None:
-            self._processed_actions[:, self._pose_abs_idx : self._pose_abs_idx + 3] *= self._position_scale
-            self._processed_actions[:, self._pose_abs_idx + 3 : self._pose_abs_idx + 7] *= self._orientation_scale
-        if self._pose_rel_idx is not None:
-            self._processed_actions[:, self._pose_rel_idx : self._pose_rel_idx + 3] *= self._position_scale
-            self._processed_actions[:, self._pose_rel_idx + 3 : self._pose_rel_idx + 6] *= self._orientation_scale
-        if self._wrench_abs_idx is not None:
-            self._processed_actions[:, self._wrench_abs_idx : self._wrench_abs_idx + 6] *= self._wrench_scale
+        # Assemble functionally so export tracers preserve the processed action graph.
+        processed_parts = []
+        cmd_idx = 0
+        for target_type in self.cfg.controller_cfg.target_types:
+            if target_type == "pose_abs":
+                processed_parts.append(actions[:, cmd_idx : cmd_idx + 3] * self._position_scale)
+                processed_parts.append(actions[:, cmd_idx + 3 : cmd_idx + 7] * self._orientation_scale)
+                cmd_idx += 7
+            elif target_type == "pose_rel":
+                processed_parts.append(actions[:, cmd_idx : cmd_idx + 3] * self._position_scale)
+                processed_parts.append(actions[:, cmd_idx + 3 : cmd_idx + 6] * self._orientation_scale)
+                cmd_idx += 6
+            elif target_type == "wrench_abs":
+                processed_parts.append(actions[:, cmd_idx : cmd_idx + 6] * self._wrench_scale)
+                cmd_idx += 6
+
         if self._stiffness_idx is not None:
-            self._processed_actions[:, self._stiffness_idx : self._stiffness_idx + 6] *= self._stiffness_scale
-            self._processed_actions[:, self._stiffness_idx : self._stiffness_idx + 6] = torch.clamp(
-                self._processed_actions[:, self._stiffness_idx : self._stiffness_idx + 6],
-                min=self.cfg.controller_cfg.motion_stiffness_limits_task[0],
-                max=self.cfg.controller_cfg.motion_stiffness_limits_task[1],
+            stiffness = actions[:, cmd_idx : cmd_idx + 6] * self._stiffness_scale
+            processed_parts.append(
+                torch.clamp(
+                    stiffness,
+                    min=self.cfg.controller_cfg.motion_stiffness_limits_task[0],
+                    max=self.cfg.controller_cfg.motion_stiffness_limits_task[1],
+                )
             )
+            cmd_idx += 6
         if self._damping_ratio_idx is not None:
-            self._processed_actions[:, self._damping_ratio_idx : self._damping_ratio_idx + 6] *= (
-                self._damping_ratio_scale
+            damping_ratio = actions[:, cmd_idx : cmd_idx + 6] * self._damping_ratio_scale
+            processed_parts.append(
+                torch.clamp(
+                    damping_ratio,
+                    min=self.cfg.controller_cfg.motion_damping_ratio_limits_task[0],
+                    max=self.cfg.controller_cfg.motion_damping_ratio_limits_task[1],
+                )
             )
-            self._processed_actions[:, self._damping_ratio_idx : self._damping_ratio_idx + 6] = torch.clamp(
-                self._processed_actions[:, self._damping_ratio_idx : self._damping_ratio_idx + 6],
-                min=self.cfg.controller_cfg.motion_damping_ratio_limits_task[0],
-                max=self.cfg.controller_cfg.motion_damping_ratio_limits_task[1],
-            )
+
+        self._processed_actions = torch.cat(processed_parts, dim=-1) if processed_parts else actions
+        self._apply_action_response_randomization()

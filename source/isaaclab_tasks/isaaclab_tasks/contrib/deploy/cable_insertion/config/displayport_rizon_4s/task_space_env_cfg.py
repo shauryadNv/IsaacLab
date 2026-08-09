@@ -457,6 +457,16 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             ),
             position_scale=_ACTION_SCALE,
             orientation_scale=_ACTION_SCALE,
+            # Controller-response randomization knobs default to identity.
+            # Override these per run to model action gain, latency, smoothing, or OSC gain mismatch.
+            action_response_position_gain_range=(1.0, 1.0),
+            action_response_orientation_gain_range=(1.0, 1.0),
+            action_response_delay_steps_range=(0, 0),
+            action_response_smoothing_alpha_range=(1.0, 1.0),
+            action_response_max_abs_position_delta=None,
+            action_response_max_abs_orientation_delta=None,
+            osc_stiffness_gain_range=(1.0, 1.0),
+            osc_damping_ratio_gain_range=(1.0, 1.0),
         )
 
         # ----- Events: curriculum + production friction -----

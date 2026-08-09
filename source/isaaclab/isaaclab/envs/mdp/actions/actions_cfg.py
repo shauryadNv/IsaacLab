@@ -348,6 +348,30 @@ class OperationalSpaceControllerActionCfg(ActionTermCfg):
     orientation_scale: float = 1.0
     """Scale factor for the orientation (quad for ``pose_abs`` or axis-angle for ``pose_rel``). Defaults to 1.0."""
 
+    action_response_position_gain_range: tuple[float, float] = (1.0, 1.0)
+    """Inclusive uniform range for per-episode gain on ``pose_rel`` position deltas. Defaults to identity."""
+
+    action_response_orientation_gain_range: tuple[float, float] = (1.0, 1.0)
+    """Inclusive uniform range for per-episode gain on ``pose_rel`` axis-angle deltas. Defaults to identity."""
+
+    action_response_delay_steps_range: tuple[int, int] = (0, 0)
+    """Inclusive uniform integer range for per-episode ``pose_rel`` command delay, in policy steps. Defaults to none."""
+
+    action_response_smoothing_alpha_range: tuple[float, float] = (1.0, 1.0)
+    """Inclusive uniform range for per-episode first-order smoothing alpha. Defaults to no smoothing."""
+
+    action_response_max_abs_position_delta: float | None = None
+    """Optional absolute clamp for realized ``pose_rel`` position deltas, in meters. Defaults to no clamp."""
+
+    action_response_max_abs_orientation_delta: float | None = None
+    """Optional absolute clamp for realized ``pose_rel`` axis-angle deltas, in radians. Defaults to no clamp."""
+
+    osc_stiffness_gain_range: tuple[float, float] = (1.0, 1.0)
+    """Inclusive uniform range for per-episode scaling of fixed OSC task stiffness. Defaults to identity."""
+
+    osc_damping_ratio_gain_range: tuple[float, float] = (1.0, 1.0)
+    """Inclusive uniform range for per-episode scaling of fixed OSC task damping ratio. Defaults to identity."""
+
     wrench_scale: float = 1.0
     """Scale factor for the wrench targets. Defaults to 1.0."""
 
