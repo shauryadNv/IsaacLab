@@ -15,7 +15,6 @@ import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
-from isaaclab.envs.mdp.actions.actions_cfg import OperationalSpaceControllerActionCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -468,11 +467,11 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         # Control the same TCP/end-effector frame that the actor observes:
         # ``body_name`` anchors the OSC to the flange rigid body, while
         # ``body_offset`` moves the controlled task frame to the gripper TCP.
-        self.actions.arm_action = OperationalSpaceControllerActionCfg(
+        self.actions.arm_action = mdp.DeployOperationalSpaceControllerActionCfg(
             asset_name="robot",
             joint_names=_ARM_JOINTS,
             body_name="flange",
-            body_offset=OperationalSpaceControllerActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
+            body_offset=mdp.DeployOperationalSpaceControllerActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
             controller_cfg=OperationalSpaceControllerCfg(
                 target_types=["pose_rel"],
                 impedance_mode="fixed",

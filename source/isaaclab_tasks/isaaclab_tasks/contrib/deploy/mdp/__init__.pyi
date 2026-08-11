@@ -9,6 +9,12 @@ __all__ = [
     "set_robot_to_grasp_pose",
     "set_robot_to_object_grasp_pose",
     "reset_plug_at_goal_curriculum",
+    "DeployRelativeJointPositionAction",
+    "DeployRelativeJointPositionActionCfg",
+    "DeployOperationalSpaceControllerAction",
+    "DeployOperationalSpaceControllerActionCfg",
+    "DeployDifferentialInverseKinematicsAction",
+    "DeployDifferentialInverseKinematicsActionCfg",
     "ResetSampledConstantNoiseModel",
     "ResetSampledConstantNoiseModelCfg",
     "gear_pos_w",
@@ -44,6 +50,16 @@ from .events import (
     set_robot_to_grasp_pose,
     set_robot_to_object_grasp_pose,
     reset_plug_at_goal_curriculum,
+)
+from .actions import (
+    DeployDifferentialInverseKinematicsAction,
+    DeployOperationalSpaceControllerAction,
+    DeployRelativeJointPositionAction,
+)
+from .actions_cfg import (
+    DeployDifferentialInverseKinematicsActionCfg,
+    DeployOperationalSpaceControllerActionCfg,
+    DeployRelativeJointPositionActionCfg,
 )
 from .noise_models import ResetSampledConstantNoiseModel, ResetSampledConstantNoiseModelCfg
 from .observations import (
