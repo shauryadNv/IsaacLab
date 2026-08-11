@@ -66,12 +66,10 @@ _ACTION_SCALE = 0.025
 _INSERTION_LENGTH = 0.011
 
 # Gripper tool-center-point (TCP) offset from the flange body, in the flange's
-# local frame [m]. The policy observes the TCP pose (where the plug is actually
-# held), not the raw flange. Matches IsaacLab_UR's Flexiv + Grav
-# ``gripper_eef_pos_local = [0.0, 0.0, 0.2 - 0.0075]``. Direct cross-check: in
-# the live grasp the flange sits ~0.1875-0.1925 m above the held plug along the
-# tool axis.
-_TCP_OFFSET = [0.0, 0.0, 0.2 - 0.0075]
+# local frame [m]. The policy observes and controls the TCP pose (where the plug
+# is actually held), not the raw flange. Matches IsaacLab_UR's Flexiv + Grav
+# TCP offset used for this setup: 15 cm along the tool axis.
+_TCP_OFFSET = [0.0, 0.0, 0.15]
 
 ##
 # Pre-defined configs
@@ -467,10 +465,14 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             self.observations.policy.eef_rot_6d.params["max_angle_rad"] = EXP_EEF_ROT_OBS_NOISE_RAD
 
         # ----- Actions: Operational Space Controller -----
+        # Control the same TCP/end-effector frame that the actor observes:
+        # ``body_name`` anchors the OSC to the flange rigid body, while
+        # ``body_offset`` moves the controlled task frame to the gripper TCP.
         self.actions.arm_action = OperationalSpaceControllerActionCfg(
             asset_name="robot",
             joint_names=_ARM_JOINTS,
             body_name="flange",
+            body_offset=OperationalSpaceControllerActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
             controller_cfg=OperationalSpaceControllerCfg(
                 target_types=["pose_rel"],
                 impedance_mode="fixed",
