@@ -118,3 +118,14 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
     },
 )
+
+# Flexiv Rizon 4s - Task space differential IK diagnostics/training
+gym.register(
+    id="Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-DiffIK-v0",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.task_space_env_cfg:Rizon4sTaskSpaceDiffIKDisplayportInsertionEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)

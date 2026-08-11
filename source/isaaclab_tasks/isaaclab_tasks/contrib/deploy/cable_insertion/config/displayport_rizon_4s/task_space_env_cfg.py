@@ -14,8 +14,12 @@ import math
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
+from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
-from isaaclab.envs.mdp.actions.actions_cfg import OperationalSpaceControllerActionCfg
+from isaaclab.envs.mdp.actions.actions_cfg import (
+    DifferentialInverseKinematicsActionCfg,
+    OperationalSpaceControllerActionCfg,
+)
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -624,3 +628,31 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg_PLAY(Rizon4sTaskSpaceDisplaypor
         self.observations.policy.socket_kp_rot_6d.func = mdp.rigid_object_rot_6d_w
         self.observations.policy.socket_kp_rot_6d.params.pop("max_angle_rad", None)
         self.observations.policy.enable_corruption = False
+
+
+@configclass
+class Rizon4sTaskSpaceDiffIKDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplayportInsertionEnvCfg):
+    """Task-space DisplayPort insertion with relative-pose differential IK control."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # DiffIK outputs joint-position targets, so restore normal arm PD gains
+        # after the OSC parent config zeroes them for effort control.
+        for actuator_name in ("shoulder", "elbow", "wrist"):
+            source_actuator = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.actuators[actuator_name]
+            self.scene.robot.actuators[actuator_name].stiffness = source_actuator.stiffness
+            self.scene.robot.actuators[actuator_name].damping = source_actuator.damping
+
+        self.actions.arm_action = DifferentialInverseKinematicsActionCfg(
+            asset_name="robot",
+            joint_names=_ARM_JOINTS,
+            body_name="flange",
+            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
+            controller=DifferentialIKControllerCfg(
+                command_type="pose",
+                use_relative_mode=True,
+                ik_method="dls",
+            ),
+            scale=_ACTION_SCALE,
+        )
