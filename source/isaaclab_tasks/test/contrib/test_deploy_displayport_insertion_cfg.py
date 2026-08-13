@@ -102,6 +102,9 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
 
 def test_displayport_assets_author_newton_sdf_per_active_collider():
     """Newton overlays should author SDF metadata only on active collision meshes."""
+    socket_stage = Usd.Stage.Open(f"{DISPLAY_ASSETS_DIR}/display_port_socket_newton_sdf.usda")
+    assert socket_stage.GetRootLayer().subLayerPaths == ["./display_port_socket_fixed_sdf_noprotrusions.usd"]
+
     expected_counts = {
         "display_port_plug_newton_sdf.usda": (1, False),
         "display_port_socket_newton_sdf.usda": (5, False),
