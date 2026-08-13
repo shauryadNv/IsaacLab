@@ -120,6 +120,31 @@ def test_displayport_assets_author_newton_sdf_per_active_collider():
         assert all(prim.GetAttribute("newton:hydroelasticEnabled").Get() is hydroelastic_enabled for prim in sdf_prims)
 
 
+def test_displayport_point_sdf_gap_overlays_override_every_mating_collider():
+    """Gap ablations should override authored values on both sides of the mating pair."""
+    expected_gaps = {"gap_1mm": 0.001, "gap_0p5mm": 0.0005}
+    for suffix, expected_gap in expected_gaps.items():
+        for asset_name, expected_count in (("plug", 1), ("socket", 5)):
+            filename = f"display_port_{asset_name}_newton_sdf_{suffix}.usda"
+            stage = Usd.Stage.Open(f"{DISPLAY_ASSETS_DIR}/{filename}")
+            sdf_prims = [prim for prim in stage.Traverse() if prim.HasAttribute("newton:sdfMaxResolution")]
+
+            assert len(sdf_prims) == expected_count
+            assert all(abs(prim.GetAttribute("newton:contactGap").Get() - expected_gap) < 1.0e-8 for prim in sdf_prims)
+            assert all(prim.GetAttribute("newton:hydroelasticEnabled").Get() is False for prim in sdf_prims)
+
+
+def test_displayport_legacy_socket_comparison_preserves_newton_metadata():
+    """The legacy A/B layer should differ only in its underlying socket USD."""
+    stage = Usd.Stage.Open(f"{DISPLAY_ASSETS_DIR}/display_port_socket_newton_sdf_legacy.usda")
+    assert stage.GetRootLayer().subLayerPaths == ["./display_port_socket_fixed_sdf_split_visuals.usd"]
+
+    sdf_prims = [prim for prim in stage.Traverse() if prim.HasAttribute("newton:sdfMaxResolution")]
+    assert len(sdf_prims) == 5
+    assert all(prim.GetAttribute("newton:sdfMaxResolution").Get() == 256 for prim in sdf_prims)
+    assert all(abs(prim.GetAttribute("newton:contactGap").Get() - 0.005) < 1.0e-8 for prim in sdf_prims)
+
+
 def test_displayport_newton_ik_commands_flange_without_actor_velocity():
     """The deployment-oriented IK task should command the flange with a six-dimensional action."""
     env_cfg = Rizon4sGravDisplayportInsertionIKNewtonEnvCfg()
