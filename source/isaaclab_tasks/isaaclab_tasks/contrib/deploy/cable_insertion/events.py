@@ -182,6 +182,12 @@ class ResetPlugAtGoalCurriculum(ManagerTermBase):
             position_noise[:, index].uniform_(float(bounds[0]), float(bounds[1]))
         position_noise[at_goal_mask] = 0.0
 
+        if not hasattr(env, "_displayport_initial_xy_offset_m"):
+            env._displayport_initial_xy_offset_m = torch.zeros(env.num_envs, device=env.device)
+            env._displayport_initial_xy_offset_valid = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+        env._displayport_initial_xy_offset_m[env_ids] = torch.linalg.vector_norm(position_noise[:, :2], dim=-1)
+        env._displayport_initial_xy_offset_valid[env_ids] = True
+
         plug_keypoint_w = keypoint_origin_w + depth.unsqueeze(-1) * insertion_axis_w
         plug_pos_w = plug_keypoint_w - plug_offset_w + position_noise
         root_pose = torch.cat((plug_pos_w, goal_quat_w), dim=-1)

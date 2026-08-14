@@ -18,7 +18,15 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.a
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.ik_newton_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObsEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale015EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale025EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale015EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale025EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg,
@@ -75,6 +83,15 @@ def test_displayport_preserves_physx_default_and_exposes_newton_mjwarp():
     assert newton_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
 
 
+def test_displayport_physx_can_use_clean_no_protrusions_socket():
+    """PhysX should support the same cleaned socket surface used by Newton."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"physx_noprotrusions"})
+
+    assert type(env_cfg.sim.physics).__name__ == "PhysxCfg"
+    assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_fixed_sdf.usd")
+    assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_fixed_sdf_noprotrusions.usd")
+
+
 def test_displayport_newton_disables_robot_gravity_passively():
     """Newton should cancel gravity on robot bodies without using actuator forces."""
     for preset_name in ("newton_mjwarp", "newton_sdf", "newton_hydroelastic"):
@@ -98,6 +115,20 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
     assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
+
+
+def test_displayport_point_sdf_gap_presets_keep_newton_backend():
+    """Gap asset presets must not fall back to the default PhysX backend."""
+    for preset_name, suffix in (
+        ("newton_sdf_gap_1mm", "gap_1mm.usda"),
+        ("newton_sdf_gap_0p5mm", "gap_0p5mm.usda"),
+    ):
+        env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {preset_name})
+
+        assert type(env_cfg.sim.physics).__name__ == "NewtonCfg"
+        assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
+        assert env_cfg.scene.dp_plug.spawn.usd_path.endswith(suffix)
+        assert env_cfg.scene.dp_socket.spawn.usd_path.endswith(suffix)
 
 
 def test_displayport_assets_author_newton_sdf_per_active_collider():
@@ -183,6 +214,93 @@ def test_displayport_calibrated_dr_flange_observation_preserves_randomization():
     assert env_cfg.observations.policy.flange_pose is not None
     assert env_cfg.events.randomize_arm_joint_friction is not None
     assert env_cfg.events.randomize_arm_pd_gains is not None
+
+
+def test_displayport_flange_pose_6d_observes_and_controls_flange_origin():
+    """The flange pose-6D task should use the flange origin on both policy interfaces."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg()
+    policy = env_cfg.observations.policy
+    pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+    assert policy.joint_pos is None
+    assert policy.joint_vel is None
+    assert policy.socket_quat is None
+    assert policy.tool_pos.func is deploy_mdp.body_pos_w_with_offset
+    assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.0)
+    assert policy.tool_rot_6d.func is deploy_mdp.body_rot_6d_w
+    assert policy.socket_rot_6d.func is deploy_mdp.rigid_object_rot_6d_w
+    assert pose_objective.body_name == "flange"
+    assert pose_objective.body_offset_pos == (0.0, 0.0, 0.0)
+    assert pose_objective.scale == 0.01
+
+
+def test_displayport_tcp_15cm_pose_6d_observes_tcp_and_controls_flange():
+    """The TCP pose-6D task should observe 150 mm TCP while controlling the flange."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg()
+    policy = env_cfg.observations.policy
+    pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+    assert policy.joint_pos is None
+    assert policy.joint_vel is None
+    assert policy.socket_quat is None
+    assert policy.tool_pos.func is deploy_mdp.body_pos_w_with_offset
+    assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
+    assert policy.tool_rot_6d.func is deploy_mdp.body_rot_6d_w
+    assert policy.socket_rot_6d.func is deploy_mdp.rigid_object_rot_6d_w
+    assert pose_objective.body_name == "flange"
+    assert pose_objective.body_offset_pos == (0.0, 0.0, 0.0)
+    assert pose_objective.scale == 0.01
+    assert env_cfg.events.randomize_arm_joint_friction is not None
+    assert env_cfg.events.randomize_arm_pd_gains is not None
+
+
+def test_displayport_pose_6d_action_scale_variants():
+    """Scale-specific tasks should preserve flange control for either observation frame."""
+    variants = (
+        (Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale015EnvCfg, 0.015),
+        (Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale025EnvCfg, 0.025),
+        (Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale015EnvCfg, 0.015),
+        (Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale025EnvCfg, 0.025),
+    )
+
+    for cfg_type, expected_scale in variants:
+        env_cfg = cfg_type()
+        pose_objective = env_cfg.actions.arm_action.objectives[0]
+        assert pose_objective.body_name == "flange"
+        assert pose_objective.body_offset_pos == (0.0, 0.0, 0.0)
+        assert pose_objective.scale == expected_scale
+
+
+def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
+    """Newton OSC should command flange effort without a competing arm PD loop."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg()
+    action = env_cfg.actions.arm_action
+
+    assert action.body_name == "flange"
+    assert action.body_offset.pos == (0.0, 0.0, 0.0)
+    assert action.position_scale == 0.015
+    assert action.orientation_scale == 0.015
+    assert action.controller_cfg.inertial_dynamics_decoupling is True
+    assert action.controller_cfg.motion_stiffness_task == (100.0,) * 6
+    assert action.controller_cfg.motion_damping_ratio_task == (1.0,) * 6
+    assert action.controller_cfg.nullspace_control == "position"
+    assert action.nullspace_joint_pos_target == "default"
+    assert env_cfg.events.randomize_arm_joint_friction is not None
+    assert env_cfg.events.randomize_arm_pd_gains is None
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        assert env_cfg.scene.robot.actuators[actuator_name].stiffness == 0.0
+        assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0
+
+
+def test_displayport_newton_osc_tcp_observation_still_controls_flange():
+    """The OSC TCP-observation ablation should retain flange-origin actions."""
+    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg()
+    policy = env_cfg.observations.policy
+    action = env_cfg.actions.arm_action
+
+    assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
+    assert action.body_name == "flange"
+    assert action.body_offset.pos == (0.0, 0.0, 0.0)
 
 
 def test_displayport_calibrated_dr_tcp_observation_offsets_only_actor_pose():

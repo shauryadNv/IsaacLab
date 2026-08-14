@@ -23,6 +23,7 @@ re-parameterized through the same quaternion helpers as the GB300 base so the
 keypoint goal reproduces the exact verified mate used by the PhysX task.
 """
 
+import copy
 import os
 from dataclasses import MISSING
 
@@ -168,6 +169,7 @@ class DisplayPortPlug(RigidObjectCfg):
     spawn = sim_utils.UsdFileCfg(
         usd_path=preset(
             default=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_fixed_sdf.usd"),
+            physx_noprotrusions=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_fixed_sdf.usd"),
             newton_mjwarp=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
             newton_sdf=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
             newton_sdf_gap_1mm=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf_gap_1mm.usda"),
@@ -212,6 +214,7 @@ class DisplayPortSocket(RigidObjectCfg):
     spawn = sim_utils.UsdFileCfg(
         usd_path=preset(
             default=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_fixed_sdf_split_visuals.usd"),
+            physx_noprotrusions=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_fixed_sdf_noprotrusions.usd"),
             newton_mjwarp=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
             newton_sdf=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
             newton_sdf_gap_1mm=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf_gap_1mm.usda"),
@@ -331,6 +334,9 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
         gpu_max_rigid_contact_count=2**23,
         gpu_max_rigid_patch_count=2**23,
     )
+    newton_sdf_gap_1mm: NewtonCfg = copy.deepcopy(newton_sdf)
+    newton_sdf_gap_0p5mm: NewtonCfg = copy.deepcopy(newton_sdf)
+    physx_noprotrusions: PhysxCfg = copy.deepcopy(physx)
     default = physx
 
 
@@ -481,6 +487,27 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
 
     log_success_metrics: bool = True
     """Whether to log DisplayPort insertion success metrics."""
+
+    log_task_space_action_metrics: bool = False
+    """Whether to log task-space search-action diagnostics."""
+
+    success_xy_offset_bin_edges: tuple[float, ...] = (0.002, 0.005, 0.010)
+    """Upper edges of initial XY-offset success bins [m]."""
+
+    task_space_action_insertion_axis: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    """Insertion axis used to split task-space translation commands."""
+
+    task_space_diagnostic_tcp_offset: tuple[float, float, float] = (0.0, 0.0, 0.15)
+    """TCP translation from the controlled flange frame [m]."""
+
+    task_space_action_spectrum_window: int = 64
+    """Policy-step window used for lateral action spectrum diagnostics."""
+
+    task_space_action_spectrum_low_hz: float = 2.0
+    """Upper frequency of the low-frequency lateral action band [Hz]."""
+
+    task_space_action_spectrum_high_hz: float = 8.0
+    """Lower frequency of the high-frequency lateral action band [Hz]."""
 
     success_socket_asset: str = "dp_socket"
     """Scene asset containing the fixed socket."""
