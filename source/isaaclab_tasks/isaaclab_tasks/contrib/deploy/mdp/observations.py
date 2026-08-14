@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
-from isaaclab.utils.math import combine_frame_transforms
+from isaaclab.utils.math import combine_frame_transforms, matrix_from_quat
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation, RigidObject
@@ -419,6 +419,60 @@ class body_pose_w_with_offset(ManagerTermBase):
         return pose.reshape(env.num_envs, -1)
 
 
+class body_pos_w_with_offset(body_pose_w_with_offset):
+    """Articulation body position with a body-local translation offset [m]."""
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+        offset: tuple[float, float, float] | list[float] | None = None,
+    ) -> torch.Tensor:
+        """Return offset body positions in the environment frame.
+
+        Args:
+            env: Environment containing the articulation.
+            asset_cfg: Articulation and selected bodies configured for this term.
+            offset: Translation in each selected body local frame [m].
+
+        Returns:
+            Flattened positions [m] with shape ``(num_envs, 3 * num_bodies)``.
+        """
+        poses = super().__call__(env, asset_cfg=asset_cfg, offset=offset).reshape(env.num_envs, -1, 7)
+        return poses[..., :3].reshape(env.num_envs, -1)
+
+
+class body_rot_6d_w(ManagerTermBase):
+    """Articulation body orientation as a continuous 6D rotation."""
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+
+        if "asset_cfg" not in cfg.params:
+            raise ValueError("asset_cfg is required in body_rot_6d_w configuration.")
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: Articulation = env.scene[self.asset_cfg.name]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+    ) -> torch.Tensor:
+        """Return the first two rows of each selected body's rotation matrix.
+
+        Args:
+            env: Environment containing the articulation.
+            asset_cfg: Articulation and selected bodies configured for this term.
+
+        Returns:
+            Flattened 6D rotations with shape ``(num_envs, 6 * num_bodies)``.
+        """
+        quaternions = self.asset.data.body_quat_w.torch[:, self.asset_cfg.body_ids]
+        rotations = matrix_from_quat(quaternions)
+        rotation_6d = rotations[..., :2, :].reshape(*rotations.shape[:-2], 6)
+        return rotation_6d.reshape(env.num_envs, -1)
+
+
 class rigid_object_quat_w(ManagerTermBase):
     """Rigid object orientation in the world frame."""
 
@@ -438,3 +492,32 @@ class rigid_object_quat_w(ManagerTermBase):
         obj_quat = self.asset.data.root_quat_w.torch
         w_negative = obj_quat[:, 3] < 0
         return torch.where(w_negative.unsqueeze(-1), -obj_quat, obj_quat)
+
+
+class rigid_object_rot_6d_w(ManagerTermBase):
+    """Rigid-object orientation as a continuous 6D rotation."""
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+
+        if "asset_cfg" not in cfg.params:
+            raise ValueError("asset_cfg is required in rigid_object_rot_6d_w configuration.")
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: RigidObject = env.scene[self.asset_cfg.name]
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg | None = None,
+    ) -> torch.Tensor:
+        """Return the first two rows of the root rotation matrix.
+
+        Args:
+            env: Environment containing the rigid object.
+            asset_cfg: Rigid object configured for this term.
+
+        Returns:
+            6D rotations with shape ``(num_envs, 6)``.
+        """
+        rotations = matrix_from_quat(self.asset.data.root_quat_w.torch)
+        return rotations[..., :2, :].reshape(env.num_envs, 6)
