@@ -157,6 +157,19 @@ gym.register(
 )
 
 gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-IK-FlangePose6D-ActionClip1",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.ik_newton_env_cfg:"
+            "Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DActionClip1EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)
+
+gym.register(
     id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-IK-Tcp15cmObsPose6D",
     entry_point=_INSERTION_ENV_ENTRY,
     disable_env_checker=True,
@@ -268,6 +281,58 @@ gym.register(
         "env_cfg_entry_point": (
             f"{__name__}.ik_newton_env_cfg:"
             "Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-OSC-FlangePose6D-ActionClip1",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.ik_newton_env_cfg:"
+            "Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-OSC-FlangePose6D-Scale010-ActionClip1",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.ik_newton_env_cfg:"
+            "Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010ActionClip1EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-OSC-FlangePose6D-Scale0125-ActionClip1",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.ik_newton_env_cfg:"
+            "Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale0125ActionClip1EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-OSC-FlangePose6D-Scale025-ActionClip1",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.ik_newton_env_cfg:"
+            "Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale025ActionClip1EnvCfg"
         ),
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
     },

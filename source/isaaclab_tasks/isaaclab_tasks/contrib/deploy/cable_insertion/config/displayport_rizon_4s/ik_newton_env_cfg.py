@@ -57,6 +57,11 @@ def _set_ik_action_scale(env_cfg, scale: float) -> None:
     pose_objective.scale = scale
 
 
+def _set_action_clip(env_cfg, bound: float) -> None:
+    """Set the symmetric normalized action bound for a task-space action."""
+    env_cfg.actions.arm_action.clip = {".*": (-bound, bound)}
+
+
 def _flange_osc_action(
     action_scale: float = _OSC_ACTION_SCALE,
     inertial_dynamics_decoupling: bool = True,
@@ -280,6 +285,17 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePos
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DActionClip1EnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg
+):
+    """Flange pose-6D Newton IK task with the full normalized action range."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _set_action_clip(self, 1.0)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale015EnvCfg(
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg
 ):
@@ -365,6 +381,53 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePo
         super().__post_init__()
         self.actions.arm_action.position_scale = 0.01
         self.actions.arm_action.orientation_scale = 0.01
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg
+):
+    """Flange OSC task with the full normalized action range."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _set_action_clip(self, 1.0)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010ActionClip1EnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg
+):
+    """Full-range flange OSC task with a 0.010 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.arm_action.position_scale = 0.01
+        self.actions.arm_action.orientation_scale = 0.01
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale0125ActionClip1EnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg
+):
+    """Full-range flange OSC task with a 0.0125 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.arm_action.position_scale = 0.0125
+        self.actions.arm_action.orientation_scale = 0.0125
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale025ActionClip1EnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg
+):
+    """Full-range flange OSC task with a 0.025 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.arm_action.position_scale = 0.025
+        self.actions.arm_action.orientation_scale = 0.025
 
 
 @configclass

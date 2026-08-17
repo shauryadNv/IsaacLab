@@ -8,6 +8,8 @@ Added
   initial XY offset.
 * Added point-SDF contact-gap presets and a PhysX preset using the cleaned
   DisplayPort socket asset.
+* Added explicit full-range Newton IK and operational-space action variants
+  for comparison with PhysX task-space policies.
 
 Fixed
 ^^^^^

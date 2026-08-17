@@ -18,6 +18,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.a
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.ik_newton_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangeObsEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale025EnvCfg,
@@ -25,8 +26,12 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale025EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010ActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale0125ActionClip1EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale025ActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
@@ -273,6 +278,36 @@ def test_displayport_pose_6d_action_scale_variants():
         assert pose_objective.body_name == "flange"
         assert pose_objective.body_offset_pos == (0.0, 0.0, 0.0)
         assert pose_objective.scale == expected_scale
+
+
+def test_displayport_task_space_full_action_range_variants():
+    """Full-range tasks should use clip one without changing legacy task semantics."""
+    legacy_ik = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg()
+    full_ik = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DActionClip1EnvCfg()
+    assert legacy_ik.actions.arm_action.clip == {".*": (-0.5, 0.5)}
+    assert full_ik.actions.arm_action.clip == {".*": (-1.0, 1.0)}
+    assert full_ik.actions.arm_action.objectives[0].scale == 0.01
+
+    osc_variants = (
+        (Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg, 0.005),
+        (Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010ActionClip1EnvCfg, 0.01),
+        (
+            Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale0125ActionClip1EnvCfg,
+            0.0125,
+        ),
+        (
+            Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale025ActionClip1EnvCfg,
+            0.025,
+        ),
+    )
+    legacy_osc = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg()
+    assert legacy_osc.actions.arm_action.clip == {".*": (-0.5, 0.5)}
+
+    for cfg_type, expected_scale in osc_variants:
+        action = cfg_type().actions.arm_action
+        assert action.clip == {".*": (-1.0, 1.0)}
+        assert action.position_scale == expected_scale
+        assert action.orientation_scale == expected_scale
 
 
 def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
