@@ -26,6 +26,8 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale025EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
@@ -273,23 +275,50 @@ def test_displayport_pose_6d_action_scale_variants():
 
 def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
     """Newton OSC should command flange effort without a competing arm PD loop."""
-    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg()
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg(),
+        {"newton_sdf"},
+    )
     action = env_cfg.actions.arm_action
 
     assert action.body_name == "flange"
     assert action.body_offset.pos == (0.0, 0.0, 0.0)
-    assert action.position_scale == 0.015
-    assert action.orientation_scale == 0.015
-    assert action.controller_cfg.inertial_dynamics_decoupling is True
-    assert action.controller_cfg.motion_stiffness_task == (100.0,) * 6
-    assert action.controller_cfg.motion_damping_ratio_task == (1.0,) * 6
-    assert action.controller_cfg.nullspace_control == "position"
-    assert action.nullspace_joint_pos_target == "default"
+    assert action.position_scale == 0.005
+    assert action.orientation_scale == 0.005
+    assert action.controller_cfg.inertial_dynamics_decoupling is False
+    assert action.controller_cfg.partial_inertial_dynamics_decoupling is False
+    assert action.controller_cfg.gravity_compensation is False
+    assert action.controller_cfg.motion_stiffness_task == (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
+    assert action.controller_cfg.motion_damping_ratio_task == (
+        35.0 / (2.0 * 300.0**0.5),
+        35.0 / (2.0 * 300.0**0.5),
+        35.0 / (2.0 * 300.0**0.5),
+        1.1 / (2.0 * 30.0**0.5),
+        1.1 / (2.0 * 30.0**0.5),
+        1.1 / (2.0 * 30.0**0.5),
+    )
+    assert action.controller_cfg.nullspace_control == "none"
+    assert action.nullspace_joint_pos_target == "none"
     assert env_cfg.events.randomize_arm_joint_friction is not None
     assert env_cfg.events.randomize_arm_pd_gains is None
+    assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
     for actuator_name in ("shoulder", "elbow", "wrist"):
         assert env_cfg.scene.robot.actuators[actuator_name].stiffness == 0.0
         assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0
+
+
+def test_displayport_newton_osc_action_ablation_variants():
+    """OSC ablations should vary only action scale or inverse dynamics."""
+    scale_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg()
+    inertial_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg()
+
+    assert scale_cfg.actions.arm_action.position_scale == 0.01
+    assert scale_cfg.actions.arm_action.orientation_scale == 0.01
+    assert scale_cfg.actions.arm_action.controller_cfg.inertial_dynamics_decoupling is False
+    assert inertial_cfg.actions.arm_action.position_scale == 0.005
+    assert inertial_cfg.actions.arm_action.orientation_scale == 0.005
+    assert inertial_cfg.actions.arm_action.controller_cfg.inertial_dynamics_decoupling is True
+    assert inertial_cfg.actions.arm_action.controller_cfg.motion_damping_ratio_task == (1.0,) * 6
 
 
 def test_displayport_newton_osc_tcp_observation_still_controls_flange():

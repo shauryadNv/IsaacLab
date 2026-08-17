@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
+
 from isaaclab_newton.envs.mdp.actions.newton_ik_actions_cfg import NewtonInverseKinematicsActionCfg
 from isaaclab_newton.ik.newton_ik_objectives_cfg import NewtonIKJointLimitObjectiveCfg, NewtonIKPoseObjectiveCfg
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
@@ -21,8 +23,17 @@ from . import joint_pos_env_cfg
 _LEGACY_TCP_OBSERVATION_OFFSET = (0.0, 0.0, 0.1925)
 _TCP_15CM_OFFSET = (0.0, 0.0, 0.15)
 
-_OSC_STIFFNESS = (100.0,) * 6
-_OSC_DAMPING_RATIO = (1.0,) * 6
+_OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
+_OSC_DAMPING_RATIO = (
+    35.0 / (2.0 * math.sqrt(300.0)),
+    35.0 / (2.0 * math.sqrt(300.0)),
+    35.0 / (2.0 * math.sqrt(300.0)),
+    1.1 / (2.0 * math.sqrt(30.0)),
+    1.1 / (2.0 * math.sqrt(30.0)),
+    1.1 / (2.0 * math.sqrt(30.0)),
+)
+_OSC_CRITICAL_DAMPING_RATIO = (1.0,) * 6
+_OSC_ACTION_SCALE = 0.005
 
 
 def _ik_action(body_offset_pos: tuple[float, float, float]) -> NewtonInverseKinematicsActionCfg:
@@ -56,8 +67,12 @@ def _set_ik_action_scale(env_cfg, scale: float) -> None:
     pose_objective.scale = scale
 
 
-def _flange_osc_action() -> OperationalSpaceControllerActionCfg:
-    """Create a compliant relative-pose torque controller for the flange."""
+def _flange_osc_action(
+    action_scale: float = _OSC_ACTION_SCALE,
+    inertial_dynamics_decoupling: bool = False,
+    damping_ratio: tuple[float, ...] = _OSC_DAMPING_RATIO,
+) -> OperationalSpaceControllerActionCfg:
+    """Create a relative-pose torque controller for the flange origin."""
     return OperationalSpaceControllerActionCfg(
         asset_name="robot",
         joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"],
@@ -67,14 +82,18 @@ def _flange_osc_action() -> OperationalSpaceControllerActionCfg:
         controller_cfg=OperationalSpaceControllerCfg(
             target_types=["pose_rel"],
             impedance_mode="fixed",
-            inertial_dynamics_decoupling=True,
+            inertial_dynamics_decoupling=inertial_dynamics_decoupling,
+            partial_inertial_dynamics_decoupling=False,
+            # Robot-body gravity is already canceled by the Newton rigid-body
+            # gravcomp setting. Enabling this would compensate it twice.
+            gravity_compensation=False,
             motion_stiffness_task=_OSC_STIFFNESS,
-            motion_damping_ratio_task=_OSC_DAMPING_RATIO,
-            nullspace_control="position",
+            motion_damping_ratio_task=damping_ratio,
+            nullspace_control="none",
         ),
-        nullspace_joint_pos_target="default",
-        position_scale=0.015,
-        orientation_scale=0.015,
+        nullspace_joint_pos_target="none",
+        position_scale=action_scale,
+        orientation_scale=action_scale,
     )
 
 
@@ -318,6 +337,31 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePo
     def __post_init__(self):
         super().__post_init__()
         _use_pose_6d_actor_observation(self, (0.0, 0.0, 0.0))
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg
+):
+    """Flange operational-space task with a 0.010 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.arm_action.position_scale = 0.01
+        self.actions.arm_action.orientation_scale = 0.01
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg
+):
+    """Flange operational-space task with full inverse-dynamics decoupling."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        controller_cfg = self.actions.arm_action.controller_cfg
+        controller_cfg.inertial_dynamics_decoupling = True
+        controller_cfg.motion_damping_ratio_task = _OSC_CRITICAL_DAMPING_RATIO
 
 
 @configclass

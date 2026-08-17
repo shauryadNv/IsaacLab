@@ -13,3 +13,6 @@ Fixed
 ^^^^^
 
 * Fixed DisplayPort point-SDF gap presets falling back to the PhysX backend.
+* Fixed unstable Newton operational-space task defaults by reducing relative
+  flange commands, removing competing nullspace motion, and adding isolated
+  action-scale and inverse-dynamics ablations.
