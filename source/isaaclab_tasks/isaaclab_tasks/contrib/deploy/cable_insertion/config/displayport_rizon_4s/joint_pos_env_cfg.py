@@ -100,6 +100,32 @@ _GRAV_GRIPPER_MIMIC_GEARING = {
 _ARM_JOINT_NAMES = [f"joint{joint_id}" for joint_id in range(1, 8)]
 
 
+def _configure_arm_domain_randomization(env_cfg) -> None:
+    """Randomize Rizon arm friction and position-control gains at reset."""
+    arm_cfg = SceneEntityCfg("robot", joint_names=_ARM_JOINT_NAMES)
+    env_cfg.events.randomize_arm_joint_friction = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        mode="reset",
+        params={
+            "asset_cfg": arm_cfg,
+            "friction_distribution_params": (0.0, 0.15),
+            "operation": "add",
+            "distribution": "uniform",
+        },
+    )
+    env_cfg.events.randomize_arm_pd_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": arm_cfg,
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
+
+
 def set_finger_joint_pos_grav(
     joint_pos: torch.Tensor,
     reset_ind_joint_pos: list[int],
@@ -460,6 +486,15 @@ class Rizon4sGravDisplayportInsertionNoJointVelEnvCfg(Rizon4sGravDisplayportInse
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg(Rizon4sGravDisplayportInsertionNoJointVelEnvCfg):
+    """Nominal-kinematics velocity-free task with arm domain randomization."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _configure_arm_domain_randomization(self)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg(Rizon4sGravDisplayportInsertionNoJointVelEnvCfg):
     """Velocity-free DisplayPort task using calibrated Rizon 4S kinematics."""
 
@@ -476,26 +511,4 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg(
 
     def __post_init__(self):
         super().__post_init__()
-
-        arm_cfg = SceneEntityCfg("robot", joint_names=_ARM_JOINT_NAMES)
-        self.events.randomize_arm_joint_friction = EventTerm(
-            func=mdp.randomize_joint_parameters,
-            mode="reset",
-            params={
-                "asset_cfg": arm_cfg,
-                "friction_distribution_params": (0.0, 0.15),
-                "operation": "add",
-                "distribution": "uniform",
-            },
-        )
-        self.events.randomize_arm_pd_gains = EventTerm(
-            func=mdp.randomize_actuator_gains,
-            mode="reset",
-            params={
-                "asset_cfg": arm_cfg,
-                "stiffness_distribution_params": (0.8, 1.2),
-                "damping_distribution_params": (0.8, 1.2),
-                "operation": "scale",
-                "distribution": "uniform",
-            },
-        )
+        _configure_arm_domain_randomization(self)

@@ -30,12 +30,14 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg,
     Rizon4sGravDisplayportInsertionEnvCfg,
     Rizon4sGravDisplayportInsertionNoJointVelEnvCfg,
 )
@@ -300,6 +302,39 @@ def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
         assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0
 
 
+def test_displayport_nominal_and_calibrated_osc_vary_robot_kinematics_only():
+    """Nominal and calibrated OSC tasks should share policy and physics semantics."""
+    nominal_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCFlangePose6DEnvCfg(),
+        {"newton_sdf"},
+    )
+    calibrated_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg(),
+        {"newton_sdf"},
+    )
+
+    assert nominal_cfg.scene.robot.spawn.usd_path.endswith("rizon4s_with_grav.usd")
+    assert calibrated_cfg.scene.robot.spawn.usd_path.endswith("Rizon4s-063459_with_Grav_calibrated_kinematics.usd")
+    assert nominal_cfg.scene.robot.spawn.usd_path != calibrated_cfg.scene.robot.spawn.usd_path
+
+    for env_cfg in (nominal_cfg, calibrated_cfg):
+        action = env_cfg.actions.arm_action
+        policy = env_cfg.observations.policy
+
+        assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
+        assert action.body_name == "flange"
+        assert action.body_offset.pos == (0.0, 0.0, 0.0)
+        assert action.position_scale == 0.005
+        assert action.orientation_scale == 0.005
+        assert action.controller_cfg.inertial_dynamics_decoupling is True
+        assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.0)
+        assert policy.tool_pos.func is deploy_mdp.body_pos_w_with_offset
+        assert policy.tool_rot_6d.func is deploy_mdp.body_rot_6d_w
+        assert policy.socket_rot_6d.func is deploy_mdp.rigid_object_rot_6d_w
+        assert env_cfg.events.randomize_arm_joint_friction is not None
+        assert env_cfg.events.randomize_arm_pd_gains is None
+
+
 def test_displayport_newton_osc_action_ablation_variants():
     """OSC ablations should vary only action scale or inverse dynamics."""
     scale_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg()
@@ -429,28 +464,32 @@ def test_displayport_socket_observation_uses_reset_sampled_ten_millimeter_noise(
     assert env_cfg.observations.critic.socket_pos.noise is None
 
 
-def test_displayport_calibrated_domain_randomization_targets_arm_joints():
-    """The calibrated DR task should randomize only joint1 through joint7 at reset."""
+def test_displayport_domain_randomization_targets_arm_joints():
+    """Nominal and calibrated DR tasks should randomize only arm joints."""
     baseline_cfg = Rizon4sGravDisplayportInsertionCalibratedNoJointVelEnvCfg()
-    env_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg()
+    env_cfgs = (
+        Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg(),
+        Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg(),
+    )
 
     assert baseline_cfg.events.randomize_arm_joint_friction is None
     assert baseline_cfg.events.randomize_arm_pd_gains is None
 
-    friction = env_cfg.events.randomize_arm_joint_friction
-    assert friction.mode == "reset"
-    assert friction.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
-    assert friction.params["friction_distribution_params"] == (0.0, 0.15)
-    assert friction.params["operation"] == "add"
-    assert friction.params["distribution"] == "uniform"
+    for env_cfg in env_cfgs:
+        friction = env_cfg.events.randomize_arm_joint_friction
+        assert friction.mode == "reset"
+        assert friction.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
+        assert friction.params["friction_distribution_params"] == (0.0, 0.15)
+        assert friction.params["operation"] == "add"
+        assert friction.params["distribution"] == "uniform"
 
-    gains = env_cfg.events.randomize_arm_pd_gains
-    assert gains.mode == "reset"
-    assert gains.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
-    assert gains.params["stiffness_distribution_params"] == (0.8, 1.2)
-    assert gains.params["damping_distribution_params"] == (0.8, 1.2)
-    assert gains.params["operation"] == "scale"
-    assert gains.params["distribution"] == "uniform"
+        gains = env_cfg.events.randomize_arm_pd_gains
+        assert gains.mode == "reset"
+        assert gains.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
+        assert gains.params["stiffness_distribution_params"] == (0.8, 1.2)
+        assert gains.params["damping_distribution_params"] == (0.8, 1.2)
+        assert gains.params["operation"] == "scale"
+        assert gains.params["distribution"] == "uniform"
 
 
 def test_displayport_play_mode_uses_approach_resets():

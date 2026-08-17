@@ -1,9 +1,9 @@
 Added
 ^^^^^
 
-* Added calibrated DisplayPort task-space variants with flange-origin or
-  150 mm TCP pose observations, Newton inverse kinematics, and compliant
-  operational-space control.
+* Added nominal and calibrated DisplayPort task-space variants with
+  flange-origin or 150 mm TCP pose observations, Newton inverse kinematics,
+  and compliant operational-space control.
 * Added task-space search diagnostics and terminal success metrics grouped by
   initial XY offset.
 * Added point-SDF contact-gap presets and a PhysX preset using the cleaned

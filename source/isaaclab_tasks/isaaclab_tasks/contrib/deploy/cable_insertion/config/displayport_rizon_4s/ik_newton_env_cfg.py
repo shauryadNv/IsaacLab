@@ -301,6 +301,38 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmOb
         _set_ik_action_scale(self, 0.025)
 
 
+def _configure_osc_control(env_cfg) -> None:
+    """Configure direct operational-space effort control for the arm."""
+    env_cfg.actions.arm_action = _flange_osc_action()
+    _enable_task_space_diagnostics(env_cfg)
+    env_cfg.events.randomize_arm_pd_gains = None
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        env_cfg.scene.robot.actuators[actuator_name].stiffness = 0.0
+        env_cfg.scene.robot.actuators[actuator_name].damping = 0.0
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCEnvCfg(
+    joint_pos_env_cfg.Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg
+):
+    """Nominal-kinematics Newton task using flange operational-space control."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _configure_osc_control(self)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCFlangePose6DEnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCEnvCfg
+):
+    """Nominal-kinematics Newton OSC task with flange pose observations."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _use_pose_6d_actor_observation(self, (0.0, 0.0, 0.0))
+
+
 @configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCEnvCfg(
     joint_pos_env_cfg.Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNoJointVelEnvCfg
@@ -309,13 +341,7 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCEnvCfg(
 
     def __post_init__(self):
         super().__post_init__()
-
-        self.actions.arm_action = _flange_osc_action()
-        _enable_task_space_diagnostics(self)
-        self.events.randomize_arm_pd_gains = None
-        for actuator_name in ("shoulder", "elbow", "wrist"):
-            self.scene.robot.actuators[actuator_name].stiffness = 0.0
-            self.scene.robot.actuators[actuator_name].damping = 0.0
+        _configure_osc_control(self)
 
 
 @configclass
