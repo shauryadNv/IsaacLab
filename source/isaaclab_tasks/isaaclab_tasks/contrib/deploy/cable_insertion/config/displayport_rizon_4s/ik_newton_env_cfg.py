@@ -3,8 +3,6 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import math
-
 from isaaclab_newton.envs.mdp.actions.newton_ik_actions_cfg import NewtonInverseKinematicsActionCfg
 from isaaclab_newton.ik.newton_ik_objectives_cfg import NewtonIKJointLimitObjectiveCfg, NewtonIKPoseObjectiveCfg
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
@@ -24,15 +22,7 @@ _LEGACY_TCP_OBSERVATION_OFFSET = (0.0, 0.0, 0.1925)
 _TCP_15CM_OFFSET = (0.0, 0.0, 0.15)
 
 _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
-_OSC_DAMPING_RATIO = (
-    35.0 / (2.0 * math.sqrt(300.0)),
-    35.0 / (2.0 * math.sqrt(300.0)),
-    35.0 / (2.0 * math.sqrt(300.0)),
-    1.1 / (2.0 * math.sqrt(30.0)),
-    1.1 / (2.0 * math.sqrt(30.0)),
-    1.1 / (2.0 * math.sqrt(30.0)),
-)
-_OSC_CRITICAL_DAMPING_RATIO = (1.0,) * 6
+_OSC_DAMPING_RATIO = (1.0,) * 6
 _OSC_ACTION_SCALE = 0.005
 
 
@@ -69,7 +59,7 @@ def _set_ik_action_scale(env_cfg, scale: float) -> None:
 
 def _flange_osc_action(
     action_scale: float = _OSC_ACTION_SCALE,
-    inertial_dynamics_decoupling: bool = False,
+    inertial_dynamics_decoupling: bool = True,
     damping_ratio: tuple[float, ...] = _OSC_DAMPING_RATIO,
 ) -> OperationalSpaceControllerActionCfg:
     """Create a relative-pose torque controller for the flange origin."""
@@ -355,13 +345,13 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePo
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg(
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg
 ):
-    """Flange operational-space task with full inverse-dynamics decoupling."""
+    """Compatibility task selecting the inertia-decoupled OSC default."""
 
     def __post_init__(self):
         super().__post_init__()
         controller_cfg = self.actions.arm_action.controller_cfg
         controller_cfg.inertial_dynamics_decoupling = True
-        controller_cfg.motion_damping_ratio_task = _OSC_CRITICAL_DAMPING_RATIO
+        controller_cfg.motion_damping_ratio_task = _OSC_DAMPING_RATIO
 
 
 @configclass

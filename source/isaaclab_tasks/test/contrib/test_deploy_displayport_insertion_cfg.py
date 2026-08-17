@@ -285,18 +285,11 @@ def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
     assert action.body_offset.pos == (0.0, 0.0, 0.0)
     assert action.position_scale == 0.005
     assert action.orientation_scale == 0.005
-    assert action.controller_cfg.inertial_dynamics_decoupling is False
+    assert action.controller_cfg.inertial_dynamics_decoupling is True
     assert action.controller_cfg.partial_inertial_dynamics_decoupling is False
     assert action.controller_cfg.gravity_compensation is False
     assert action.controller_cfg.motion_stiffness_task == (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
-    assert action.controller_cfg.motion_damping_ratio_task == (
-        35.0 / (2.0 * 300.0**0.5),
-        35.0 / (2.0 * 300.0**0.5),
-        35.0 / (2.0 * 300.0**0.5),
-        1.1 / (2.0 * 30.0**0.5),
-        1.1 / (2.0 * 30.0**0.5),
-        1.1 / (2.0 * 30.0**0.5),
-    )
+    assert action.controller_cfg.motion_damping_ratio_task == (1.0,) * 6
     assert action.controller_cfg.nullspace_control == "none"
     assert action.nullspace_joint_pos_target == "none"
     assert env_cfg.events.randomize_arm_joint_friction is not None
@@ -314,7 +307,7 @@ def test_displayport_newton_osc_action_ablation_variants():
 
     assert scale_cfg.actions.arm_action.position_scale == 0.01
     assert scale_cfg.actions.arm_action.orientation_scale == 0.01
-    assert scale_cfg.actions.arm_action.controller_cfg.inertial_dynamics_decoupling is False
+    assert scale_cfg.actions.arm_action.controller_cfg.inertial_dynamics_decoupling is True
     assert inertial_cfg.actions.arm_action.position_scale == 0.005
     assert inertial_cfg.actions.arm_action.orientation_scale == 0.005
     assert inertial_cfg.actions.arm_action.controller_cfg.inertial_dynamics_decoupling is True
