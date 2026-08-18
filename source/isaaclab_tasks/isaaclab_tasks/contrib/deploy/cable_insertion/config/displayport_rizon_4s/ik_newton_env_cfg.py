@@ -263,6 +263,32 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmOb
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg(
+    joint_pos_env_cfg.Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg
+):
+    """Nominal Newton IK task that observes and controls the 150 mm TCP."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action = _ik_action(_TCP_15CM_OFFSET)
+        _enable_task_space_diagnostics(self)
+        _use_pose_6d_actor_observation(self, _TCP_15CM_OFFSET)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg
+):
+    """Calibrated Newton IK task that observes and controls the 150 mm TCP."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action.objectives[0].body_offset_pos = _TCP_15CM_OFFSET
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DScale015EnvCfg(
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg
 ):
@@ -452,3 +478,28 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmO
     def __post_init__(self):
         super().__post_init__()
         _use_pose_6d_actor_observation(self, _TCP_15CM_OFFSET)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCEnvCfg
+):
+    """Nominal Newton OSC task that observes and controls the 150 mm TCP."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action.body_offset.pos = _TCP_15CM_OFFSET
+        _use_pose_6d_actor_observation(self, _TCP_15CM_OFFSET)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg
+):
+    """Calibrated Newton OSC task that observes and controls the 150 mm TCP."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action.body_offset.pos = _TCP_15CM_OFFSET

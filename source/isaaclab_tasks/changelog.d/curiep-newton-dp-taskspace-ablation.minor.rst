@@ -10,6 +10,8 @@ Added
   DisplayPort socket asset.
 * Added explicit full-range Newton IK and operational-space action variants
   for comparison with PhysX task-space policies.
+* Added nominal and calibrated Newton IK and operational-space variants that
+  observe and command a matching TCP frame 150 mm from the Rizon 4s flange.
 
 Fixed
 ^^^^^

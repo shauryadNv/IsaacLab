@@ -25,6 +25,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DScale025EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
@@ -34,8 +35,11 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale025ActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg,
 )
@@ -557,3 +561,54 @@ def test_displayport_newton_matches_reference_training_curriculum():
     assert exponential.params["kp_exp_coeffs"][-1] == (2000, 0.0001)
 
     assert Rizon4sGravDisplayportInsertionRNNPPORunnerCfg().max_iterations == 1500
+
+
+def test_displayport_tcp_15cm_pose_6d_ik_observes_and_controls_tcp():
+    """Matched TCP IK tasks should observe and command the same 150 mm frame."""
+    variants = (
+        (
+            Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
+            "rizon4s_with_grav.usd",
+        ),
+        (
+            Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
+            "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
+        ),
+    )
+
+    for cfg_type, expected_robot_usd in variants:
+        env_cfg = cfg_type()
+        policy = env_cfg.observations.policy
+        pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+        assert env_cfg.scene.robot.spawn.usd_path.endswith(expected_robot_usd)
+        assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
+        assert pose_objective.body_name == "flange"
+        assert pose_objective.body_offset_pos == (0.0, 0.0, 0.15)
+        assert pose_objective.use_relative_mode is True
+        assert pose_objective.scale == 0.01
+
+
+def test_displayport_newton_osc_tcp_15cm_observes_and_controls_tcp():
+    """Matched TCP OSC tasks should use the same 150 mm pose and Jacobian frame."""
+    variants = (
+        (
+            Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
+            "rizon4s_with_grav.usd",
+        ),
+        (
+            Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
+            "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
+        ),
+    )
+
+    for cfg_type, expected_robot_usd in variants:
+        env_cfg = cfg_type()
+        policy = env_cfg.observations.policy
+        action = env_cfg.actions.arm_action
+
+        assert env_cfg.scene.robot.spawn.usd_path.endswith(expected_robot_usd)
+        assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
+        assert action.body_name == "flange"
+        assert action.body_offset.pos == (0.0, 0.0, 0.15)
+        assert action.controller_cfg.target_types == ["pose_rel"]
