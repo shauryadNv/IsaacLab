@@ -37,7 +37,6 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
 )
 
 from .joint_pos_env_cfg import (
-    _CALIBRATED_RIZON4S_GRAV_USD,
     _PLUG_ROOT,
     _PLUG_ROT,
     _SOCKET_ROOT,
@@ -171,7 +170,6 @@ EXP_SOCKET_ORN_DEG = 2.0                    # socket orientation randomization, 
 EXP_CURRICULUM = "anneal_80_0_500"
 EXP_EQUAL_REWARD_WEIGHTS = True  # True => exp keypoint weight == linear (UR 1:1); False => 2:1
 EXP_RAND = "both"          # none|friction|pd|both -- robot joint-friction and/or PD-gain domain randomization
-EXP_CALIB_USD = True      # True => spawn the calibrated Rizon4s USD instead of the stock one
 EXP_OBS_NOISE_M = 0.0      # socket-position observation noise [m] applied at inference (0.0=none, 0.005=5mm)
 EXP_SOCKET_ROT_OBS_NOISE_RAD = 0.0  # socket orientation observation bias [rad], sampled as axis-angle
 EXP_EEF_POS_OBS_NOISE_M = 0.0  # EEF TCP position observation bias [m] (0.0=none; set from measured FK error)

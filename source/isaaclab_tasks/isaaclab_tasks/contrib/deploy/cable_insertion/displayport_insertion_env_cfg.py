@@ -35,6 +35,8 @@ from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantN
 
 CABLE_INSERTION_DIR = os.path.dirname(os.path.abspath(__file__))
 DISPLAY_ASSETS_DIR = os.path.join(CABLE_INSERTION_DIR, "display_cable_insertion_assets")
+DISPLAYPORT_PLUG_USD = "omniverse://isaac-dev.ov.nvidia.com/Projects/isaac_ros_rl/aug_18_dp_cable_assets/displayport_plug.usd"
+DISPLAYPORT_SOCKET_USD = "omniverse://isaac-dev.ov.nvidia.com/Projects/isaac_ros_rl/aug_18_dp_cable_assets/displayport_socket_no_protrusions.usd"
 
 
 def _quat_rotate_vec(q_xyzw, v):
@@ -123,7 +125,7 @@ class DisplayPortPlug(RigidObjectCfg):
 
     prim_path = "{ENV_REGEX_NS}/DisplayPortPlug"
     spawn = sim_utils.UsdFileCfg(
-        usd_path=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_fixed_sdf.usd"),
+        usd_path=DISPLAYPORT_PLUG_USD,
         scale=(1.0, 1.0, 1.0),
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
@@ -151,7 +153,7 @@ class DisplayPortSocket(RigidObjectCfg):
 
     prim_path = "{ENV_REGEX_NS}/DisplayPortSocket"
     spawn = sim_utils.UsdFileCfg(
-        usd_path=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_fixed_sdf_noprotrusions.usd"),
+        usd_path=DISPLAYPORT_SOCKET_USD,
         scale=(1.0, 1.0, 1.0),
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
