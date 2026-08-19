@@ -277,6 +277,28 @@ class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale0125EnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg
+):
+    """Nominal matched-TCP Newton IK task with a 0.0125 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _set_ik_action_scale(self, 0.0125)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale015EnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg
+):
+    """Nominal matched-TCP Newton IK task with a 0.015 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        _set_ik_action_scale(self, 0.015)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg(
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg
 ):
@@ -491,6 +513,18 @@ class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCf
 
         self.actions.arm_action.body_offset.pos = _TCP_15CM_OFFSET
         _use_pose_6d_actor_observation(self, _TCP_15CM_OFFSET)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DScale015EnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg
+):
+    """Nominal matched-TCP Newton OSC task with a 0.015 relative action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.arm_action.position_scale = 0.015
+        self.actions.arm_action.orientation_scale = 0.015
 
 
 @configclass

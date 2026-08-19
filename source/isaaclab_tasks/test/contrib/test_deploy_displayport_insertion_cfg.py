@@ -38,8 +38,11 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale0125EnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonFlangeObsEnvCfg,
 )
@@ -612,3 +615,29 @@ def test_displayport_newton_osc_tcp_15cm_observes_and_controls_tcp():
         assert action.body_name == "flange"
         assert action.body_offset.pos == (0.0, 0.0, 0.15)
         assert action.controller_cfg.target_types == ["pose_rel"]
+
+
+def test_displayport_nominal_tcp_15cm_action_scale_variants():
+    """Nominal matched-TCP tasks should expose the intended action-scale ablations."""
+    ik_variants = (
+        (Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale0125EnvCfg, 0.0125),
+        (Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale015EnvCfg, 0.015),
+    )
+
+    for cfg_type, expected_scale in ik_variants:
+        env_cfg = cfg_type()
+        pose_objective = env_cfg.actions.arm_action.objectives[0]
+
+        assert env_cfg.scene.robot.spawn.usd_path.endswith("rizon4s_with_grav.usd")
+        assert env_cfg.observations.policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
+        assert pose_objective.body_offset_pos == (0.0, 0.0, 0.15)
+        assert pose_objective.scale == expected_scale
+
+    osc_cfg = Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DScale015EnvCfg()
+    osc_action = osc_cfg.actions.arm_action
+
+    assert osc_cfg.scene.robot.spawn.usd_path.endswith("rizon4s_with_grav.usd")
+    assert osc_cfg.observations.policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
+    assert osc_action.body_offset.pos == (0.0, 0.0, 0.15)
+    assert osc_action.position_scale == 0.015
+    assert osc_action.orientation_scale == 0.015
