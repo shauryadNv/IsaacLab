@@ -71,7 +71,7 @@ _INSERTION_LENGTH = 0.011
 # ``gripper_eef_pos_local = [0.0, 0.0, 0.2 - 0.0075]``. Direct cross-check: in
 # the live grasp the flange sits ~0.1875-0.1925 m above the held plug along the
 # tool axis.
-_TCP_OFFSET = [0.0, 0.0, 0.2 - 0.0075]
+_TCP_OFFSET = [0.0, 0.0, 0.15]
 
 ##
 # Pre-defined configs
@@ -445,7 +445,6 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             asset_name="robot",
             joint_names=_ARM_JOINTS,
             body_name="flange",
-            body_offset=OperationalSpaceControllerActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
             controller_cfg=OperationalSpaceControllerCfg(
                 target_types=["pose_rel"],
                 impedance_mode="fixed",
