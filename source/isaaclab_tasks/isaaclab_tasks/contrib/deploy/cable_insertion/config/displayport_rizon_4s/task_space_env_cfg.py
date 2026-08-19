@@ -445,6 +445,7 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             asset_name="robot",
             joint_names=_ARM_JOINTS,
             body_name="flange",
+            body_offset=OperationalSpaceControllerActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
             controller_cfg=OperationalSpaceControllerCfg(
                 target_types=["pose_rel"],
                 impedance_mode="fixed",
