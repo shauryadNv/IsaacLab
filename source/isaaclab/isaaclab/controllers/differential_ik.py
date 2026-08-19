@@ -83,6 +83,9 @@ class DifferentialIKController:
         # -- optional joint position limits for null-space joint-limit avoidance (set externally)
         self._joint_pos_lower = None
         self._joint_pos_upper = None
+        # -- per-environment DLS damping coefficient
+        self._lambda_val = torch.zeros(self.num_envs, device=self._device)
+        self.reset()
 
     """
     Properties.
@@ -108,7 +111,21 @@ class DifferentialIKController:
         Args:
             env_ids: The environment indices to reset. If None, then all environments are reset.
         """
-        pass
+        if self.cfg.ik_method != "dls":
+            return
+        if env_ids is None:
+            env_ids = slice(None)
+            num_resets = self.num_envs
+        else:
+            num_resets = len(env_ids)
+
+        if self.cfg.lambda_val_range is None:
+            self._lambda_val[env_ids] = self.cfg.ik_params["lambda_val"]
+        else:
+            lambda_min, lambda_max = self.cfg.lambda_val_range
+            self._lambda_val[env_ids] = torch.empty(num_resets, device=self._device).uniform_(
+                lambda_min, lambda_max
+            )
 
     def set_command(
         self, command: torch.Tensor, ee_pos: torch.Tensor | None = None, ee_quat: torch.Tensor | None = None
@@ -256,15 +273,15 @@ class DifferentialIKController:
             delta_joint_pos = k_val * jacobian_T @ delta_pose.unsqueeze(-1)
             delta_joint_pos = delta_joint_pos.squeeze(-1)
         elif self.cfg.ik_method == "dls":  # damped least squares
-            # parameters
-            lambda_val = self.cfg.ik_params["lambda_val"]
             # computation
             jacobian_T = torch.transpose(jacobian, dim0=1, dim1=2)
-            lambda_matrix = (lambda_val**2) * torch.eye(n=jacobian.shape[1], device=self._device)
-            delta_joint_pos = (
-                jacobian_T @ torch.inverse(jacobian @ jacobian_T + lambda_matrix) @ delta_pose.unsqueeze(-1)
+            lambda_matrix = self._lambda_val.square().view(-1, 1, 1) * torch.eye(
+                n=jacobian.shape[1], device=self._device
             )
-            delta_joint_pos = delta_joint_pos.squeeze(-1)
+            delta_joint_pos = torch.bmm(
+                jacobian_T,
+                torch.linalg.solve(torch.bmm(jacobian, jacobian_T) + lambda_matrix, delta_pose.unsqueeze(-1)),
+            ).squeeze(-1)
         elif self.cfg.ik_method == "adaptive_dls":  # manipulability-aware damped least squares
             # parameters
             lambda_min = self.cfg.ik_params["lambda_min"]

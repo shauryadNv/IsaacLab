@@ -5,9 +5,10 @@
 
 """Sim-free unit tests for the optional :class:`DifferentialIKController` features.
 
-Covers the ``adaptive_dls`` ik-method, per-axis orientation weighting, null-space joint-limit
-avoidance, and quaternion renormalization -- all exercised with hand-built tensors (no gym.make,
-USD, or GPU). The simulated convergence tests live in ``test_differential_ik.py``.
+Covers the ``adaptive_dls`` ik-method, DLS lambda randomization, per-axis orientation weighting,
+null-space joint-limit avoidance, and quaternion renormalization -- all exercised with hand-built
+tensors (no gym.make, USD, or GPU). The simulated convergence tests live in
+``test_differential_ik.py``.
 """
 
 import math
@@ -35,6 +36,7 @@ def _make_controller(
     command_type: str = "pose",
     ik_method: str = "adaptive_dls",
     ik_params: dict | None = None,
+    lambda_val_range: tuple[float, float] | None = None,
     orientation_weight=None,
     joint_limit_avoidance_gain: float = 0.0,
     joint_limit_avoidance_margin: float = 0.3,
@@ -45,6 +47,7 @@ def _make_controller(
         use_relative_mode=False,
         ik_method=ik_method,
         ik_params=ik_params,
+        lambda_val_range=lambda_val_range,
         orientation_weight=orientation_weight,
         joint_limit_avoidance_gain=joint_limit_avoidance_gain,
         joint_limit_avoidance_margin=joint_limit_avoidance_margin,
@@ -73,6 +76,53 @@ def test_cfg_rejects_bad_adaptive_params():
             ik_method="adaptive_dls",
             ik_params={"lambda_min": 0.5, "lambda_max": 0.1, "sigma_thresh": 0.02},
         )
+
+
+def test_cfg_rejects_bad_lambda_val_range():
+    with pytest.raises(ValueError):
+        DifferentialIKControllerCfg(
+            command_type="pose", use_relative_mode=False, ik_method="dls", lambda_val_range=(0.5, 0.1)
+        )
+    with pytest.raises(ValueError):
+        DifferentialIKControllerCfg(
+            command_type="pose", use_relative_mode=False, ik_method="adaptive_dls", lambda_val_range=(0.1, 0.5)
+        )
+
+
+def test_dls_fixed_lambda_populates_per_env_buffer_on_reset():
+    c = _make_controller(ik_method="dls", ik_params={"lambda_val": 0.23}, num_envs=3)
+    torch.testing.assert_close(c._lambda_val, torch.full((3,), 0.23))
+
+    c._lambda_val[:] = 0.0
+    c.reset(torch.tensor([1]))
+    torch.testing.assert_close(c._lambda_val, torch.tensor([0.0, 0.23, 0.0]))
+
+
+def test_dls_lambda_range_samples_per_env_on_reset():
+    torch.manual_seed(7)
+    c = _make_controller(ik_method="dls", lambda_val_range=(0.2, 0.4), num_envs=4)
+    torch.manual_seed(7)
+    expected = torch.empty(4).uniform_(0.2, 0.4)
+    assert c._lambda_val.shape == (4,)
+    torch.testing.assert_close(c._lambda_val, expected)
+
+    env_ids = torch.tensor([1, 3])
+    torch.manual_seed(11)
+    c.reset(env_ids)
+    torch.manual_seed(11)
+    expected[env_ids] = torch.empty(2).uniform_(0.2, 0.4)
+    torch.testing.assert_close(c._lambda_val, expected)
+
+
+def test_dls_uses_per_env_lambda():
+    c = _make_controller(ik_method="dls", num_envs=2)
+    c._lambda_val[:] = torch.tensor([0.0, 1.0])
+    delta_pose = torch.ones(2, 1)
+    jacobian = torch.ones(2, 1, 1)
+
+    dq = c._compute_delta_joint_pos(delta_pose=delta_pose, jacobian=jacobian)
+
+    torch.testing.assert_close(dq, torch.tensor([[1.0], [0.5]]))
 
 
 def test_set_command_renormalizes_quat():

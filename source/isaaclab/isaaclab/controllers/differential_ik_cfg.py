@@ -60,6 +60,14 @@ class DifferentialIKControllerCfg:
           (default: 0.02).
     """
 
+    lambda_val_range: tuple[float, float] | None = None
+    """Uniform sampling range for the DLS damping coefficient. Defaults to ``None``.
+
+    When set for the ``"dls"`` IK method, the controller samples one ``lambda_val`` per environment
+    on reset from ``[min, max]``. When ``None``, the fixed ``ik_params["lambda_val"]`` value is used
+    for every environment, preserving the default behavior.
+    """
+
     orientation_weight: float | tuple[float, float, float] | None = None
     """Soft weight on the orientation task rows for ``"pose"`` command types. Defaults to ``None``
     (the orientation rows keep weight 1, i.e. unchanged behavior).
@@ -116,6 +124,23 @@ class DifferentialIKControllerCfg:
                     f"adaptive_dls lambda_min ({self.ik_params['lambda_min']}) must be <= "
                     f"lambda_max ({self.ik_params['lambda_max']})."
                 )
+        if self.lambda_val_range is not None:
+            if self.ik_method != "dls":
+                raise ValueError("lambda_val_range is only supported for the dls IK method.")
+            try:
+                lambda_min, lambda_max = (float(value) for value in self.lambda_val_range)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "lambda_val_range must be a length-2 (min, max) tuple, got "
+                    f"{self.lambda_val_range}."
+                ) from exc
+            if lambda_min < 0.0 or lambda_max < 0.0:
+                raise ValueError(f"lambda_val_range values must be >= 0, got {self.lambda_val_range}.")
+            if lambda_min > lambda_max:
+                raise ValueError(
+                    f"lambda_val_range min ({lambda_min}) must be <= lambda_val_range max ({lambda_max})."
+                )
+            self.lambda_val_range = (lambda_min, lambda_max)
         # validate optional orientation weighting / joint-limit-avoidance settings
         if self.orientation_weight is not None and not isinstance(self.orientation_weight, (int, float)):
             if len(self.orientation_weight) != 3:

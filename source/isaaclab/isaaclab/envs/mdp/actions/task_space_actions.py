@@ -221,6 +221,7 @@ class DifferentialInverseKinematicsAction(ActionTerm):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self._raw_actions[env_ids] = 0.0
+        self._ik_controller.reset(env_ids)
 
     """
     Helper functions.
