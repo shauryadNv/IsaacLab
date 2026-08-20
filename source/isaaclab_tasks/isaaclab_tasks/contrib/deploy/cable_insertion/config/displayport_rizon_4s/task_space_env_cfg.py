@@ -71,7 +71,7 @@ _INSERTION_LENGTH = 0.011
 # ``gripper_eef_pos_local = [0.0, 0.0, 0.2 - 0.0075]``. Direct cross-check: in
 # the live grasp the flange sits ~0.1875-0.1925 m above the held plug along the
 # tool axis.
-_TCP_OFFSET = [0.0, 0.0, 0.15]
+_TCP_OFFSET = [0.0, 0.0, 0.2 - 0.0075]
 
 ##
 # Pre-defined configs
@@ -158,7 +158,7 @@ class TaskSpaceObservationsCfg:
 # is invalid under OSC because the arm joint PD is zeroed for operational-space
 # control, so there is no EXP_SYSID toggle here.
 # --- EXP TOGGLES START ---
-EXP_SOCKET_POS_RANGE = [0.01, 0.01, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
+EXP_SOCKET_POS_RANGE = [0.02, 0.02, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
 EXP_SOCKET_ORN_DEG = 2.0                    # socket orientation randomization, +/- deg on roll/pitch/yaw
 # modes: disabled|fixed80|fixed50|fixed20|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
 EXP_CURRICULUM = "anneal_80_0_500"
@@ -445,7 +445,6 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             asset_name="robot",
             joint_names=_ARM_JOINTS,
             body_name="flange",
-            body_offset=OperationalSpaceControllerActionCfg.OffsetCfg(pos=tuple(_TCP_OFFSET)),
             controller_cfg=OperationalSpaceControllerCfg(
                 target_types=["pose_rel"],
                 impedance_mode="fixed",
