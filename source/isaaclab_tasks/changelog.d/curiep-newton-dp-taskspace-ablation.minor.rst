@@ -20,3 +20,5 @@ Fixed
 * Fixed unstable Newton operational-space task defaults by reducing relative
   flange commands, enabling inertia decoupling with critical damping, removing
   competing nullspace motion, and adding an isolated action-scale ablation.
+* Fixed DisplayPort training accepting plugs that tunneled through the socket
+  by terminating trajectories beyond the mate-plane tolerance.

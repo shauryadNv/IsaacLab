@@ -478,3 +478,79 @@ class reset_when_plug_orientation_exceeded(ManagerTermBase):
             | (torch.abs(yaw) > yaw_threshold_rad)
         )
         return self.reset_flags
+
+
+class reset_when_plug_overtravel(ManagerTermBase):
+    """Reset when the plug mate frame passes through the socket mate plane."""
+
+    def __init__(self, cfg: TerminationTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+
+        for required in (
+            "plug_asset_cfg",
+            "socket_asset_cfg",
+            "plug_offset",
+            "socket_offset",
+            "insertion_axis",
+        ):
+            if required not in cfg.params:
+                raise ValueError(f"'{required}' is required in reset_when_plug_overtravel configuration.")
+
+        self.plug_asset_cfg: SceneEntityCfg = cfg.params["plug_asset_cfg"]
+        self.socket_asset_cfg: SceneEntityCfg = cfg.params["socket_asset_cfg"]
+        self.plug_asset = env.scene[self.plug_asset_cfg.name]
+        self.socket_asset = env.scene[self.socket_asset_cfg.name]
+
+        self.plug_offset = torch.tensor(cfg.params["plug_offset"], device=env.device, dtype=torch.float32)
+        self.socket_offset = torch.tensor(cfg.params["socket_offset"], device=env.device, dtype=torch.float32)
+        insertion_axis = torch.tensor(cfg.params["insertion_axis"], device=env.device, dtype=torch.float32)
+        insertion_axis_norm = torch.linalg.vector_norm(insertion_axis)
+        if not torch.isfinite(insertion_axis_norm) or insertion_axis_norm.item() == 0.0:
+            raise ValueError("'insertion_axis' must be finite and non-zero.")
+        self.insertion_axis = insertion_axis / insertion_axis_norm
+
+        self.reset_flags = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        max_overtravel: float = 0.003,
+        plug_asset_cfg: SceneEntityCfg | None = None,
+        socket_asset_cfg: SceneEntityCfg | None = None,
+        plug_offset: list[float] | None = None,
+        socket_offset: list[float] | None = None,
+        insertion_axis: list[float] | None = None,
+    ) -> torch.Tensor:
+        """Return reset flags for plug overtravel beyond the socket mate plane.
+
+        Args:
+            env: Environment instance.
+            max_overtravel: Allowed travel past the socket mate plane [m].
+            plug_asset_cfg: Plug scene entity configuration.
+            socket_asset_cfg: Socket scene entity configuration.
+            plug_offset: Plug mate-frame offset in the plug frame [m].
+            socket_offset: Socket mate-frame offset in the socket frame [m].
+            insertion_axis: Insertion direction in the socket frame.
+
+        Returns:
+            Boolean reset flags with shape (num_envs,).
+        """
+        del env, plug_asset_cfg, socket_asset_cfg, plug_offset, socket_offset, insertion_axis
+        if max_overtravel < 0.0:
+            raise ValueError("'max_overtravel' must be non-negative.")
+
+        plug_pos = self.plug_asset.data.root_link_pos_w.torch
+        plug_quat = self.plug_asset.data.root_link_quat_w.torch
+        socket_pos = self.socket_asset.data.root_link_pos_w.torch
+        socket_quat = self.socket_asset.data.root_link_quat_w.torch
+
+        plug_offset = self.plug_offset.unsqueeze(0).expand(plug_pos.shape[0], -1)
+        socket_offset = self.socket_offset.unsqueeze(0).expand(socket_pos.shape[0], -1)
+        insertion_axis = self.insertion_axis.unsqueeze(0).expand(socket_pos.shape[0], -1)
+        plug_mate_pos = plug_pos + math_utils.quat_apply(plug_quat, plug_offset)
+        socket_mate_pos = socket_pos + math_utils.quat_apply(socket_quat, socket_offset)
+        insertion_axis_w = math_utils.quat_apply(socket_quat, insertion_axis)
+        insertion_depth = torch.sum((plug_mate_pos - socket_mate_pos) * insertion_axis_w, dim=-1)
+
+        self.reset_flags[:] = (~torch.isfinite(insertion_depth)) | (insertion_depth < -max_overtravel)
+        return self.reset_flags

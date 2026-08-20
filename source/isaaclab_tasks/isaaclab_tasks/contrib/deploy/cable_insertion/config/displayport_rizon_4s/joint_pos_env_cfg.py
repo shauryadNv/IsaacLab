@@ -284,6 +284,18 @@ class TerminationsCfg:
         },
     )
 
+    plug_overtravel = DoneTerm(
+        func=cable_terminations.reset_when_plug_overtravel,
+        params={
+            "plug_asset_cfg": SceneEntityCfg("dp_plug"),
+            "socket_asset_cfg": SceneEntityCfg("dp_socket"),
+            "plug_offset": PLUG_INSERTION_OFFSET,
+            "socket_offset": SOCKET_INSERTION_OFFSET,
+            "insertion_axis": [1.0, 0.0, 0.0],
+            "max_overtravel": 0.003,
+        },
+    )
+
 
 @configclass
 class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):

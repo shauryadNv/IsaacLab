@@ -11,6 +11,8 @@ import gymnasium as gym
 import pytest
 import torch
 
+from isaaclab.managers import SceneEntityCfg, TerminationTermCfg
+
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
     Rizon4sGravDisplayportInsertionEnvCfg,
 )
@@ -23,6 +25,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.insertion_env import (
     DisplayportInsertionEnv,
     _keypoint_offsets_6d,
 )
+from isaaclab_tasks.contrib.deploy.mdp.terminations import reset_when_plug_overtravel
 from isaaclab_tasks.utils.hydra import resolve_presets
 
 
@@ -123,6 +126,32 @@ def test_displayport_physics_watchdog_separates_telemetry_from_fail_fast():
     env._update_physics_watchdog(log)
     with pytest.raises(RuntimeError, match="persistent instability"):
         env._update_physics_watchdog(log)
+
+
+def test_displayport_overtravel_termination_rejects_tunneled_plugs():
+    """The task should reset plugs that pass through the physical mate plane."""
+    socket_pos = torch.zeros((3, 3), dtype=torch.float32)
+    plug_pos = torch.tensor([[0.010, 0.0, 0.0], [-0.002, 0.0, 0.0], [-0.004, 0.0, 0.0]])
+    env = SimpleNamespace(
+        scene=_Scene(3, socket=_asset(socket_pos), plug=_asset(plug_pos)),
+        num_envs=3,
+        device="cpu",
+    )
+    cfg = TerminationTermCfg(
+        func=reset_when_plug_overtravel,
+        params={
+            "plug_asset_cfg": SceneEntityCfg("plug"),
+            "socket_asset_cfg": SceneEntityCfg("socket"),
+            "plug_offset": [0.0, 0.0, 0.0],
+            "socket_offset": [0.0, 0.0, 0.0],
+            "insertion_axis": [1.0, 0.0, 0.0],
+            "max_overtravel": 0.003,
+        },
+    )
+
+    term = reset_when_plug_overtravel(cfg, env)
+
+    assert term(env, **cfg.params).tolist() == [False, False, True]
 
 
 def test_displayport_success_config_matches_reward_frames():
