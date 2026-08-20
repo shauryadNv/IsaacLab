@@ -158,7 +158,7 @@ class TaskSpaceObservationsCfg:
 # is invalid under OSC because the arm joint PD is zeroed for operational-space
 # control, so there is no EXP_SYSID toggle here.
 # --- EXP TOGGLES START ---
-EXP_SOCKET_POS_RANGE = [0.05, 0.05, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
+EXP_SOCKET_POS_RANGE = [0.06, 0.06, 0.02]  # socket position randomization, +/- m per axis [x, y, z]
 EXP_SOCKET_ORN_DEG = 2.0                    # socket orientation randomization, +/- deg on roll/pitch/yaw
 # modes: disabled|fixed80|fixed50|fixed20|anneal_80_0_1000|anneal_80_20_1000|anneal_80_20_500|anneal_80_0_500
 EXP_CURRICULUM = "anneal_80_0_500"
