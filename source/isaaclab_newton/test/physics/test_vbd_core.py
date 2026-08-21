@@ -12,8 +12,47 @@ from types import SimpleNamespace
 
 import pytest
 from isaaclab_newton.physics import NewtonCfg, NewtonManager, NewtonSoftContactCfg
+from newton.solvers import SolverVBD
 
 from isaaclab.physics import PhysicsManager
+
+
+def test_vbd_rigid_tuning_fields_are_forwarded_to_newton():
+    """Public rigid tuning fields should reach Newton's VBD constructor."""
+    physics = importlib.import_module("isaaclab_newton.physics")
+    solver_cfg = physics.VBDSolverCfg(
+        friction_epsilon=0.02,
+        rigid_avbd_alpha=0.9,
+        rigid_avbd_joint_alpha=0.8,
+        rigid_avbd_contact_alpha=0.1,
+        rigid_avbd_linear_beta=2.0e4,
+        rigid_avbd_angular_beta=3.0e3,
+        rigid_avbd_gamma=0.99,
+        rigid_contact_hard=True,
+        rigid_contact_history=False,
+        rigid_body_contact_buffer_size=256,
+        rigid_joint_linear_ke=2.0e5,
+        rigid_joint_angular_ke=3.0e5,
+        rigid_joint_linear_kd=10.0,
+        rigid_joint_angular_kd=20.0,
+    )
+
+    kwargs = NewtonManager._filter_solver_kwargs(SolverVBD, solver_cfg)
+
+    assert kwargs["friction_epsilon"] == 0.02
+    assert kwargs["rigid_avbd_alpha"] == 0.9
+    assert kwargs["rigid_avbd_joint_alpha"] == 0.8
+    assert kwargs["rigid_avbd_contact_alpha"] == 0.1
+    assert kwargs["rigid_avbd_linear_beta"] == 2.0e4
+    assert kwargs["rigid_avbd_angular_beta"] == 3.0e3
+    assert kwargs["rigid_avbd_gamma"] == 0.99
+    assert kwargs["rigid_contact_hard"] is True
+    assert kwargs["rigid_contact_history"] is False
+    assert kwargs["rigid_body_contact_buffer_size"] == 256
+    assert kwargs["rigid_joint_linear_ke"] == 2.0e5
+    assert kwargs["rigid_joint_angular_ke"] == 3.0e5
+    assert kwargs["rigid_joint_linear_kd"] == 10.0
+    assert kwargs["rigid_joint_angular_kd"] == 20.0
 
 
 @pytest.mark.parametrize(

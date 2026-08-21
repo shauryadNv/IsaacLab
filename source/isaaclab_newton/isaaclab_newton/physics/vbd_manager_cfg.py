@@ -27,6 +27,9 @@ class VBDSolverCfg(NewtonSolverCfg):
     iterations: int = 10
     """Number of VBD iterations per substep."""
 
+    friction_epsilon: float = 0.01
+    """Relative-speed threshold used to regularize contact friction [m/s]."""
+
     integrate_with_external_rigid_solver: bool = False
     """Whether an external solver integrates rigid bodies."""
 
@@ -61,9 +64,65 @@ class VBDSolverCfg(NewtonSolverCfg):
     rigid_contact_k_start: float = 1.0e2
     """Initial stiffness seed for rigid-body contacts [N/m]."""
 
+    rigid_avbd_alpha: float = 0.95
+    """Default C0 stabilization strength for rigid joints and contacts."""
+
+    rigid_avbd_joint_alpha: float | None = None
+    """Joint-specific C0 stabilization strength, or ``None`` to use :attr:`rigid_avbd_alpha`."""
+
+    rigid_avbd_contact_alpha: float | None = None
+    """Contact-specific C0 stabilization strength, or ``None`` to use :attr:`rigid_avbd_alpha`."""
+
+    rigid_avbd_beta: float = 0.0
+    """Fallback AVBD penalty ramp per iteration.
+
+    Its units depend on the constraint: [N/m] for linear constraints and
+    [N*m/rad] for angular constraints. Use the linear and angular overrides
+    when enabling penalty ramping in production.
+    """
+
+    rigid_avbd_linear_beta: float | None = None
+    """Linear AVBD penalty ramp per iteration [N/m], or ``None`` to use :attr:`rigid_avbd_beta`."""
+
+    rigid_avbd_angular_beta: float | None = None
+    """Angular AVBD penalty ramp per iteration [N*m/rad], or ``None`` to use :attr:`rigid_avbd_beta`."""
+
+    rigid_avbd_gamma: float = 0.999
+    """Per-step decay applied to AVBD penalties and persisted hard-contact duals."""
+
+    rigid_contact_hard: bool = True
+    """Whether rigid contacts use augmented-Lagrangian hard constraints instead of penalty-only contact."""
+
+    rigid_contact_history: bool = False
+    """Whether to warm-start rigid contact penalties and duals across steps.
+
+    This requires a Newton collision pipeline configured with contact matching.
+    """
+
+    rigid_body_contact_buffer_size: int = 64
+    """Maximum body-body contacts stored per rigid body."""
+
     rigid_body_particle_contact_buffer_size: int = 256
     """Per-body capacity of the particle, edge, and face soft-contact list.
 
     Increase this value when Newton reports a per-body particle contact buffer overflow.
     Only used when :attr:`integrate_with_external_rigid_solver` is ``False``.
     """
+
+    rigid_joint_linear_ke: float = 1.0e5
+    """Penalty stiffness ceiling for structural linear joint constraints [N/m]."""
+
+    rigid_joint_angular_ke: float = 1.0e5
+    """Penalty stiffness ceiling for structural angular joint constraints [N*m/rad]."""
+
+    rigid_joint_linear_k_start: float = 1.0e2
+    """Initial linear joint penalty used when linear AVBD ramping is enabled [N/m]."""
+
+    rigid_joint_angular_k_start: float = 1.0e1
+    """Initial angular joint penalty used when angular AVBD ramping is enabled [N*m/rad]."""
+
+    rigid_joint_linear_kd: float = 0.0
+    """Damping for structural linear joint constraints [N*s/m]."""
+
+    rigid_joint_angular_kd: float = 0.0
+    """Damping for structural angular joint constraints [N*m*s/rad]."""

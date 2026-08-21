@@ -7,9 +7,13 @@
 
 from pathlib import Path
 
+from isaaclab_newton.physics import MJWarpSolverCfg, VBDSolverCfg
+
 from pxr import Usd
 
 from isaaclab.envs import mdp
+
+from isaaclab_contrib.coupling import CouplerProxyCfg
 
 import isaaclab_tasks.contrib.deploy.mdp as deploy_mdp
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
@@ -89,6 +93,8 @@ def test_displayport_preserves_physx_default_and_exposes_newton_mjwarp():
     assert default_cfg.scene.robot.actuators["shoulder"].stiffness == 1320.0
     assert default_cfg.scene.robot.actuators["elbow"].stiffness == 600.0
     assert default_cfg.scene.robot.actuators["wrist"].stiffness == 216.0
+    assert default_cfg.sim.dt == 1.0 / 1000.0
+    assert default_cfg.decimation == 33
 
     assert newton_cfg.sim.physics.solver_cfg.use_mujoco_contacts is True
     assert newton_cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is False
@@ -131,6 +137,57 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
     assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
+
+
+def test_displayport_all_vbd_uses_hard_point_sdf_contacts():
+    """The all-VBD baseline should use hard point-SDF contacts and explicit gravity."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_vbd"})
+    solver_cfg = env_cfg.sim.physics.solver_cfg
+
+    assert isinstance(solver_cfg, VBDSolverCfg)
+    assert solver_cfg.rigid_contact_hard is True
+    assert solver_cfg.rigid_contact_history is False
+    assert solver_cfg.rigid_body_contact_buffer_size == 512
+    assert env_cfg.sim.dt == 0.01
+    assert env_cfg.decimation == 3
+    assert env_cfg.sim.render_interval == 3
+    assert env_cfg.sim.physics.num_substeps == 20
+    assert env_cfg.sim.physics.collision_decimation == 10
+    assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
+    assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
+    assert env_cfg.scene.robot.spawn.joint_drive_props is None
+    assert env_cfg.scene.robot.spawn.rigid_props.disable_gravity is False
+    assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
+    assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
+
+
+def test_displayport_proxy_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
+    """Selective proxy coupling should preserve MJWarp robot dynamics and VBD mating contacts."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_mjwarp_vbd_proxy"})
+    solver_cfg = env_cfg.sim.physics.solver_cfg
+
+    assert isinstance(solver_cfg, CouplerProxyCfg)
+    entries = {entry.name: entry for entry in solver_cfg.entries}
+    assert isinstance(entries["robot"].solver_cfg, MJWarpSolverCfg)
+    assert entries["robot"].solver_cfg.disable_contacts is True
+    assert entries["robot"].solver_cfg.use_mujoco_contacts is True
+    assert entries["robot"].solver_cfg.update_data_interval == 10
+    assert env_cfg.sim.dt == 0.01
+    assert env_cfg.decimation == 3
+    assert env_cfg.sim.render_interval == 3
+    assert env_cfg.sim.physics.num_substeps == 20
+    assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
+    assert isinstance(entries["environment"].solver_cfg, VBDSolverCfg)
+    assert entries["environment"].solver_cfg.rigid_contact_hard is True
+    assert entries["environment"].solver_cfg.rigid_body_contact_buffer_size == 512
+    assert solver_cfg.proxies[0].source == "robot"
+    assert solver_cfg.proxies[0].destination == "environment"
+    assert solver_cfg.proxies[0].bodies == [r"/World/envs/env_[^/]+/Robot/Grav_gripper"]
+    assert solver_cfg.proxies[0].mode == "staggered"
+    assert solver_cfg.proxies[0].collide_interval == 10
+    assert solver_cfg.proxies[0].collision_pipeline.sdf_hydroelastic_config is None
+    assert env_cfg.sim.physics.collision_cfg is None
+    assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
 
 
 def test_displayport_point_sdf_gap_presets_keep_newton_backend():

@@ -62,6 +62,8 @@ def _newton_actuator_gain(default: float, newton: float) -> PresetCfg:
         newton_mjwarp=newton,
         newton_sdf=newton,
         newton_hydroelastic=newton,
+        newton_vbd=newton,
+        newton_mjwarp_vbd_proxy=newton,
     )
 
 
@@ -368,6 +370,8 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                     newton_mjwarp=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
                     newton_sdf=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
                     newton_hydroelastic=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
+                    newton_vbd=None,
+                    newton_mjwarp_vbd_proxy=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
                 ),
                 rigid_props=preset(
                     default=PhysxRigidBodyPropertiesCfg(
@@ -385,6 +389,8 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                     newton_mjwarp=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
                     newton_sdf=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
                     newton_hydroelastic=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
+                    newton_vbd=sim_utils.RigidBodyBaseCfg(disable_gravity=False),
+                    newton_mjwarp_vbd_proxy=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
                 ),
                 articulation_props=PhysxArticulationRootPropertiesCfg(
                     enabled_self_collisions=False,
@@ -408,9 +414,11 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             ),
         )
 
-        # PhysX excludes each robot body from gravity. Newton MJWarp applies full passive body
-        # gravity compensation without routing it through actuator force limits. The plug remains
-        # under world gravity in both backends.
+        # PhysX excludes each robot body from gravity. MJWarp and the mixed
+        # MJWarp/VBD preset apply full passive body gravity compensation
+        # without routing it through actuator force limits. All-VBD keeps world
+        # gravity enabled because VBD does not consume MuJoCo gravcomp; this is
+        # an explicit model-parity limitation of experiment A.
         self.scene.robot.actuators["shoulder"].stiffness = _newton_actuator_gain(1320.0, 6000.0)
         self.scene.robot.actuators["shoulder"].damping = _newton_actuator_gain(72.0, 108.5)
         self.scene.robot.actuators["elbow"].stiffness = _newton_actuator_gain(600.0, 4200.0)
