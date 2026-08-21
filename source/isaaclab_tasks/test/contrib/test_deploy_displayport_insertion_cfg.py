@@ -37,10 +37,12 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale0125EnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCPhysXProfileEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DScale015EnvCfg,
     Rizon4sGravDisplayportInsertionIKNewtonEnvCfg,
@@ -400,6 +402,58 @@ def test_displayport_newton_osc_tcp_observation_still_controls_flange():
     assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.15)
     assert action.body_name == "flange"
     assert action.body_offset.pos == (0.0, 0.0, 0.0)
+
+
+def test_displayport_newton_ik_physx_profile_matches_reference_interface():
+    """The tuned IK task should match the measured PhysX action and arm-gain profile."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg(),
+        {"newton_sdf"},
+    )
+    policy = env_cfg.observations.policy
+    action = env_cfg.actions.arm_action
+
+    assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.1925)
+    assert action.objectives[0].body_name == "flange"
+    assert action.objectives[0].body_offset_pos == (0.0, 0.0, 0.0)
+    assert action.objectives[0].scale == 0.025
+    assert action.clip == {".*": (-0.4, 0.4)}
+    assert env_cfg.scene.robot.actuators["shoulder"].stiffness == 1320.0
+    assert env_cfg.scene.robot.actuators["shoulder"].damping == 72.0
+    assert env_cfg.scene.robot.actuators["elbow"].stiffness == 600.0
+    assert env_cfg.scene.robot.actuators["elbow"].damping == 35.0
+    assert env_cfg.scene.robot.actuators["wrist"].stiffness == 216.0
+    assert env_cfg.scene.robot.actuators["wrist"].damping == 29.0
+    assert env_cfg.events.randomize_arm_pd_gains is None
+
+
+def test_displayport_newton_osc_physx_profile_matches_reference_controller():
+    """The tuned OSC task should use direct effort and the PhysX OSC profile."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCPhysXProfileEnvCfg(),
+        {"newton_sdf"},
+    )
+    policy = env_cfg.observations.policy
+    action = env_cfg.actions.arm_action
+    controller = action.controller_cfg
+
+    assert policy.tool_pos.params["offset"] == (0.0, 0.0, 0.1925)
+    assert action.body_name == "flange"
+    assert action.body_offset.pos == (0.0, 0.0, 0.0)
+    assert action.position_scale == 0.025
+    assert action.orientation_scale == 0.025
+    assert action.clip == {".*": (-0.4, 0.4)}
+    assert controller.inertial_dynamics_decoupling is False
+    assert controller.partial_inertial_dynamics_decoupling is False
+    assert controller.motion_stiffness_task == (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
+    expected_damping = (
+        *(35.0 / (2.0 * 300.0**0.5),) * 3,
+        *(1.1 / (2.0 * 30.0**0.5),) * 3,
+    )
+    assert controller.motion_damping_ratio_task == expected_damping
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        assert env_cfg.scene.robot.actuators[actuator_name].stiffness == 0.0
+        assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0
 
 
 def test_displayport_calibrated_dr_tcp_observation_offsets_only_actor_pose():

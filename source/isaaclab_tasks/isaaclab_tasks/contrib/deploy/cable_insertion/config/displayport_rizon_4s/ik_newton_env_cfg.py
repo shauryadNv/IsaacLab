@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
+
 from isaaclab_newton.envs.mdp.actions.newton_ik_actions_cfg import NewtonInverseKinematicsActionCfg
 from isaaclab_newton.ik.newton_ik_objectives_cfg import NewtonIKJointLimitObjectiveCfg, NewtonIKPoseObjectiveCfg
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
@@ -24,6 +26,17 @@ _TCP_15CM_OFFSET = (0.0, 0.0, 0.15)
 _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 _OSC_DAMPING_RATIO = (1.0,) * 6
 _OSC_ACTION_SCALE = 0.005
+_PHYSX_REFERENCE_OSC_DAMPING_RATIO = (
+    *(35.0 / (2.0 * math.sqrt(300.0)),) * 3,
+    *(1.1 / (2.0 * math.sqrt(30.0)),) * 3,
+)
+_PHYSX_REFERENCE_ARM_GAINS = {
+    "shoulder": (1320.0, 72.0),
+    "elbow": (600.0, 35.0),
+    "wrist": (216.0, 29.0),
+}
+_PHYSX_REFERENCE_ACTION_SCALE = 0.025
+_PHYSX_REFERENCE_ACTION_CLIP = 0.4
 
 
 def _ik_action(body_offset_pos: tuple[float, float, float]) -> NewtonInverseKinematicsActionCfg:
@@ -60,6 +73,28 @@ def _set_ik_action_scale(env_cfg, scale: float) -> None:
 def _set_action_clip(env_cfg, bound: float) -> None:
     """Set the symmetric normalized action bound for a task-space action."""
     env_cfg.actions.arm_action.clip = {".*": (-bound, bound)}
+
+
+def _use_physx_reference_arm_gains(env_cfg) -> None:
+    """Use the implicit arm gains from the PhysX DisplayPort task."""
+    for actuator_name, (stiffness, damping) in _PHYSX_REFERENCE_ARM_GAINS.items():
+        actuator_cfg = env_cfg.scene.robot.actuators[actuator_name]
+        actuator_cfg.stiffness = stiffness
+        actuator_cfg.damping = damping
+    env_cfg.events.randomize_arm_pd_gains = None
+
+
+def _use_physx_reference_osc_profile(env_cfg) -> None:
+    """Match the operational-space profile used by the PhysX task."""
+    action_cfg = env_cfg.actions.arm_action
+    action_cfg.position_scale = _PHYSX_REFERENCE_ACTION_SCALE
+    action_cfg.orientation_scale = _PHYSX_REFERENCE_ACTION_SCALE
+    _set_action_clip(env_cfg, _PHYSX_REFERENCE_ACTION_CLIP)
+    controller_cfg = action_cfg.controller_cfg
+    controller_cfg.inertial_dynamics_decoupling = False
+    controller_cfg.partial_inertial_dynamics_decoupling = False
+    controller_cfg.motion_stiffness_task = _OSC_STIFFNESS
+    controller_cfg.motion_damping_ratio_task = _PHYSX_REFERENCE_OSC_DAMPING_RATIO
 
 
 def _flange_osc_action(
@@ -299,6 +334,23 @@ class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonTcp15cmPose6DScale0
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg(
+    joint_pos_env_cfg.Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg
+):
+    """Nominal Newton IK task matched to the PhysX task-space interface."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.actions.arm_action = _flange_ik_action()
+        _set_ik_action_scale(self, _PHYSX_REFERENCE_ACTION_SCALE)
+        _set_action_clip(self, _PHYSX_REFERENCE_ACTION_CLIP)
+        _enable_task_space_diagnostics(self)
+        _use_pose_6d_actor_observation(self, _LEGACY_TCP_OBSERVATION_OFFSET)
+        _use_physx_reference_arm_gains(self)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg(
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg
 ):
@@ -525,6 +577,19 @@ class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCTcp15cmPose6DScale
         super().__post_init__()
         self.actions.arm_action.position_scale = 0.015
         self.actions.arm_action.orientation_scale = 0.015
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCPhysXProfileEnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCEnvCfg
+):
+    """Nominal Newton OSC task matched to the PhysX task-space interface."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _use_pose_6d_actor_observation(self, _LEGACY_TCP_OBSERVATION_OFFSET)
+        _use_physx_reference_osc_profile(self)
 
 
 @configclass
