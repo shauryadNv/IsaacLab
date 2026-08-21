@@ -63,8 +63,7 @@ _PHYSX_ARM_GAINS = {
     "wrist": (216.0, 29.0),
 }
 _PHYSX_2X_ARM_GAINS = {
-    name: (2.0 * stiffness, math.sqrt(2.0) * damping)
-    for name, (stiffness, damping) in _PHYSX_ARM_GAINS.items()
+    name: (2.0 * stiffness, math.sqrt(2.0) * damping) for name, (stiffness, damping) in _PHYSX_ARM_GAINS.items()
 }
 
 
