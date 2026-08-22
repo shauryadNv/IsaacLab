@@ -444,7 +444,13 @@ def main() -> None:
     cfg.sim.render_interval = args.decimation
     cfg.sim.physics.num_substeps = args.num_substeps
     cfg.sim.physics.collision_decimation = args.collision_decimation
-    cfg.sim.physics.solver_cfg.update_data_interval = args.update_data_interval
+    solver_cfg = cfg.sim.physics.solver_cfg
+    if hasattr(solver_cfg, "update_data_interval"):
+        solver_cfg.update_data_interval = args.update_data_interval
+    else:
+        for entry in getattr(solver_cfg, "entries", ()):
+            if hasattr(entry.solver_cfg, "update_data_interval"):
+                entry.solver_cfg.update_data_interval = args.update_data_interval
     _disable_rollout_mutations(cfg)
     socket_geometry_pos = _configure_initial_state(cfg, trace[0])
     _configure_physical_action_input(cfg, args.controller, args.osc_profile)
