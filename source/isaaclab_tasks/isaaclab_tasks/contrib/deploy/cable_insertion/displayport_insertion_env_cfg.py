@@ -78,14 +78,17 @@ _SOCKET_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortSocket"
 # Randomized 256-world DisplayPort rollouts reached 530 contacts on a single
 # body. Keep headroom above that observed peak so VBD does not discard contacts.
 _VBD_BODY_CONTACT_BUFFER_SIZE = 1024
-# Reserve outer-pipeline contact rows independently of Newton ADMM's internal
-# cross-entry collision pipeline, whose triangle-pair capacity is solver-owned.
-_ADMM_RIGID_CONTACT_MAX = 2**20
-# Match the baseline 1 kHz actuator refresh and 30.3 Hz policy period while
-# retaining a 2 kHz VBD solve rate and 200 Hz collision refresh.
-_VBD_OUTER_DT = 1.0 / 1000.0
-_VBD_POLICY_DECIMATION = 33
-_VBD_SOLVER_SUBSTEPS = 2
+# An ADMM rollout reached roughly 1.7M cross-entry triangle pairs. Keep enough
+# headroom that the collision pipeline does not discard candidate contacts.
+_ADMM_RIGID_CONTACT_MAX = 2**21
+# The validated VBD cadence runs 20 solver substeps per 10 ms outer tick and
+# refreshes collision at the start and midpoint of each tick. This yields a
+# 2 kHz solver, 200 Hz collision, and 33.3 Hz policy. Newton currently cannot
+# decimate collision across outer ticks, so a 1 ms outer tick would collide at
+# least at 1 kHz regardless of collision_decimation.
+_VBD_OUTER_DT = 1.0 / 100.0
+_VBD_POLICY_DECIMATION = 3
+_VBD_SOLVER_SUBSTEPS = 20
 _VBD_COLLISION_DECIMATION = 10
 _VBD_CONTACT_GAP = 0.005
 
