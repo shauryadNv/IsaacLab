@@ -351,6 +351,35 @@ class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg(
 
 
 @configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileScale050EnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg
+):
+    """PhysX-profile Newton IK with a 50 mm task-space action scale.
+
+    The PhysX-parity arm gains make the arm markedly more compliant than the stock
+    Newton gains, so a larger commanded step is required to reach the same realised
+    motion per policy step.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _set_ik_action_scale(self, 0.05)
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileScale075EnvCfg(
+    Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg
+):
+    """PhysX-profile Newton IK with a 75 mm task-space action scale."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        _set_ik_action_scale(self, 0.075)
+
+
+@configclass
 class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg(
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmObsPose6DEnvCfg
 ):
