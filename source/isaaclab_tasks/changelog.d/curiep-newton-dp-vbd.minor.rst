@@ -12,5 +12,5 @@ Fixed
   while retaining world gravity for manipulated objects.
 * Fixed the DisplayPort VBD timing presets to use the validated 2 kHz solver,
   200 Hz collision, and 33.3 Hz policy cadence.
-* Increased the DisplayPort ADMM contact capacity to cover measured randomized
-  rollout demand without discarding collision candidates.
+* Reduced DisplayPort ADMM collision candidates by limiting robot-side
+  cross-solver collision ownership to gripper shapes.

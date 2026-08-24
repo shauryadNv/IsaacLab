@@ -259,6 +259,8 @@ def test_displayport_admm_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     entries = {entry.name: entry for entry in solver_cfg.entries}
     assert isinstance(entries["robot"].solver_cfg, MJWarpSolverCfg)
     assert isinstance(entries["environment"].solver_cfg, VBDSolverCfg)
+    assert entries["robot"].include_body_shapes is False
+    assert entries["robot"].shape_label_patterns == [r"/World/envs/env_[^/]+/Robot/Grav_gripper/.*"]
     assert solver_cfg.contact_pairs == [("robot", "environment")]
     assert solver_cfg.iterations == 2
     assert solver_cfg.rho == 50.0
@@ -273,7 +275,7 @@ def test_displayport_admm_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
     assert solver_cfg.rigid_contact_matching == "latest"
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
-    assert env_cfg.sim.physics.collision_cfg.rigid_contact_max == 2**21
+    assert env_cfg.sim.physics.collision_cfg.rigid_contact_max == 2**20
     assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
 
 

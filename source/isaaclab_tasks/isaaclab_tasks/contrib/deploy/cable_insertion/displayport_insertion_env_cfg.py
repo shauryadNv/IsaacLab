@@ -73,14 +73,16 @@ _DISPLAYPORT_HYDRO_BUFFER_MULT_ISO = 2
 
 _ROBOT_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot"
 _GRIPPER_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot/Grav_gripper"
+_GRIPPER_SHAPE_PATTERN = rf"{_GRIPPER_BODY_PATTERN}/.*"
 _PLUG_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortPlug"
 _SOCKET_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortSocket"
 # Randomized 256-world DisplayPort rollouts reached 530 contacts on a single
 # body. Keep headroom above that observed peak so VBD does not discard contacts.
 _VBD_BODY_CONTACT_BUFFER_SIZE = 1024
-# An ADMM rollout reached roughly 1.7M cross-entry triangle pairs. Keep enough
-# headroom that the collision pipeline does not discard candidate contacts.
-_ADMM_RIGID_CONTACT_MAX = 2**21
+# Keep ample capacity for the outer point-SDF contact stream. ADMM constructs a
+# separate cross-entry collision stream whose triangle pairs are reduced by
+# exposing only gripper shapes on the robot side.
+_ADMM_RIGID_CONTACT_MAX = 2**20
 # The validated VBD cadence runs 20 solver substeps per 10 ms outer tick and
 # refreshes collision at the start and midpoint of each tick. This yields a
 # 2 kHz solver, 200 Hz collision, and 33.3 Hz policy. Newton currently cannot
@@ -340,6 +342,24 @@ def _displayport_coupled_entries() -> list[CouplerEntryCfg]:
     ]
 
 
+def _displayport_admm_entries() -> list[CouplerEntryCfg]:
+    """Create ADMM entries with robot contact ownership limited to the gripper."""
+    return [
+        CouplerEntryCfg(
+            name="robot",
+            solver_cfg=_displayport_mjwarp_robot_solver_cfg(),
+            bodies=[_ROBOT_BODY_PATTERN],
+            include_body_shapes=False,
+            shape_label_patterns=[_GRIPPER_SHAPE_PATTERN],
+        ),
+        CouplerEntryCfg(
+            name="environment",
+            solver_cfg=_displayport_vbd_solver_cfg(),
+            bodies=[_PLUG_BODY_PATTERN, _SOCKET_BODY_PATTERN],
+        ),
+    ]
+
+
 @configclass
 class DisplayportInsertionPhysicsCfg(PresetCfg):
     """Physics backend presets for DisplayPort insertion.
@@ -447,7 +467,7 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
     )
     newton_mjwarp_vbd_admm: NewtonCfg = NewtonCfg(
         solver_cfg=CouplerAdmmCfg(
-            entries=_displayport_coupled_entries(),
+            entries=_displayport_admm_entries(),
             contact_pairs=[("robot", "environment")],
             iterations=2,
             rho=50.0,
