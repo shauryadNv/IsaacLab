@@ -214,7 +214,7 @@ def test_displayport_admm_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
     assert solver_cfg.rigid_contact_matching == "latest"
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
-    assert env_cfg.sim.physics.collision_cfg.rigid_contact_max == 2**20
+    assert env_cfg.sim.physics.collision_cfg.rigid_contact_max == 2**23
     assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
 
 

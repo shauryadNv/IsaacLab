@@ -76,8 +76,9 @@ _GRIPPER_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot/Grav_gripper"
 _PLUG_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortPlug"
 _SOCKET_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortSocket"
 _VBD_BODY_CONTACT_BUFFER_SIZE = 512
-# Reserve 1024 cross-solver contact rows per world for a 1024-environment single-GPU benchmark.
-_ADMM_RIGID_CONTACT_MAX = 2**20
+# A 256-world ADMM shard reached 5.47M cross-entry collision candidates at reset.
+# Keep 8.39M rows so the shared collision pipeline has roughly 50% headroom.
+_ADMM_RIGID_CONTACT_MAX = 2**23
 _VBD_OUTER_DT = 0.01
 _VBD_POLICY_DECIMATION = 3
 _VBD_SOLVER_SUBSTEPS = 20
