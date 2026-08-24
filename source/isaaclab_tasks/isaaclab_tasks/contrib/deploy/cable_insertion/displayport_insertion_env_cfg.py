@@ -75,7 +75,9 @@ _ROBOT_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot"
 _GRIPPER_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot/Grav_gripper"
 _PLUG_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortPlug"
 _SOCKET_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortSocket"
-_VBD_BODY_CONTACT_BUFFER_SIZE = 512
+# Randomized 256-world DisplayPort rollouts reached 530 contacts on a single
+# body. Keep headroom above that observed peak so VBD does not discard contacts.
+_VBD_BODY_CONTACT_BUFFER_SIZE = 1024
 # Reserve outer-pipeline contact rows independently of Newton ADMM's internal
 # cross-entry collision pipeline, whose triangle-pair capacity is solver-owned.
 _ADMM_RIGID_CONTACT_MAX = 2**20

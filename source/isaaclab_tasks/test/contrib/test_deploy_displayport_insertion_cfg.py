@@ -149,7 +149,7 @@ def test_displayport_all_vbd_uses_hard_point_sdf_contacts():
     assert isinstance(solver_cfg, VBDSolverCfg)
     assert solver_cfg.rigid_contact_hard is True
     assert solver_cfg.rigid_contact_history is False
-    assert solver_cfg.rigid_body_contact_buffer_size == 512
+    assert solver_cfg.rigid_body_contact_buffer_size == 1024
     assert env_cfg.sim.dt == 0.01
     assert env_cfg.decimation == 3
     assert env_cfg.sim.render_interval == 3
@@ -181,7 +181,7 @@ def test_displayport_proxy_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
     assert isinstance(entries["environment"].solver_cfg, VBDSolverCfg)
     assert entries["environment"].solver_cfg.rigid_contact_hard is True
-    assert entries["environment"].solver_cfg.rigid_body_contact_buffer_size == 512
+    assert entries["environment"].solver_cfg.rigid_body_contact_buffer_size == 1024
     assert solver_cfg.proxies[0].source == "robot"
     assert solver_cfg.proxies[0].destination == "environment"
     assert solver_cfg.proxies[0].bodies == [r"/World/envs/env_[^/]+/Robot/Grav_gripper"]
