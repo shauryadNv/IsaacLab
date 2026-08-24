@@ -76,9 +76,9 @@ _GRIPPER_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot/Grav_gripper"
 _PLUG_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortPlug"
 _SOCKET_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortSocket"
 _VBD_BODY_CONTACT_BUFFER_SIZE = 512
-# A 256-world ADMM shard reached 5.47M cross-entry collision candidates at reset.
-# Keep 8.39M rows so the shared collision pipeline has roughly 50% headroom.
-_ADMM_RIGID_CONTACT_MAX = 2**23
+# Reserve outer-pipeline contact rows independently of Newton ADMM's internal
+# cross-entry collision pipeline, whose triangle-pair capacity is solver-owned.
+_ADMM_RIGID_CONTACT_MAX = 2**20
 _VBD_OUTER_DT = 0.01
 _VBD_POLICY_DECIMATION = 3
 _VBD_SOLVER_SUBSTEPS = 20
