@@ -54,7 +54,7 @@ from isaaclab.sim.simulation_cfg import SimulationCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.noise import UniformNoiseCfg
 
-from isaaclab_contrib.coupling import CouplerEntryCfg, CouplerProxyCfg, CouplerProxyMappingCfg
+from isaaclab_contrib.coupling import CouplerAdmmCfg, CouplerEntryCfg, CouplerProxyCfg, CouplerProxyMappingCfg
 
 import isaaclab_tasks.contrib.deploy.mdp as mdp
 from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
@@ -76,6 +76,8 @@ _GRIPPER_BODY_PATTERN = r"/World/envs/env_[^/]+/Robot/Grav_gripper"
 _PLUG_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortPlug"
 _SOCKET_BODY_PATTERN = r"/World/envs/env_[^/]+/DisplayPortSocket"
 _VBD_BODY_CONTACT_BUFFER_SIZE = 512
+# Reserve 1024 cross-solver contact rows per world for a 1024-environment single-GPU benchmark.
+_ADMM_RIGID_CONTACT_MAX = 2**20
 _VBD_OUTER_DT = 0.01
 _VBD_POLICY_DECIMATION = 3
 _VBD_SOLVER_SUBSTEPS = 20
@@ -190,6 +192,7 @@ class DisplayPortPlug(RigidObjectCfg):
             newton_sdf=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
             newton_vbd=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
             newton_mjwarp_vbd_proxy=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
+            newton_mjwarp_vbd_admm=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda"),
             newton_sdf_gap_1mm=os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf_gap_1mm.usda"),
             newton_sdf_gap_0p5mm=os.path.join(
                 DISPLAY_ASSETS_DIR,
@@ -237,6 +240,7 @@ class DisplayPortSocket(RigidObjectCfg):
             newton_sdf=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
             newton_vbd=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
             newton_mjwarp_vbd_proxy=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
+            newton_mjwarp_vbd_admm=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda"),
             newton_sdf_gap_1mm=os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf_gap_1mm.usda"),
             newton_sdf_gap_0p5mm=os.path.join(
                 DISPLAY_ASSETS_DIR,
@@ -276,10 +280,11 @@ class DisplayPortSocket(RigidObjectCfg):
 ##
 
 
-def _displayport_point_sdf_collision_cfg() -> NewtonCollisionPipelineCfg:
+def _displayport_point_sdf_collision_cfg(*, rigid_contact_max: int | None = None) -> NewtonCollisionPipelineCfg:
     """Create the point-SDF collision pipeline shared by VBD experiments."""
     return NewtonCollisionPipelineCfg(
         reduce_contacts=True,
+        rigid_contact_max=rigid_contact_max,
         max_triangle_pairs=_DISPLAYPORT_MAX_TRIANGLE_PAIRS,
     )
 
@@ -338,9 +343,9 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
     assets. The point-SDF preset emits reduced point contacts, while the
     hydroelastic preset emits distributed contact patches.
 
-    ``newton_vbd`` solves the complete scene with VBD. The mixed proxy preset keeps
-    the Flexiv articulation in MJWarp and solves plug/socket contacts with VBD.
-    A selective gripper proxy exchanges contact wrenches between the solvers.
+    ``newton_vbd`` solves the complete scene with VBD. The mixed presets keep
+    the Flexiv articulation in MJWarp and solve plug/socket contacts with VBD,
+    using either selective virtual-proxy or symmetric ADMM coupling.
     """
 
     newton_mjwarp: NewtonCfg = NewtonCfg(
@@ -429,6 +434,22 @@ class DisplayportInsertionPhysicsCfg(PresetCfg):
             iterations=1,
         ),
         num_substeps=_VBD_SOLVER_SUBSTEPS,
+        default_shape_cfg=NewtonShapeCfg(gap=_VBD_CONTACT_GAP),
+        debug_mode=False,
+    )
+    newton_mjwarp_vbd_admm: NewtonCfg = NewtonCfg(
+        solver_cfg=CouplerAdmmCfg(
+            entries=_displayport_coupled_entries(),
+            contact_pairs=[("robot", "environment")],
+            iterations=2,
+            rho=50.0,
+            gamma=0.1,
+            baumgarte=0.01,
+            rigid_contact_matching="latest",
+        ),
+        collision_cfg=_displayport_point_sdf_collision_cfg(rigid_contact_max=_ADMM_RIGID_CONTACT_MAX),
+        num_substeps=_VBD_SOLVER_SUBSTEPS,
+        collision_decimation=_VBD_COLLISION_DECIMATION,
         default_shape_cfg=NewtonShapeCfg(gap=_VBD_CONTACT_GAP),
         debug_mode=False,
     )
@@ -680,12 +701,14 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
             default=33,
             newton_vbd=_VBD_POLICY_DECIMATION,
             newton_mjwarp_vbd_proxy=_VBD_POLICY_DECIMATION,
+            newton_mjwarp_vbd_admm=_VBD_POLICY_DECIMATION,
         )
         self.sim.render_interval = self.decimation
         self.sim.dt = preset(
             default=1.0 / 1000.0,
             newton_vbd=_VBD_OUTER_DT,
             newton_mjwarp_vbd_proxy=_VBD_OUTER_DT,
+            newton_mjwarp_vbd_admm=_VBD_OUTER_DT,
         )
 
         # Keep the metric geometry identical to the keypoint-tracking reward.

@@ -64,6 +64,7 @@ def _newton_actuator_gain(default: float, newton: float) -> PresetCfg:
         newton_hydroelastic=newton,
         newton_vbd=newton,
         newton_mjwarp_vbd_proxy=newton,
+        newton_mjwarp_vbd_admm=newton,
     )
 
 
@@ -372,6 +373,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                     newton_hydroelastic=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
                     newton_vbd=None,
                     newton_mjwarp_vbd_proxy=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
+                    newton_mjwarp_vbd_admm=sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False),
                 ),
                 rigid_props=preset(
                     default=PhysxRigidBodyPropertiesCfg(
@@ -391,6 +393,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
                     newton_hydroelastic=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
                     newton_vbd=sim_utils.RigidBodyBaseCfg(disable_gravity=False),
                     newton_mjwarp_vbd_proxy=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
+                    newton_mjwarp_vbd_admm=sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0),
                 ),
                 articulation_props=PhysxArticulationRootPropertiesCfg(
                     enabled_self_collisions=False,

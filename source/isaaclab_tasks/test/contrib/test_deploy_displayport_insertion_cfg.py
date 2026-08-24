@@ -13,7 +13,7 @@ from pxr import Usd
 
 from isaaclab.envs import mdp
 
-from isaaclab_contrib.coupling import CouplerProxyCfg
+from isaaclab_contrib.coupling import CouplerAdmmCfg, CouplerProxyCfg
 
 import isaaclab_tasks.contrib.deploy.mdp as deploy_mdp
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
@@ -189,6 +189,32 @@ def test_displayport_proxy_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     assert solver_cfg.proxies[0].collide_interval == 10
     assert solver_cfg.proxies[0].collision_pipeline.sdf_hydroelastic_config is None
     assert env_cfg.sim.physics.collision_cfg is None
+    assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
+
+
+def test_displayport_admm_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
+    """ADMM should symmetrically couple the MJWarp robot to the VBD environment."""
+    env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_mjwarp_vbd_admm"})
+    solver_cfg = env_cfg.sim.physics.solver_cfg
+
+    assert isinstance(solver_cfg, CouplerAdmmCfg)
+    entries = {entry.name: entry for entry in solver_cfg.entries}
+    assert isinstance(entries["robot"].solver_cfg, MJWarpSolverCfg)
+    assert isinstance(entries["environment"].solver_cfg, VBDSolverCfg)
+    assert solver_cfg.contact_pairs == [("robot", "environment")]
+    assert solver_cfg.iterations == 2
+    assert solver_cfg.rho == 50.0
+    assert solver_cfg.gamma == 0.1
+    assert solver_cfg.baumgarte == 0.01
+    assert env_cfg.sim.dt == 0.01
+    assert env_cfg.decimation == 3
+    assert env_cfg.sim.render_interval == 3
+    assert env_cfg.sim.physics.num_substeps == 20
+    assert env_cfg.sim.physics.collision_decimation == 10
+    assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
+    assert solver_cfg.rigid_contact_matching == "latest"
+    assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
+    assert env_cfg.sim.physics.collision_cfg.rigid_contact_max == 2**20
     assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
 
 
