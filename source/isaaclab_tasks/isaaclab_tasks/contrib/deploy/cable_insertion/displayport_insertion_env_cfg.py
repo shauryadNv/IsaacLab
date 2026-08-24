@@ -81,9 +81,11 @@ _VBD_BODY_CONTACT_BUFFER_SIZE = 1024
 # Reserve outer-pipeline contact rows independently of Newton ADMM's internal
 # cross-entry collision pipeline, whose triangle-pair capacity is solver-owned.
 _ADMM_RIGID_CONTACT_MAX = 2**20
-_VBD_OUTER_DT = 0.01
-_VBD_POLICY_DECIMATION = 3
-_VBD_SOLVER_SUBSTEPS = 20
+# Match the baseline 1 kHz actuator refresh and 30.3 Hz policy period while
+# retaining a 2 kHz VBD solve rate and 200 Hz collision refresh.
+_VBD_OUTER_DT = 1.0 / 1000.0
+_VBD_POLICY_DECIMATION = 33
+_VBD_SOLVER_SUBSTEPS = 2
 _VBD_COLLISION_DECIMATION = 10
 _VBD_CONTACT_GAP = 0.005
 

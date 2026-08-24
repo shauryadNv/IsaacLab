@@ -184,10 +184,10 @@ def test_displayport_all_vbd_uses_hard_point_sdf_contacts():
     assert solver_cfg.rigid_contact_hard is True
     assert solver_cfg.rigid_contact_history is False
     assert solver_cfg.rigid_body_contact_buffer_size == 1024
-    assert env_cfg.sim.dt == 0.01
-    assert env_cfg.decimation == 3
-    assert env_cfg.sim.render_interval == 3
-    assert env_cfg.sim.physics.num_substeps == 20
+    assert env_cfg.sim.dt == 1.0 / 1000.0
+    assert env_cfg.decimation == 33
+    assert env_cfg.sim.render_interval == 33
+    assert env_cfg.sim.physics.num_substeps == 2
     assert env_cfg.sim.physics.collision_decimation == 10
     assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
@@ -231,10 +231,10 @@ def test_displayport_proxy_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     assert entries["robot"].solver_cfg.disable_contacts is True
     assert entries["robot"].solver_cfg.use_mujoco_contacts is True
     assert entries["robot"].solver_cfg.update_data_interval == 10
-    assert env_cfg.sim.dt == 0.01
-    assert env_cfg.decimation == 3
-    assert env_cfg.sim.render_interval == 3
-    assert env_cfg.sim.physics.num_substeps == 20
+    assert env_cfg.sim.dt == 1.0 / 1000.0
+    assert env_cfg.decimation == 33
+    assert env_cfg.sim.render_interval == 33
+    assert env_cfg.sim.physics.num_substeps == 2
     assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
     assert isinstance(entries["environment"].solver_cfg, VBDSolverCfg)
     assert entries["environment"].solver_cfg.rigid_contact_hard is True
@@ -263,10 +263,10 @@ def test_displayport_admm_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():
     assert solver_cfg.rho == 50.0
     assert solver_cfg.gamma == 0.1
     assert solver_cfg.baumgarte == 0.01
-    assert env_cfg.sim.dt == 0.01
-    assert env_cfg.decimation == 3
-    assert env_cfg.sim.render_interval == 3
-    assert env_cfg.sim.physics.num_substeps == 20
+    assert env_cfg.sim.dt == 1.0 / 1000.0
+    assert env_cfg.decimation == 33
+    assert env_cfg.sim.render_interval == 33
+    assert env_cfg.sim.physics.num_substeps == 2
     assert env_cfg.sim.physics.collision_decimation == 10
     assert env_cfg.sim.physics.default_shape_cfg.gap == 0.005
     assert solver_cfg.rigid_contact_matching == "latest"
