@@ -257,6 +257,38 @@ def test_vbd_solver_force_input_capability(monkeypatch, external_rigid_solver):
     assert NewtonManager._supports_rigid_body_force_input is not external_rigid_solver
 
 
+@pytest.mark.parametrize("joint_count", [0, 3])
+def test_vbd_recovers_joint_state_after_solver_step(monkeypatch, joint_count):
+    """VBD recovers generalized coordinates after solving maximal body state."""
+    physics = importlib.import_module("isaaclab_newton.physics")
+    vbd_module = importlib.import_module("isaaclab_newton.physics.vbd_manager")
+    events = []
+    state_0 = object()
+    state_1 = SimpleNamespace(joint_q=object(), joint_qd=object())
+    control = object()
+    contacts = object()
+    model = SimpleNamespace(joint_count=joint_count)
+
+    class Solver:
+        def step(self, input_state, output_state, input_control, input_contacts, dt):
+            events.append(("step", input_state, output_state, input_control, input_contacts, dt))
+
+    def recover_joint_state(input_model, input_state, joint_q, joint_qd):
+        events.append(("eval_ik", input_model, input_state, joint_q, joint_qd))
+
+    monkeypatch.setattr(NewtonManager, "_solver", Solver())
+    monkeypatch.setattr(physics.NewtonVBDManager, "_model", model)
+    monkeypatch.setattr(vbd_module, "eval_ik", recover_joint_state)
+
+    physics.NewtonVBDManager._step_solver(state_0, state_1, control, contacts, 0.001)
+
+    assert events[0] == ("step", state_0, state_1, control, contacts, 0.001)
+    if joint_count:
+        assert events[1] == ("eval_ik", model, state_1, state_1.joint_q, state_1.joint_qd)
+    else:
+        assert len(events) == 1
+
+
 def test_vbd_rebuilds_particle_bvh_before_physics_step(monkeypatch):
     """VBD rebuilds its particle BVH before the base physics step."""
     physics = importlib.import_module("isaaclab_newton.physics")

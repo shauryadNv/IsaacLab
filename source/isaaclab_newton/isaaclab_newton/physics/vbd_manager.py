@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from newton import Model
+from newton import Contacts, Control, Model, State, eval_ik
 from newton.solvers import SolverVBD
 
 from .newton_manager import NewtonManager
@@ -75,6 +75,15 @@ class NewtonVBDManager(NewtonManager):
         NewtonManager._use_single_state = False
         NewtonManager._needs_collision_pipeline = True
         NewtonManager._supports_rigid_body_force_input = not solver_cfg.integrate_with_external_rigid_solver
+
+    @classmethod
+    def _step_solver(
+        cls, state_0: State, state_1: State, control: Control, contacts: Contacts | None, substep_dt: float
+    ) -> None:
+        """Run VBD and recover reduced articulation state from the solved body state."""
+        super()._step_solver(state_0, state_1, control, contacts, substep_dt)
+        if cls._model.joint_count > 0:
+            eval_ik(cls._model, state_1, state_1.joint_q, state_1.joint_qd)
 
     @classmethod
     def _solver_specific_clear(cls) -> None:
