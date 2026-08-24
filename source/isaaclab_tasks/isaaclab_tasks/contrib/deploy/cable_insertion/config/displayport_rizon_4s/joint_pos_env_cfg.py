@@ -37,7 +37,10 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     compute_plug_pose,
     compute_socket_root,
 )
-from isaaclab_tasks.contrib.deploy.cable_insertion.events import ResetPlugAtGoalCurriculum
+from isaaclab_tasks.contrib.deploy.cable_insertion.events import (
+    ResetPlugAtGoalCurriculum,
+    compensate_articulation_body_gravity,
+)
 from isaaclab_tasks.utils import PresetCfg, preset
 
 # ---------------------------------------------------------------------------
@@ -255,6 +258,18 @@ class EventCfg:
         },
     )
 
+    robot_body_gravity_compensation = preset(
+        default=None,
+        newton_vbd=EventTerm(
+            func=compensate_articulation_body_gravity,
+            mode="reset",
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "gravity": (0.0, 0.0, -9.81),
+            },
+        ),
+    )
+
 
 @configclass
 class TerminationsCfg:
@@ -418,10 +433,9 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         )
 
         # PhysX excludes each robot body from gravity. MJWarp and the mixed
-        # MJWarp/VBD preset apply full passive body gravity compensation
-        # without routing it through actuator force limits. All-VBD keeps world
-        # gravity enabled because VBD does not consume MuJoCo gravcomp; this is
-        # an explicit model-parity limitation of experiment A.
+        # MJWarp/VBD presets use body ``gravcomp``. All-VBD keeps world gravity
+        # enabled for the plug and socket, while its reset event applies an
+        # equal-and-opposite CoM force to each robot body for backend parity.
         self.scene.robot.actuators["shoulder"].stiffness = _newton_actuator_gain(1320.0, 6000.0)
         self.scene.robot.actuators["shoulder"].damping = _newton_actuator_gain(72.0, 108.5)
         self.scene.robot.actuators["elbow"].stiffness = _newton_actuator_gain(600.0, 4200.0)

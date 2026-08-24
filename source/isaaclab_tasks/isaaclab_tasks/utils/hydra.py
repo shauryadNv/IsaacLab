@@ -625,7 +625,10 @@ def register_task(task_name: str, agent_entry: str, play_mode: bool = False) -> 
         else:
             override_items.append((key, val, arg))
 
-    explicit = {key: val for key, val, _arg in override_items}
+    # A scalar-valued PresetCfg may be replaced directly from the CLI (for
+    # example, ``env.decimation=30``). Only string values can name a preset;
+    # resolve all non-string values after the active preset branch is chosen.
+    explicit = {key: val for key, val, _arg in override_items if isinstance(_parse_val(val), str)}
     consumed_presets: set[str] = set()
     typed_hits: dict[str, set[PresetTarget]] = {}
     consumed_explicit: set[str] = set()
@@ -732,9 +735,13 @@ def parse_overrides(args: list[str], presets: dict) -> tuple:
             known_names = _known_preset_names(presets)
             global_presets.extend(_normalize_preset_name(v.strip(), known_names) for v in val.split(",") if v.strip())
         elif key in preset_paths:
-            sec, path = key.split(".", 1) if "." in key else (key, "")
-            known_names = set(presets[sec][path])
-            preset_sel.append((sec, path, _normalize_preset_name(val, known_names)))
+            parsed_val = _parse_val(val)
+            if not isinstance(parsed_val, str) and "." in key:
+                preset_scalar.append((key, val))
+            else:
+                sec, path = key.split(".", 1) if "." in key else (key, "")
+                known_names = set(presets[sec][path])
+                preset_sel.append((sec, path, _normalize_preset_name(val, known_names)))
         elif any(key.startswith(pp + ".") for pp in preset_paths):
             preset_scalar.append((key, val))
         else:

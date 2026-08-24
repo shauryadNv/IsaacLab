@@ -463,6 +463,18 @@ def test_parse_overrides_mixed():
     assert "env.decimation=10" in glob
 
 
+def test_parse_overrides_scalar_replaces_exact_preset_path():
+    """A numeric value at an exact preset path is a scalar replacement."""
+    presets = {
+        "env": {"decimation": {"default": 33, "newton_vbd": 3}},
+        "agent": {},
+    }
+    _, selected, scalar, global_scalar = parse_overrides(["env.decimation=30"], presets)
+    assert selected == []
+    assert scalar == [("env.decimation", "30")]
+    assert global_scalar == []
+
+
 def test_parse_overrides_root_preset():
     """Root-level PresetCfg parsed as agent=<name>."""
     presets = {"env": {}, "agent": collect_presets(RootAgentCfg())}
@@ -1595,3 +1607,27 @@ def test_register_task_play_mode_applies_play_mode(monkeypatch):
         assert not env_cfg.played
     finally:
         del gym.registry["Isaac-Hydra-PlayMode-Test"]
+
+
+def test_register_task_scalar_override_replaces_preset_valued_field(monkeypatch):
+    """A scalar CLI value replaces a preset-valued field after preset resolution."""
+    import sys
+
+    import gymnasium as gym
+
+    @configclass
+    class PresetScalarEnvCfg:
+        decimation: PresetCfg = preset(default=33, newton_vbd=3)
+
+    gym.register(
+        id="Isaac-Hydra-Preset-Scalar-Override-Test",
+        entry_point="dummy:Env",
+        kwargs={"env_cfg_entry_point": PresetScalarEnvCfg},
+    )
+    monkeypatch.setattr(sys, "argv", ["test", "presets=newton_vbd", "env.decimation=30"])
+    try:
+        env_cfg, _, hydra_args = hydra_mod.register_task("Isaac-Hydra-Preset-Scalar-Override-Test", None)
+        assert env_cfg.decimation == 30
+        assert hydra_args == []
+    finally:
+        del gym.registry["Isaac-Hydra-Preset-Scalar-Override-Test"]

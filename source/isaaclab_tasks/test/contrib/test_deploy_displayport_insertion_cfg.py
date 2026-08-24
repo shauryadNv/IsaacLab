@@ -6,7 +6,9 @@
 """Tests for the Deploy DisplayPort insertion environment configuration."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import torch
 from isaaclab_newton.physics import MJWarpSolverCfg, VBDSolverCfg
 
 from pxr import Usd
@@ -63,6 +65,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     DISPLAY_ASSETS_DIR,
     SOCKET_INSERTION_OFFSET,
 )
+from isaaclab_tasks.contrib.deploy.cable_insertion.events import compensate_articulation_body_gravity
 from isaaclab_tasks.utils.hydra import resolve_presets
 
 
@@ -141,6 +144,37 @@ def test_displayport_hard_sdf_uses_point_contacts_with_precomputed_sdfs():
     assert env_cfg.sim.physics.solver_cfg.use_mujoco_contacts is False
 
 
+def test_displayport_body_gravity_compensation_cancels_selected_body_weight():
+    """The VBD compensator should apply ``-mass * gravity`` at each selected CoM."""
+    captured = {}
+
+    def capture_wrench(**kwargs):
+        captured.update(kwargs)
+
+    body_mass = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    asset = SimpleNamespace(
+        num_instances=2,
+        device="cpu",
+        data=SimpleNamespace(body_mass=SimpleNamespace(torch=body_mass)),
+        permanent_wrench_composer=SimpleNamespace(add_forces_and_torques_index=capture_wrench),
+    )
+    env = SimpleNamespace(scene={"robot": asset})
+    asset_cfg = SimpleNamespace(name="robot", body_ids=[0, 2])
+
+    compensate_articulation_body_gravity(
+        env,
+        torch.tensor([1]),
+        asset_cfg=asset_cfg,
+        gravity=(0.0, 0.0, -9.81),
+    )
+
+    expected = torch.tensor([[[0.0, 0.0, 39.24], [0.0, 0.0, 58.86]]])
+    assert torch.allclose(captured["forces"], expected)
+    assert captured["body_ids"] == [0, 2]
+    assert captured["env_ids"].dtype == torch.int32
+    assert captured["is_global"] is True
+
+
 def test_displayport_all_vbd_uses_hard_point_sdf_contacts():
     """The all-VBD baseline should use hard point-SDF contacts and explicit gravity."""
     env_cfg = resolve_presets(Rizon4sGravDisplayportInsertionEnvCfg(), {"newton_vbd"})
@@ -159,8 +193,31 @@ def test_displayport_all_vbd_uses_hard_point_sdf_contacts():
     assert env_cfg.sim.physics.collision_cfg.sdf_hydroelastic_config is None
     assert env_cfg.scene.robot.spawn.joint_drive_props is None
     assert env_cfg.scene.robot.spawn.rigid_props.disable_gravity is False
+    gravity_event = env_cfg.events.robot_body_gravity_compensation
+    assert gravity_event.func is compensate_articulation_body_gravity
+    assert gravity_event.mode == "reset"
+    assert gravity_event.params["gravity"] == (0.0, 0.0, -9.81)
     assert env_cfg.scene.dp_plug.spawn.usd_path.endswith("display_port_plug_newton_sdf.usda")
     assert env_cfg.scene.dp_socket.spawn.usd_path.endswith("display_port_socket_newton_sdf.usda")
+
+
+def test_displayport_physx_profile_keeps_reference_gains_with_vbd_proxy():
+    """The VBD proxy must not restore the stronger generic Newton arm gains."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionDomainRandomizedIKNewtonPhysXProfileEnvCfg(),
+        {"newton_mjwarp_vbd_proxy"},
+    )
+
+    expected_gains = {
+        "shoulder": (1320.0, 72.0),
+        "elbow": (600.0, 35.0),
+        "wrist": (216.0, 29.0),
+    }
+    for actuator_name, (stiffness, damping) in expected_gains.items():
+        actuator_cfg = env_cfg.scene.robot.actuators[actuator_name]
+        assert actuator_cfg.stiffness == stiffness
+        assert actuator_cfg.damping == damping
+    assert env_cfg.events.randomize_arm_pd_gains is None
 
 
 def test_displayport_proxy_coupling_keeps_robot_in_mjwarp_and_contacts_in_vbd():

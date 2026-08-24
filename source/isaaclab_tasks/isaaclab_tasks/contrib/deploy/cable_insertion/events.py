@@ -16,6 +16,42 @@ from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 
 
+def compensate_articulation_body_gravity(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    gravity: tuple[float, float, float] = (0.0, 0.0, -9.81),
+) -> None:
+    """Cancel world gravity on selected articulation bodies with CoM forces.
+
+    This provides per-body gravity exclusion for Newton solvers that do not
+    consume MuJoCo body ``gravcomp`` metadata. The equal-and-opposite force is
+    expressed in the world frame and applied at each body center of mass, so it
+    introduces no compensating torque.
+
+    Args:
+        env: Environment containing the articulation.
+        env_ids: Environment indices receiving gravity compensation.
+        asset_cfg: Articulation and body selection.
+        gravity: World gravity acceleration [m/s^2].
+    """
+    asset = env.scene[asset_cfg.name]
+    if env_ids is None:
+        env_ids = torch.arange(asset.num_instances, device=asset.device, dtype=torch.int32)
+    else:
+        env_ids = env_ids.to(device=asset.device, dtype=torch.int32)
+
+    body_ids = asset_cfg.body_ids
+    body_mass = asset.data.body_mass.torch[env_ids]
+    if body_ids is not None:
+        body_mass = body_mass[:, body_ids]
+    gravity_w = torch.tensor(gravity, device=asset.device, dtype=body_mass.dtype)
+    forces_w = -body_mass.unsqueeze(-1) * gravity_w
+    asset.permanent_wrench_composer.add_forces_and_torques_index(
+        forces=forces_w, body_ids=body_ids, env_ids=env_ids, is_global=True
+    )
+
+
 class ResetPlugAtGoalCurriculum(ManagerTermBase):
     """Reset plugs in near-goal and approach bands along the insertion axis.
 
