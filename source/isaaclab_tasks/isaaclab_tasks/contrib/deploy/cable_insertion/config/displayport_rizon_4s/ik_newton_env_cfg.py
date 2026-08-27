@@ -3,8 +3,6 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import math
-
 from isaaclab_newton.envs.mdp.actions.newton_ik_actions_cfg import NewtonInverseKinematicsActionCfg
 from isaaclab_newton.ik.newton_ik_objectives_cfg import NewtonIKJointLimitObjectiveCfg, NewtonIKPoseObjectiveCfg
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
@@ -26,10 +24,6 @@ _TCP_15CM_OFFSET = (0.0, 0.0, 0.15)
 _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 _OSC_DAMPING_RATIO = (1.0,) * 6
 _OSC_ACTION_SCALE = 0.005
-_PHYSX_REFERENCE_OSC_DAMPING_RATIO = (
-    *(35.0 / (2.0 * math.sqrt(300.0)),) * 3,
-    *(1.1 / (2.0 * math.sqrt(30.0)),) * 3,
-)
 _PHYSX_REFERENCE_ARM_GAINS = {
     "shoulder": (1320.0, 72.0),
     "elbow": (600.0, 35.0),
@@ -85,16 +79,23 @@ def _use_physx_reference_arm_gains(env_cfg) -> None:
 
 
 def _use_physx_reference_osc_profile(env_cfg) -> None:
-    """Match the operational-space profile used by the PhysX task."""
+    """Match the PhysX task's action scale/clip while keeping Newton's stable OSC gains.
+
+    Matching PhysX's raw joint-damping constants (translation ratio ~1.01, rotation ratio
+    ~0.1) left the rotational axes underdamped under Newton's OSC solver and collapsed
+    insertion success (~82% to ~12% terminal success at matched training steps). Newton's
+    inertia-decoupled, critically-damped defaults (:data:`_OSC_DAMPING_RATIO`) reproduce the
+    validated PhysX behavior; only the action scale/clip are still matched to PhysX.
+    """
     action_cfg = env_cfg.actions.arm_action
     action_cfg.position_scale = _PHYSX_REFERENCE_ACTION_SCALE
     action_cfg.orientation_scale = _PHYSX_REFERENCE_ACTION_SCALE
     _set_action_clip(env_cfg, _PHYSX_REFERENCE_ACTION_CLIP)
     controller_cfg = action_cfg.controller_cfg
-    controller_cfg.inertial_dynamics_decoupling = False
+    controller_cfg.inertial_dynamics_decoupling = True
     controller_cfg.partial_inertial_dynamics_decoupling = False
     controller_cfg.motion_stiffness_task = _OSC_STIFFNESS
-    controller_cfg.motion_damping_ratio_task = _PHYSX_REFERENCE_OSC_DAMPING_RATIO
+    controller_cfg.motion_damping_ratio_task = _OSC_DAMPING_RATIO
 
 
 def _flange_osc_action(
