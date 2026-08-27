@@ -616,6 +616,21 @@ class RewardsCfg:
         },
     )
 
+    insertion_depth_tracking_exp = RewTerm(
+        func=mdp.insertion_depth_exp,
+        weight=0.0,
+        params={
+            "socket_asset_cfg": SceneEntityCfg("dp_socket"),
+            "plug_asset_cfg": SceneEntityCfg("dp_plug"),
+            "socket_offset": SOCKET_INSERTION_OFFSET,
+            "plug_offset": PLUG_INSERTION_OFFSET,
+            "insertion_axis": [1.0, 0.0, 0.0],
+            "depth_scale": 0.005,
+            "lateral_scale": 0.005,
+        },
+    )
+    """Optional seated-depth shaping; disabled by default for behavioral compatibility."""
+
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-5.0e-06)
 
 
@@ -669,6 +684,18 @@ class DisplayportInsertionEnvCfg(ManagerBasedRLEnvCfg):
 
     success_pos_threshold: float = 0.003
     """Maximum mate-frame origin error [m] counted as success."""
+
+    success_insertion_axis: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    """Insertion direction in the socket mate frame."""
+
+    success_min_remaining_depth: float | None = None
+    """Optional minimum signed distance from the seated plane [m].
+
+    Negative values allow limited insertion overtravel.
+    """
+
+    success_max_remaining_depth: float | None = None
+    """Optional maximum signed distance short of the seated plane [m]."""
 
     success_keypoint_scale: float = 0.15
     """Keypoint diagnostic scale [m]."""

@@ -58,6 +58,8 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
     * ``Metrics/terminal_success_rate``: Success fraction immediately before
       completed environments are reset.
     * ``Metrics/plug_socket_pos_error_m``: Mean mate-frame origin error [m].
+    * ``Metrics/plug_socket_remaining_depth_m``: Mean signed distance short of
+      the seated mate plane [m].
     * ``Metrics/plug_socket_keypoint_dist_m``: Mean keypoint error [m].
     * ``Metrics/physics_watchdog_violation_rate``: Fraction of environments
       violating an enabled physics-watchdog limit.
@@ -94,6 +96,25 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         self._success_plug_asset = str(getattr(cfg, "success_plug_asset", "dp_plug"))
         self._success_pos_threshold = float(getattr(cfg, "success_pos_threshold", 0.003))
         self._success_keypoint_scale = float(getattr(cfg, "success_keypoint_scale", 0.15))
+        success_axis = torch.tensor(
+            getattr(cfg, "success_insertion_axis", (1.0, 0.0, 0.0)),
+            device=self.device,
+            dtype=torch.float32,
+        )
+        success_axis_norm = torch.linalg.vector_norm(success_axis)
+        if not bool(torch.isfinite(success_axis_norm)) or success_axis_norm.item() <= 0.0:
+            raise ValueError("success_insertion_axis must be finite and non-zero.")
+        self._success_insertion_axis = success_axis / success_axis_norm
+        min_remaining_depth = getattr(cfg, "success_min_remaining_depth", None)
+        max_remaining_depth = getattr(cfg, "success_max_remaining_depth", None)
+        self._success_min_remaining_depth = None if min_remaining_depth is None else float(min_remaining_depth)
+        self._success_max_remaining_depth = None if max_remaining_depth is None else float(max_remaining_depth)
+        if (
+            self._success_min_remaining_depth is not None
+            and self._success_max_remaining_depth is not None
+            and self._success_min_remaining_depth > self._success_max_remaining_depth
+        ):
+            raise ValueError("success_min_remaining_depth must not exceed success_max_remaining_depth.")
 
         self._success_socket_offset = torch.tensor(
             getattr(cfg, "success_socket_offset", [0.0, 0.0, 0.0]), device=self.device, dtype=torch.float32
@@ -225,8 +246,8 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         plug_frame_pos, plug_frame_quat = combine_frame_transforms(plug_pos, plug_quat, plug_offset, plug_goal_rot_inv)
         return socket_frame_pos, socket_frame_quat, plug_frame_pos, plug_frame_quat
 
-    def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute success, mate-frame position error, and keypoint error."""
+    def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute success, position error, keypoint error, and remaining depth."""
         socket_frame_pos, socket_frame_quat, plug_frame_pos, plug_frame_quat = self._compute_mate_frames()
         position_error = torch.linalg.norm(plug_frame_pos - socket_frame_pos, dim=-1)
 
@@ -248,7 +269,17 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         )[0].reshape(self.num_envs, num_keypoints, 3)
         keypoint_error = torch.linalg.norm(plug_keypoints - socket_keypoints, dim=-1).mean(dim=-1)
 
-        return position_error < self._success_pos_threshold, position_error, keypoint_error
+        insertion_axis = self._success_insertion_axis.unsqueeze(0).expand(self.num_envs, -1)
+        insertion_axis_w = quat_apply(socket_frame_quat, insertion_axis)
+        remaining_depth = torch.sum((plug_frame_pos - socket_frame_pos) * insertion_axis_w, dim=-1)
+
+        is_success = position_error < self._success_pos_threshold
+        if self._success_min_remaining_depth is not None:
+            is_success &= remaining_depth >= self._success_min_remaining_depth
+        if self._success_max_remaining_depth is not None:
+            is_success &= remaining_depth <= self._success_max_remaining_depth
+
+        return is_success, position_error, keypoint_error, remaining_depth
 
     def _compute_flange_pose_b(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the flange-origin pose in the robot root frame."""
@@ -422,10 +453,11 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         obs_buf, reward_buf, terminated, time_outs, extras = super().step(action)
         log = extras.setdefault("log", {})
         if self._log_success_metrics:
-            is_success, position_error, keypoint_error = self._compute_success()
+            is_success, position_error, keypoint_error, remaining_depth = self._compute_success()
             log["Metrics/success_rate"] = is_success.float().mean()
             log["Metrics/plug_socket_pos_error_m"] = position_error.mean()
             log["Metrics/plug_socket_keypoint_dist_m"] = keypoint_error.mean()
+            log["Metrics/plug_socket_remaining_depth_m"] = remaining_depth.mean()
         log.update(task_space_action_metrics)
         if self._log_task_space_action_metrics:
             log.update(self._compute_task_space_tracking_metrics())
@@ -438,7 +470,7 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         terminal_success = None
         terminal_success_by_offset_available = False
         if getattr(self, "_log_success_metrics", False):
-            is_success, _, _ = self._compute_success()
+            is_success, _, _, _ = self._compute_success()
             terminal_success = is_success[env_ids].float().mean()
             if hasattr(self, "_terminal_success_by_xy_offset"):
                 initial_offset = self._displayport_initial_xy_offset_m[env_ids]

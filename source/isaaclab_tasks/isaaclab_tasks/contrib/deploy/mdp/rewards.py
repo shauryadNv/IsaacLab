@@ -607,6 +607,103 @@ class keypoint_ee_grasp_error_exp(keypoint_ee_grasp_error):
         return scaled_reward
 
 
+class insertion_depth_exp(ManagerTermBase):
+    """Reward seated depth while gating the reward by lateral mate-frame alignment.
+
+    Remaining depth is signed along the insertion axis in the socket mate frame:
+    positive values are outside the seated plane and negative values are
+    overtravel. The depth component saturates at the seated plane. A separate
+    exponential lateral gate prevents the policy from earning the full reward by
+    pushing through geometry beside the socket opening.
+    """
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        """Initialize the insertion-depth reward.
+
+        Args:
+            cfg: Reward term configuration.
+            env: Environment instance.
+        """
+        super().__init__(cfg, env)
+
+        self.socket_asset = env.scene[cfg.params["socket_asset_cfg"].name]
+        self.plug_asset = env.scene[cfg.params["plug_asset_cfg"].name]
+        self.socket_offset = torch.tensor(
+            cfg.params.get("socket_offset", [0.0, 0.0, 0.0]), device=env.device, dtype=torch.float32
+        )
+        self.plug_offset = torch.tensor(
+            cfg.params.get("plug_offset", [0.0, 0.0, 0.0]), device=env.device, dtype=torch.float32
+        )
+        insertion_axis = torch.tensor(
+            cfg.params.get("insertion_axis", [1.0, 0.0, 0.0]), device=env.device, dtype=torch.float32
+        )
+        axis_norm = torch.linalg.vector_norm(insertion_axis)
+        if not bool(torch.isfinite(axis_norm)) or axis_norm.item() <= 0.0:
+            raise ValueError("insertion_axis must be finite and non-zero.")
+        self.insertion_axis = insertion_axis / axis_norm
+
+        self.depth_scale = float(cfg.params.get("depth_scale", 0.005))
+        self.lateral_scale = float(cfg.params.get("lateral_scale", 0.005))
+        if self.depth_scale <= 0.0 or self.lateral_scale <= 0.0:
+            raise ValueError("depth_scale and lateral_scale must be positive.")
+
+        self.identity_quat = torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=env.device, dtype=torch.float32).repeat(
+            env.num_envs, 1
+        )
+
+    def _get_mate_frames(self, env: ManagerBasedRLEnv) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return socket orientation and both mate-frame positions."""
+        socket_pos = self.socket_asset.data.root_link_pos_w.torch
+        socket_quat = self.socket_asset.data.root_link_quat_w.torch
+        plug_pos = self.plug_asset.data.root_link_pos_w.torch
+        plug_quat = self.plug_asset.data.root_link_quat_w.torch
+
+        socket_offset = self.socket_offset.unsqueeze(0).expand(env.num_envs, -1)
+        plug_offset = self.plug_offset.unsqueeze(0).expand(env.num_envs, -1)
+        socket_frame_pos, socket_frame_quat = combine_frame_transforms(
+            socket_pos, socket_quat, socket_offset, self.identity_quat
+        )
+        plug_frame_pos, _ = combine_frame_transforms(plug_pos, plug_quat, plug_offset, self.identity_quat)
+        return socket_frame_pos, socket_frame_quat, plug_frame_pos
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        socket_asset_cfg: SceneEntityCfg,
+        plug_asset_cfg: SceneEntityCfg,
+        socket_offset: list[float],
+        plug_offset: list[float],
+        insertion_axis: list[float],
+        depth_scale: float,
+        lateral_scale: float,
+    ) -> torch.Tensor:
+        """Compute an alignment-gated exponential insertion-depth reward.
+
+        Args:
+            env: Environment instance.
+            socket_asset_cfg: Scene entity containing the socket.
+            plug_asset_cfg: Scene entity containing the plug.
+            socket_offset: Socket-local mate-frame translation [m].
+            plug_offset: Plug-local mate-frame translation [m].
+            insertion_axis: Insertion direction in the socket mate frame.
+            depth_scale: Exponential scale for positive remaining depth [m].
+            lateral_scale: Exponential scale for lateral mate-frame error [m].
+
+        Returns:
+            Per-environment reward in the range (0, 1].
+        """
+        socket_pos, socket_quat, plug_pos = self._get_mate_frames(env)
+        insertion_axis = self.insertion_axis.unsqueeze(0).expand(env.num_envs, -1)
+        insertion_axis_w = quat_apply(socket_quat, insertion_axis)
+        mate_delta = plug_pos - socket_pos
+        remaining_depth = torch.sum(mate_delta * insertion_axis_w, dim=-1)
+        lateral_delta = mate_delta - remaining_depth.unsqueeze(-1) * insertion_axis_w
+        lateral_error = torch.linalg.vector_norm(lateral_delta, dim=-1)
+
+        positive_remaining_depth = torch.clamp(remaining_depth, min=0.0)
+        return torch.exp(-positive_remaining_depth / self.depth_scale - lateral_error / self.lateral_scale)
+
+
 class keypoint_two_body_error(ManagerTermBase):
     """Keypoint distance between two rigid objects with body-frame offsets."""
 
