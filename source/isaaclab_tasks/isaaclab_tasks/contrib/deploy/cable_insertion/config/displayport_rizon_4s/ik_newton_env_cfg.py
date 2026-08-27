@@ -419,10 +419,19 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmOb
 
 
 def _configure_osc_control(env_cfg) -> None:
-    """Configure direct operational-space effort control for the arm."""
+    """Configure direct operational-space effort control for the arm.
+
+    Arm joint-friction randomization is disabled to match the validated PhysX
+    task: the real Flexiv controller is precise enough that this randomization
+    is unnecessary, and OSC's effort control (with gravity compensation
+    disabled in favor of Newton's rigid-body gravcomp) has no friction
+    compensation term, so randomized friction is an unmodeled disturbance
+    the controller must reject on every reset.
+    """
     env_cfg.actions.arm_action = _flange_osc_action()
     _enable_task_space_diagnostics(env_cfg)
     env_cfg.events.randomize_arm_pd_gains = None
+    env_cfg.events.randomize_arm_joint_friction = None
     for actuator_name in ("shoulder", "elbow", "wrist"):
         env_cfg.scene.robot.actuators[actuator_name].stiffness = 0.0
         env_cfg.scene.robot.actuators[actuator_name].damping = 0.0
