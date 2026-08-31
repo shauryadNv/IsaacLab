@@ -33,18 +33,21 @@ class ResetSampledConstantNoiseModel(NoiseModel):
 
     The noise is sampled from the configured distribution ONLY during reset and applied consistently
     until the next reset. Unlike regular noise that generates new random values every step,
-    this model maintains the same noise values throughout an episode.
+    this model maintains the same noise values throughout an episode. By default, one scalar is sampled
+    per environment and broadcast to all observation components. Independent per-component values can
+    be enabled with :attr:`ResetSampledConstantNoiseModelCfg.sample_per_component`.
 
     Note:
         This noise model was used since the noise randimization should only be done at reset time.
         Other noise models(Eg: GaussianNoise) were not used since this randomizes the noise at every time-step.
     """
 
-    def __init__(self, noise_model_cfg: NoiseModelCfg, num_envs: int, device: str):
+    def __init__(self, noise_model_cfg: ResetSampledConstantNoiseModelCfg, num_envs: int, device: str):
         # initialize parent class
         super().__init__(noise_model_cfg, num_envs, device)
         # store the noise configuration
         self._noise_cfg = noise_model_cfg.noise_cfg
+        self._sample_per_component = noise_model_cfg.sample_per_component
         self._sampled_noise = torch.zeros((num_envs, 1), device=self._device)
         self._num_components: int | None = None
 
@@ -62,15 +65,20 @@ class ResetSampledConstantNoiseModel(NoiseModel):
         if env_ids is None:
             env_ids = slice(None)
 
-        # Use the existing noise function to sample new noise
-        # Create dummy data to sample from the noise function
-        dummy_data = torch.zeros(
-            (env_ids.stop - env_ids.start if isinstance(env_ids, slice) else len(env_ids), 1), device=self._device
-        )
+        # Per-component sampling is deferred until the first observation establishes its width.
+        if self._sample_per_component and self._num_components is None:
+            return
+
+        num_resets = self._sampled_noise[env_ids].shape[0]
+        num_samples = self._num_components if self._sample_per_component else 1
+        dummy_data = torch.zeros((num_resets, num_samples), device=self._device)
 
         # Sample noise using the configured noise function
         sampled_noise = self._noise_model_cfg.noise_cfg.func(dummy_data, self._noise_model_cfg.noise_cfg)
 
+        # Legacy mode draws one value per environment even after the storage has been expanded.
+        if not self._sample_per_component and self._num_components is not None:
+            sampled_noise = sampled_noise.expand(-1, self._num_components)
         self._sampled_noise[env_ids] = sampled_noise
 
     def __call__(self, data: torch.Tensor) -> torch.Tensor:
@@ -88,8 +96,14 @@ class ResetSampledConstantNoiseModel(NoiseModel):
         # on first apply, expand noise to match last dim of data
         if self._num_components is None:
             *_, self._num_components = data.shape
-            # expand noise from (num_envs,1) to (num_envs, num_components)
-            self._sampled_noise = self._sampled_noise.repeat(1, self._num_components)
+            if self._sample_per_component:
+                self._sampled_noise = torch.zeros(
+                    (self._num_envs, self._num_components), device=self._device, dtype=data.dtype
+                )
+                self.reset()
+            else:
+                # expand noise from (num_envs, 1) to (num_envs, num_components)
+                self._sampled_noise = self._sampled_noise.repeat(1, self._num_components)
 
         # apply the noise based on operation
         if self._noise_cfg.operation == "add":
@@ -112,6 +126,13 @@ class ResetSampledConstantNoiseModelCfg(NoiseModelCfg):
     """The noise configuration for the noise.
 
     Based on this configuration, the noise is sampled at every reset of the noise model.
+    """
+
+    sample_per_component: bool = False
+    """Whether to sample an independent value for each observation component.
+
+    If false, one value is sampled per environment and broadcast across components, preserving
+    the legacy behavior. If true, sampling is deferred until the observation width is known.
     """
 
 

@@ -8,6 +8,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import gymnasium as gym
 import torch
 from isaaclab_newton.physics import MJWarpSolverCfg, VBDSolverCfg
 
@@ -34,6 +35,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcpObsEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DActionClip1EnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DArmFrictionDREnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010ActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale010EnvCfg,
@@ -482,7 +484,8 @@ def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
     assert action.controller_cfg.motion_damping_ratio_task == (1.0,) * 6
     assert action.controller_cfg.nullspace_control == "none"
     assert action.nullspace_joint_pos_target == "none"
-    assert env_cfg.events.randomize_arm_joint_friction is not None
+    assert env_cfg.osc_randomize_arm_joint_friction is False
+    assert env_cfg.events.randomize_arm_joint_friction is None
     assert env_cfg.events.randomize_arm_pd_gains is None
     assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
     for actuator_name in ("shoulder", "elbow", "wrist"):
@@ -519,8 +522,46 @@ def test_displayport_nominal_and_calibrated_osc_vary_robot_kinematics_only():
         assert policy.tool_pos.func is deploy_mdp.body_pos_w_with_offset
         assert policy.tool_rot_6d.func is deploy_mdp.body_rot_6d_w
         assert policy.socket_rot_6d.func is deploy_mdp.rigid_object_rot_6d_w
-        assert env_cfg.events.randomize_arm_joint_friction is not None
+        assert env_cfg.osc_randomize_arm_joint_friction is False
+        assert env_cfg.events.randomize_arm_joint_friction is None
         assert env_cfg.events.randomize_arm_pd_gains is None
+
+
+def test_displayport_newton_osc_arm_friction_dr_is_explicit_opt_in():
+    """The calibrated OSC ablation should restore arm friction DR without arm PD-gain DR."""
+    baseline_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg()
+    friction_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DArmFrictionDREnvCfg()
+
+    assert baseline_cfg.osc_randomize_arm_joint_friction is False
+    assert baseline_cfg.events.randomize_arm_joint_friction is None
+    assert friction_cfg.osc_randomize_arm_joint_friction is True
+
+    friction_event = friction_cfg.events.randomize_arm_joint_friction
+    assert friction_event is not None
+    assert friction_event.mode == "reset"
+    assert friction_event.params["asset_cfg"].joint_names == [f"joint{joint_id}" for joint_id in range(1, 8)]
+    assert friction_event.params["friction_distribution_params"] == (0.0, 0.15)
+    assert friction_event.params["operation"] == "add"
+    assert friction_event.params["distribution"] == "uniform"
+
+    for env_cfg in (baseline_cfg, friction_cfg):
+        action = env_cfg.actions.arm_action
+        assert env_cfg.events.randomize_arm_pd_gains is None
+        assert action.body_name == "flange"
+        assert action.position_scale == 0.005
+        assert action.orientation_scale == 0.005
+        assert action.controller_cfg.inertial_dynamics_decoupling is True
+        for actuator_name in ("shoulder", "elbow", "wrist"):
+            assert env_cfg.scene.robot.actuators[actuator_name].stiffness == 0.0
+            assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0
+
+    task_id = (
+        "IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-OSC-FlangePose6D-ArmFrictionDR"
+    )
+    env_cfg_entry_point = gym.spec(task_id).kwargs["env_cfg_entry_point"]
+    assert env_cfg_entry_point.endswith(
+        ":Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DArmFrictionDREnvCfg"
+    )
 
 
 def test_displayport_newton_osc_action_ablation_variants():

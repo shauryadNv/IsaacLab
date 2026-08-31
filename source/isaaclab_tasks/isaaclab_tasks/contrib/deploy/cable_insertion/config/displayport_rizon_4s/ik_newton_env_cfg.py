@@ -431,7 +431,8 @@ def _configure_osc_control(env_cfg) -> None:
     env_cfg.actions.arm_action = _flange_osc_action()
     _enable_task_space_diagnostics(env_cfg)
     env_cfg.events.randomize_arm_pd_gains = None
-    env_cfg.events.randomize_arm_joint_friction = None
+    if not env_cfg.osc_randomize_arm_joint_friction:
+        env_cfg.events.randomize_arm_joint_friction = None
     for actuator_name in ("shoulder", "elbow", "wrist"):
         env_cfg.scene.robot.actuators[actuator_name].stiffness = 0.0
         env_cfg.scene.robot.actuators[actuator_name].damping = 0.0
@@ -442,6 +443,9 @@ class Rizon4sGravDisplayportInsertionDomainRandomizedNewtonOSCEnvCfg(
     joint_pos_env_cfg.Rizon4sGravDisplayportInsertionDomainRandomizedNoJointVelEnvCfg
 ):
     """Nominal-kinematics Newton task using flange operational-space control."""
+
+    osc_randomize_arm_joint_friction: bool = False
+    """Whether to preserve arm joint-friction randomization for OSC training."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -465,6 +469,9 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCEnvCfg(
 ):
     """Calibrated Newton task using compliant flange operational-space control."""
 
+    osc_randomize_arm_joint_friction: bool = False
+    """Whether to preserve arm joint-friction randomization for OSC training."""
+
     def __post_init__(self):
         super().__post_init__()
         _configure_osc_control(self)
@@ -479,6 +486,15 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePo
     def __post_init__(self):
         super().__post_init__()
         _use_pose_6d_actor_observation(self, (0.0, 0.0, 0.0))
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DArmFrictionDREnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg
+):
+    """Calibrated flange-pose OSC task that preserves arm joint-friction randomization."""
+
+    osc_randomize_arm_joint_friction: bool = True
 
 
 @configclass

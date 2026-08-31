@@ -1,3 +1,10 @@
+Added
+^^^^^
+
+* Added an explicit ``FlangePose6D-ArmFrictionDR`` calibrated OSC task for
+  reproducing policies trained with arm joint-friction randomization while
+  keeping arm PD-gain randomization disabled.
+
 Fixed
 ^^^^^
 
