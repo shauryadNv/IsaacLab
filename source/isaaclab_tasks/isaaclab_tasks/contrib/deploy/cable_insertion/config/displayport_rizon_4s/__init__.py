@@ -118,3 +118,49 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
     },
 )
+
+# Flexiv Rizon 4s - Newton task space (Operational Space Control)
+gym.register(
+    id="Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-v0",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.task_space_newton_env_cfg:Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg"
+        ),
+    },
+)
+
+# Flexiv Rizon 4s - Newton task space Play
+gym.register(
+    id="Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-Play-v0",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.task_space_newton_env_cfg:Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg_PLAY"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg"
+        ),
+    },
+)
+
+# Flexiv Rizon 4s - Newton task space ROS Inference
+gym.register(
+    id="Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0",
+    entry_point=_INSERTION_ENV_ENTRY,
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.task_space_newton_ros_inference_env_cfg:"
+            "Rizon4sTaskSpaceNewtonDisplayportInsertionROSInferenceEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg"
+        ),
+    },
+)

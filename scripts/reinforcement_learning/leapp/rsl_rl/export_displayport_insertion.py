@@ -33,7 +33,7 @@ import contextlib
 import os
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
@@ -54,6 +54,21 @@ _TASK_SPACE_INPUT_SPEC = (
     ("socket_kp_pos", slice(9, 12), ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
     ("socket_kp_rot_6d", slice(12, 18), _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
 )
+
+# Observation-term metadata used to construct a contract for configurations that
+# explicitly publish their trained actor order. The PhysX task has no such metadata
+# and continues to use ``_TASK_SPACE_INPUT_SPEC`` byte-for-byte.
+_TASK_SPACE_INPUT_TERM_METADATA = {
+    "eef_pos": (3, ["x", "y", "z"], "eef_pose_pos", "state/body/position"),
+    "eef_rot_6d": (6, _ROT6D_ELEMENTS, "eef_pose_rot6d", "state/body/rotation_6d"),
+    "socket_kp_pos": (3, ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
+    "socket_kp_rot_6d": (6, _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
+    "socket_pos": (3, ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
+    "tool_pos": (3, ["x", "y", "z"], "flange_pose_pos", "state/body/position"),
+    "tool_rot_6d": (6, _ROT6D_ELEMENTS, "flange_pose_rot6d", "state/body/rotation_6d"),
+    "socket_rot_6d": (6, _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
+}
+
 
 _ACTION_ELEMENT_NAMES = [
     "delta_x",
@@ -83,9 +98,8 @@ def parse_export_args(argv: list[str] | None = None) -> tuple[argparse.Namespace
         action="store_true",
         help=(
             "Export the task-space I/O contract used by Isaac ROS Deploy: split the 18D actor"
-            " observation into named pose tensors (eef_pos, eef_rot_6d, socket_kp_pos,"
-            " socket_kp_rot_6d) and emit the clipped, scaled Cartesian delta as 'arm_action'."
-            " Requires an operational-space action term exposing position/orientation scales."
+            " observation using the task's declared order and emit the clipped, scaled Cartesian"
+            " delta as 'arm_action'. Requires an OSC action exposing position/orientation scales."
         ),
     )
     return finalize_export_args(parser, argv)
@@ -101,12 +115,51 @@ def task_space_policy_obs(obs):
     return policy_obs
 
 
-def split_and_annotate_task_space_obs(graph_name: str, policy_obs):
+def resolve_task_space_input_spec(env_cfg):
+    """Resolve task-space input slices from optional environment metadata.
+
+    Configurations without ``task_space_obs_order`` retain the original PhysX
+    EEF-first contract. Configurations that define it must name known, unique
+    observation terms whose concatenated width is exactly 18.
+    """
+    obs_order = getattr(env_cfg, "task_space_obs_order", None)
+    if obs_order is None:
+        return _TASK_SPACE_INPUT_SPEC
+    if isinstance(obs_order, (str, bytes)) or not isinstance(obs_order, Sequence):
+        raise TypeError("env_cfg.task_space_obs_order must be a sequence of observation-term names.")
+
+    input_spec = []
+    seen_terms = set()
+    start = 0
+    for term_name in obs_order:
+        if not isinstance(term_name, str):
+            raise TypeError("env_cfg.task_space_obs_order entries must be strings.")
+        if term_name in seen_terms:
+            raise ValueError(f"Duplicate task-space observation term: {term_name!r}.")
+        try:
+            width, element_names, source, kind = _TASK_SPACE_INPUT_TERM_METADATA[term_name]
+        except KeyError as exc:
+            known_terms = ", ".join(sorted(_TASK_SPACE_INPUT_TERM_METADATA))
+            raise ValueError(f"Unknown task-space observation term {term_name!r}. Known terms: {known_terms}.") from exc
+
+        stop = start + width
+        input_spec.append((term_name, slice(start, stop), element_names, source, kind))
+        seen_terms.add(term_name)
+        start = stop
+
+    if start != 18:
+        raise ValueError(
+            f"env_cfg.task_space_obs_order must describe exactly 18 values; resolved {start} from {list(obs_order)!r}."
+        )
+    return tuple(input_spec)
+
+
+def split_and_annotate_task_space_obs(graph_name: str, policy_obs, input_spec=_TASK_SPACE_INPUT_SPEC):
     """Expose the exact 18D trained observation as four Deploy-facing input tensors."""
     from leapp.utils.tensor_description import TensorSemantics
 
     parts = []
-    for name, index, element_names, source, kind in _TASK_SPACE_INPUT_SPEC:
+    for name, index, element_names, source, kind in input_spec:
         parts.append(
             _export.annotate.input_tensors(
                 graph_name,
@@ -174,6 +227,10 @@ def export_displayport_agent(
 
     agent_cfg = _export._update_agent_cfg_from_export_args(agent_cfg, args_cli)
     env_cfg.scene.num_envs = 1
+
+    task_space_input_spec = None
+    if args_cli.task_space_contract:
+        task_space_input_spec = resolve_task_space_input_spec(env_cfg)
 
     agent_cfg = _export.handle_deprecated_rsl_rl_cfg(agent_cfg, _export.installed_version)
 
@@ -287,7 +344,9 @@ def export_displayport_agent(
                 if args_cli.task_space_contract:
                     policy_obs = task_space_policy_obs(obs).to(dtype=next(policy.parameters()).dtype)
                     obs_for_policy = obs.clone()
-                    obs_for_policy["policy"] = split_and_annotate_task_space_obs(graph_name, policy_obs)
+                    obs_for_policy["policy"] = split_and_annotate_task_space_obs(
+                        graph_name, policy_obs, input_spec=task_space_input_spec
+                    )
                 else:
                     obs_for_policy = obs
 
@@ -317,7 +376,7 @@ def export_displayport_agent(
 
                 if args_cli.task_space_contract:
                     processed_action = _export.torch.clamp(actions, -1.0, 1.0) * task_space_scale
-                    export_task_space_action(graph_name, processed_action, args_cli.export_method)
+                    export_task_space_action(graph_name, processed_action, export_method)
                     # Refresh inputs without invoking the action manager, which would apply the
                     # raw (unscaled) action and desynchronise the traced graph.
                     obs = env.get_observations()

@@ -47,3 +47,11 @@ class Rizon4sGravDisplayportInsertionRNNPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.008,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg(Rizon4sGravDisplayportInsertionRNNPPORunnerCfg):
+    """RSL-RL runner for the validated Newton task-space training profile."""
+
+    max_iterations = 1000
+    experiment_name = "displayport_insertion_rizon4s_newton_osc"

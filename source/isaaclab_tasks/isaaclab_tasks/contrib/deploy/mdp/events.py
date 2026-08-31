@@ -577,7 +577,7 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         if len(eef_indices) == 0:
             raise ValueError(f"End effector body '{self.end_effector_body_name}' not found in robot")
         self.eef_idx = eef_indices[0]
-        self.jacobi_body_idx = self.eef_idx - 1
+        self.jacobi_body_idx = self.eef_idx - 1 if self.robot_asset.is_fixed_base else self.eef_idx
 
         all_joints, _ = self.robot_asset.find_joints([".*"])
         self.all_joints = all_joints
@@ -603,36 +603,7 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         grasp_offsets = self.grasp_offsets_buffer[:num_reset_envs]
         grasp_rot_offset_tensor = self.grasp_rot_offset_tensor[env_ids]
 
-        # One-shot debug log to confirm the event fires and report IK convergence.
-        # Remove or guard once the grasp wiring is verified.
-        debug_first_call = not getattr(self, "_debug_printed", False)
-        if debug_first_call:
-            self._debug_printed = True
-            target_object_dbg: RigidObject = env.scene[self.target_object_name]
-            init_obj_pos = wp.to_torch(target_object_dbg.data.root_link_pos_w)[env_ids][0].tolist()
-            init_obj_quat = wp.to_torch(target_object_dbg.data.root_link_quat_w)[env_ids][0].tolist()
-            init_eef_pos = wp.to_torch(self.robot_asset.data.body_pos_w)[env_ids, self.eef_idx][0].tolist()
-            init_eef_quat = wp.to_torch(self.robot_asset.data.body_quat_w)[env_ids, self.eef_idx][0].tolist()
-            print(
-                f"[GRASP-DBG] set_robot_to_object_grasp_pose fired:"
-                f" target={self.target_object_name!r} num_reset_envs={num_reset_envs}"
-                f" eef_idx={self.eef_idx} num_arm_joints={self.num_arm_joints}\n"
-                f"           grasp_offset={self.grasp_offset_tensor.tolist()}"
-                f" grasp_rot_offset(xyzw)={self.grasp_rot_offset_tensor[0].tolist()}"
-                f" hand_close_width={self.hand_close_width}\n"
-                f"           init_obj_pos_w={init_obj_pos}"
-                f" init_obj_quat(xyzw)={init_obj_quat}\n"
-                f"           init_eef_pos_w={init_eef_pos}"
-                f" init_eef_quat(xyzw)={init_eef_quat}"
-            )
-
-        last_pos_err = None
-        last_rot_err = None
-        converged_at = -1
-        last_target_pos = None
-        last_target_quat = None
-
-        for _iter in range(max_iterations):
+        for _ in range(max_iterations):
             joint_pos = wp.to_torch(self.robot_asset.data.joint_pos)[env_ids].clone()
             joint_vel = wp.to_torch(self.robot_asset.data.joint_vel)[env_ids].clone()
 
@@ -658,9 +629,6 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             eef_pos = wp.to_torch(self.robot_asset.data.body_pos_w)[env_ids, self.eef_idx]
             eef_quat = wp.to_torch(self.robot_asset.data.body_quat_w)[env_ids, self.eef_idx]
 
-            last_target_pos = grasp_object_pos_world.clone()
-            last_target_quat = grasp_object_quat.clone()
-
             pos_error, axis_angle_error = fc.get_pose_error(
                 fingertip_midpoint_pos=eef_pos,
                 fingertip_midpoint_quat=eef_quat,
@@ -673,15 +641,11 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
 
             pos_error_norm = torch.linalg.norm(pos_error, dim=-1)
             rot_error_norm = torch.linalg.norm(axis_angle_error, dim=-1)
-            last_pos_err = pos_error_norm
-            last_rot_err = rot_error_norm
-
             if torch.all(pos_error_norm < pos_threshold) and torch.all(rot_error_norm < rot_threshold):
-                converged_at = _iter
                 break
 
-            jacobians = wp.to_torch(self.robot_asset.root_view.get_jacobians()).clone()
-            jacobian = jacobians[env_ids, self.jacobi_body_idx, :, :]
+            jacobians = self.robot_asset.data.body_link_jacobian_w.torch.clone()
+            jacobian = jacobians[env_ids, self.jacobi_body_idx, :, self.robot_asset.num_base_dofs :]
 
             delta_dof_pos = fc._get_delta_dof_pos(
                 delta_pose=delta_hand_pose,
@@ -712,11 +676,7 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             self.robot_asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
             self.robot_asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
 
-        # Snap the held object to the achieved gripper pose so the gripper actually
-        # holds it after closing. Without this, any IK residual error or USD
-        # geometry offset leaves the object outside the finger gap and gravity drops
-        # Snap the held object to the achieved gripper pose so the gripper
-        # actually holds it after closing.
+        # Snap the held object to the achieved gripper pose before closing the gripper.
         held_object = env.scene[self.target_object_name]
         achieved_hand_pos = wp.to_torch(self.robot_asset.data.body_pos_w)[env_ids, self.eef_idx].clone()
         achieved_hand_quat = wp.to_torch(self.robot_asset.data.body_quat_w)[env_ids, self.eef_idx].clone()
@@ -737,26 +697,6 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         zero_velocity = torch.zeros((len(env_ids), 6), device=env.device, dtype=torch.float32)
         held_object.write_root_pose_to_sim(new_root_pose, env_ids=env_ids)
         held_object.write_root_velocity_to_sim(zero_velocity, env_ids=env_ids)
-
-        if debug_first_call:
-            pos_err_max = float(last_pos_err.max().item()) if last_pos_err is not None else float("nan")
-            rot_err_max = float(last_rot_err.max().item()) if last_rot_err is not None else float("nan")
-            tgt_pos0 = target_obj_pos[0].tolist()
-            tgt_quat0 = target_obj_quat[0].tolist()
-            eef_pos0 = achieved_hand_pos[0].tolist()
-            eef_quat0 = achieved_hand_quat[0].tolist()
-            ik_target_pos0 = last_target_pos[0].tolist() if last_target_pos is not None else None
-            ik_target_quat0 = last_target_quat[0].tolist() if last_target_quat is not None else None
-            print(
-                f"[GRASP-DBG] IK done: converged_at_iter={converged_at}\n"
-                f"           max_pos_err={pos_err_max:.6f} m, max_rot_err={rot_err_max:.6f} rad\n"
-                f"           IK_target_pos_w[0]={ik_target_pos0}\n"
-                f"           IK_target_quat(xyzw)[0]={ik_target_quat0}\n"
-                f"           achieved_eef_pos_w[0]={eef_pos0}\n"
-                f"           achieved_eef_quat(xyzw)[0]={eef_quat0}\n"
-                f"           snapped_obj_pos_w[0]={tgt_pos0}\n"
-                f"           snapped_obj_quat(xyzw)[0]={tgt_quat0}"
-            )
 
         joint_vel = torch.zeros_like(wp.to_torch(self.robot_asset.data.joint_vel)[env_ids])
         joint_pos = wp.to_torch(self.robot_asset.data.joint_pos)[env_ids].clone()
