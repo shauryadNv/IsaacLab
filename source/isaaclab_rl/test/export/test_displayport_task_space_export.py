@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EXPORT_SCRIPT = (
@@ -86,3 +87,27 @@ def test_task_space_input_spec_rejects_invalid_metadata(obs_order, message):
 
     with pytest.raises(ValueError, match=message):
         export_module.resolve_task_space_input_spec(SimpleNamespace(task_space_obs_order=obs_order))
+
+
+def test_task_space_action_matches_runner_clip_then_osc_scale():
+    """Deployment must reproduce the model-999 raw-action transform."""
+    export_module = _load_export_module()
+    actions = torch.tensor([[-2.0, -1.0, -0.5, 0.5, 1.0, 2.0]])
+    scale = torch.full((1, 6), 0.025)
+
+    processed = export_module.process_task_space_action(actions, scale, clip_actions=1.0)
+
+    torch.testing.assert_close(
+        processed,
+        torch.tensor([[-0.025, -0.025, -0.0125, 0.0125, 0.025, 0.025]]),
+    )
+
+
+def test_task_space_action_can_leave_runner_action_unclipped():
+    """A disabled runner clip must not add an exporter-only clamp."""
+    export_module = _load_export_module()
+    actions = torch.tensor([[-2.0, 2.0]])
+
+    processed = export_module.process_task_space_action(actions, torch.full((1, 2), 0.025), clip_actions=None)
+
+    torch.testing.assert_close(processed, torch.tensor([[-0.05, 0.05]]))

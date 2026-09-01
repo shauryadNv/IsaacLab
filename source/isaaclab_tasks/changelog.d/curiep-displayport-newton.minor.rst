@@ -1,7 +1,7 @@
 Added
 ^^^^^
 
-* Added a validated Newton point-SDF operational-space-control training,
+* Added a Newton point-SDF operational-space-control training,
   playback, and ROS-inference profile for DisplayPort insertion.
 
 Fixed

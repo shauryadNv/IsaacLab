@@ -766,9 +766,10 @@ def _replace_policy_obs_vector(obs, flat: np.ndarray, num_envs: int, device):
                     f"--init_obs_csv obs dim {flat_t.numel()} != live policy obs dim {pol.shape[-1]}. "
                     "Use a CSV recorded with the same task / observation layout."
                 )
-            # TensorDict supports item assignment; fall back to clone+set.
-            with contextlib.suppress(Exception):
-                obs = obs.clone()
+            # Clone TensorDict-like containers before replacing their policy entry.
+            clone = getattr(obs, "clone", None)
+            if clone is not None:
+                obs = clone()
             obs["policy"] = tiled.to(device=pol.device if torch.is_tensor(pol) else device)
             return obs
 
@@ -1090,8 +1091,8 @@ class LeappDisplayportPolicy:
         inputs = self._gather_inputs()
 
         # Capture rnn_in from feedback buffers BEFORE inference updates them.
-        rnn_in_vec = self._read_feedback_packed()
-        self.last_rnn_in = None if rnn_in_vec is None else rnn_in_vec.copy()
+        rnn_input = self._read_feedback_packed()
+        self.last_rnn_in = None if rnn_input is None else rnn_input.copy()
 
         with torch.inference_mode():
             self.last_outputs = self.inference.run_policy(inputs)
@@ -1495,8 +1496,8 @@ class InferenceLogger:
             # Legacy path: only post-forward state was provided.
             rnn_out = _pack_rnn_state(lstm_h, lstm_c) if rnn_out is None else rnn_out
         if rnn_in is not None:
-            rnn_in_vec = np.asarray(rnn_in, dtype=np.float64).reshape(-1)
-            print(f"[rnn_in] dim={rnn_in_vec.size} ||rnn_in||={np.linalg.norm(rnn_in_vec):.4f}")
+            rnn_input = np.asarray(rnn_in, dtype=np.float64).reshape(-1)
+            print(f"[rnn_in] dim={rnn_input.size} ||rnn_in||={np.linalg.norm(rnn_input):.4f}")
         if rnn_out is not None:
             rout = np.asarray(rnn_out, dtype=np.float64).reshape(-1)
             print(f"[rnn_out] dim={rout.size} ||rnn_out||={np.linalg.norm(rout):.4f}")
