@@ -41,7 +41,7 @@ The task follows the same structure as the gear assembly deploy environments:
 - ``isaaclab_tasks/contrib/deploy/cable_insertion/config/displayport_rizon_4s/`` — Flexiv Rizon 4s + Grav robot-specific overrides and gym registrations
 - ``isaaclab_tasks/contrib/deploy/cable_insertion/config/displayport_rizon_4s/joint_pos_env_cfg.py`` — joint-space (relative joint position) environment
 - ``isaaclab_tasks/contrib/deploy/cable_insertion/config/displayport_rizon_4s/task_space_env_cfg.py`` — task-space (operational space control) environment
-- ``isaaclab_tasks/contrib/deploy/cable_insertion/config/displayport_rizon_4s/task_space_newton_env_cfg.py`` — validated Newton point-SDF task-space environment
+- ``isaaclab_tasks/contrib/deploy/cable_insertion/config/displayport_rizon_4s/task_space_newton_env_cfg.py`` — Newton point-SDF task-space environment
 - ``isaaclab_tasks/contrib/deploy/cable_insertion/config/displayport_rizon_4s/task_space_newton_ros_inference_env_cfg.py`` — matching Newton deployment contract
 - ``scripts/reinforcement_learning/train.py`` — unified trainer (pass ``--rl_library rsl_rl``)
 - ``scripts/reinforcement_learning/deploy/play_displayport_insertion.py`` — DisplayPort raw-checkpoint inference, joint-space LEAPP validation, and CSV logging
@@ -80,7 +80,7 @@ represent *your* robot — particularly its kinematic parameters, which may vary
 joint-space training, where the policy commands joints directly. Flexiv's
 `flexiv_calibration <https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.3/flexiv_calibration>`__
 workflow exports a calibrated robot description for a specific arm; convert the result to USD and set
-``scene.robot.spawn.usd_path`` in a derived environment configuration. The validated Newton profile uses the
+``scene.robot.spawn.usd_path`` in a derived environment configuration. The Newton profile uses the
 calibrated Rizon 4s USD bundled with this task by default.
 
 **Practical workflow:**
@@ -276,7 +276,7 @@ As with the gear assembly task, policies trained without noise on proprioceptive
 
 The socket pose, by contrast, comes from perception and *is* the observation worth corrupting. The joint-space
 environments apply ±10 mm of reset-sampled uniform noise to ``socket_pos`` by default. The existing PhysX
-task-space environments disable observation noise. The validated Newton profile applies reset-held ±10 mm noise;
+task-space environments disable observation noise. The Newton profile applies reset-held ±10 mm noise;
 change it only together with the perception contract used for deployment.
 
 
@@ -350,13 +350,13 @@ The Flexiv Rizon 4s arm uses lower solver iteration counts for performance, matc
 
 Low plug/socket friction reduces sticking during blade engagement. Gripper finger friction is set to match real grasp behavior.
 
-Validated Newton Point-SDF Profile
+Newton Point-SDF Profile
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use the dedicated Newton task-space profile when training an operational-space policy with the Newton backend.
-It is additive to the existing PhysX environments and reproduces the resolved configuration of the reference
-``model_999.pt`` policy that completed insertion on the real robot. The checkpoint is not bundled; train a new
-policy with the task id below.
+It is additive to the existing PhysX environments and preserves the training and deployment ABI of the reference
+``dp_up_osc_cal_s025_c200s2000/model_999.pt`` policy. The checkpoint is not bundled; train a new policy with the
+task id below.
 
 .. important::
 
@@ -372,11 +372,15 @@ policy with the task id below.
    task id without a shape error and still receive semantically incorrect inputs. Always use a Newton task id for
    a checkpoint trained with the Newton contract.
 
+The ``display_port_*_newton_sdf.usda`` files are small metadata overlays on the versioned DisplayPort geometry
+shipped with this package. They stay next to their relative sublayers so installed-package and offline asset
+resolution are deterministic; a Nucleus dependency is not required for these task-specific schemas.
+
 The Newton actor applies reset-held socket-position noise in ``[-0.01, 0.01]`` m. For parity with the reference
 training run, one scalar is sampled per environment and broadcast across XYZ. Independent per-axis noise is a
 different training distribution. The privileged critic retains all 13 robot joints and has 40 inputs.
 
-.. list-table:: Validated Newton timing and contact settings
+.. list-table:: Newton timing and contact settings
    :widths: 42 23 35
    :header-rows: 1
 
@@ -400,22 +404,19 @@ different training distribution. The privileged critic retains all 13 robot join
      - Newton collision pipeline, not MuJoCo contacts
    * - Solver / integrator
      - Newton / ``implicitfast``
-     - 100 solver and 50 line-search iterations
-   * - Constraint and contact buffers
-     - ``8192`` / ``8192``
-     - matches the reference training run
+     - MJWarp Newton solve method
    * - Contact reduction / triangle-pair capacity
      - enabled / ``2**25``
-     - bounds contact memory pressure
-   * - ``update_data_interval``
-     - ``10``
-     - matches the validated MJWarp profile
+     - scene-wide capacity for the 256-environment per-rank default
 
 This is an MJWarp point-SDF configuration. VBD and hydroelastic SDF are separate experiments and do not reproduce
-the reference checkpoint.
+the reference checkpoint. ``max_triangle_pairs`` is scene-wide: when Newton reports an overflow, reduce the
+per-rank environment count or increase the capacity. Overflow can omit candidate contacts.
 
-The policy emits a six-dimensional relative pose command at the flange origin. Translation and rotation scales
-are both ``0.025``. The OSC stiffness is ``(300, 300, 300, 30, 30, 30)`` with damping ratio ``1.0`` on every axis.
+The policy emits a six-dimensional relative pose command at the flange origin. RSL-RL first clips each raw actor
+output to ``[-1, 1]``; the OSC action then applies ``0.025`` translation and rotation scales. The action-term clip
+is intentionally unset so this transform has only one clipping stage.
+The OSC stiffness is ``(300, 300, 300, 30, 30, 30)`` with damping ratio ``1.0`` on every axis.
 Full inertial-dynamics decoupling is enabled; partial decoupling and null-space control are disabled. Arm joint-PD
 stiffness and damping are zero so OSC supplies the arm effort. Newton rigid-body gravity compensation is enabled
 for the robot, while OSC gravity compensation is disabled to avoid applying it twice.
@@ -432,6 +433,7 @@ selected contact profile even though it is also the Newton task's default:
     ./isaaclab.sh train --rl_library rsl_rl \
         --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0 \
         --num_envs 256 \
+        --seed 126 \
         --max_iterations 1000 \
         presets=newton_sdf
 
@@ -482,7 +484,7 @@ The PhysX Rizon 4s profiles use ``ImplicitActuatorCfg`` with per-joint-group arm
         damping=0.0,
     )
 
-The validated Newton profile intentionally uses the gripper settings from the reference training run instead:
+The Newton profile intentionally uses the gripper settings from the reference training run instead:
 
 - ``gripper_drive`` controls ``finger_joint`` with effort / velocity limits of ``200.0`` / ``2.0``, stiffness /
   damping of ``2000.0`` / ``10.0``, zero friction, and armature ``0.1``.
@@ -490,14 +492,14 @@ The validated Newton profile intentionally uses the gripper settings from the re
   limits of ``20.0`` / ``1.0``, stiffness / damping of ``2000.0`` / ``10.0``, zero friction, and armature ``0.05``.
 - ``hand_hold_width`` and ``hand_close_width`` are both ``-0.1``.
 
-These values are part of the validated Newton configuration; do not substitute the PhysX gripper settings when
+These values are part of the Newton checkpoint contract; do not substitute the PhysX gripper settings when
 reproducing the reference policy.
 
 .. note::
 
    **Flexiv Rizon 4s (PhysX profiles)**: actuator-gain and joint-friction randomization is not included. The Newton
    profile retains additive uniform arm-joint friction randomization in ``[0.0, 0.15]`` and disables PD-gain
-   randomization, matching the validated training run.
+   randomization, preserving the checkpoint contract.
 
 .. _taskspace-action-space:
 
@@ -560,7 +562,7 @@ target. What differs is the space that delta lives in.
       * The arm's joint PD gains are **zeroed** (``actuators[...].stiffness = 0.0``); all compliance comes from the
         task-space stiffness above, so the controller — not the joint servo — sets the contact behavior.
       * In the PhysX task-space profile, the action is applied at the **flange**, while ``eef_pos`` is observed at
-        the **TCP**. The validated Newton profile instead observes and controls at the **flange origin**. The
+        the **TCP**. The Newton profile instead observes and controls at the **flange origin**. The
         real-robot bridge must reproduce the frame contract of the selected backend.
 
 **Action scale:** ``0.025`` in both cases — read as radians per joint per step in joint space, and as metres /
@@ -822,7 +824,7 @@ Defined in ``config/displayport_rizon_4s/agents/rsl_rl_ppo_cfg.py``.
      - Effect
    * - ``max_iterations``
      - ``1500`` (PhysX); ``1000`` (Newton reference)
-     - The validated Newton policy is the final ``model_999.pt`` checkpoint.
+     - The reference Newton policy is the final ``model_999.pt`` checkpoint.
    * - ``num_steps_per_env``
      - ``512``
      - Rollout length per iteration. Affects curriculum annealing rate (tied to ``anneal_end_iter``).
@@ -859,7 +861,7 @@ exported and deployed with Isaac ROS without swapping configurations.
    * - Environment ID
      - Purpose
    * - ``Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0``
-     - **Validated Newton task-space training and deployment — recommended Newton default.**
+     - **Newton task-space training and deployment — recommended Newton default.**
    * - ``Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-v0``
      - Newton task-space training without deployment metadata
    * - ``Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-Play-v0``
@@ -989,8 +991,9 @@ when ``--visualizer`` is omitted; there is no ``--headless`` argument on the uni
           ./isaaclab.sh train --rl_library rsl_rl \
               --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0 \
               --num_envs 256 \
+              --seed 126 \
               --max_iterations 1000 \
-              --video --video_length 200 --video_interval 76800 \
+              --video --video_length 222 --video_interval 76800 \
               presets=newton_sdf
 
 **Multi-GPU (distributed) training** — for example on a cluster / OSMO workflow (substitute any task id above):
@@ -1012,10 +1015,10 @@ deployment contract. Swap in the plain ``...-NoJointVel-v0`` / ``...-TaskSpace-v
 **Command breakdown:**
 
 - ``--rl_library rsl_rl``: Selects the RSL-RL backend (required by the unified trainer)
-- ``--num_envs 256``: Runs 256 parallel environments
+- ``--num_envs 256``: Runs 256 parallel environments per rank (the Newton-safe default)
 - Omitting ``--visualizer``: Uses headless execution by default for throughput
-- ``--video_length 200``: One episode per video (``episode_length_s / (sim.dt * decimation)`` ≈ 200 steps)
-- ``--video_interval 76800``: Records a video every 76,800 environment steps (~every 150 iterations with 512 steps/env)
+- ``--video_length 200`` / ``222``: Approximately one full episode for PhysX / Newton respectively
+- ``--video_interval 76800``: Records every 150 iterations with 512 steps per environment
 - ``--distributed``: Required when launching under ``torch.distributed.run``
 
 Training uses a recurrent PPO agent (LSTM, 512 steps per environment). Existing PhysX profiles default to 1,500
@@ -1023,7 +1026,10 @@ iterations; the Newton reference defaults to 1,000. Videos are saved under ``log
 
 .. note::
 
-    **GPU Memory Considerations**: The default configuration uses 4096 environments in the base config but 256 is recommended for most GPUs. The plug and socket SDF collision meshes and high rigid-body solver counts increase GPU memory usage compared to primitive-shape tasks. Reduce ``num_envs`` or ``solver_position_iteration_count`` on the plug/socket assets if you encounter out-of-memory errors.
+    **GPU and contact-capacity considerations**: PhysX keeps the base 4,096-environment default; the Newton task
+    defaults to 256 environments per rank. Newton collision candidate capacity is scene-wide. If you increase the
+    Newton environment count, also size ``max_triangle_pairs`` from observed warnings; overflow can omit candidate
+    contacts. Reduce ``num_envs`` for out-of-memory or overflow failures.
 
 **Monitoring Training Progress with TensorBoard:**
 
@@ -1033,7 +1039,7 @@ For PhysX profiles:
 
     ./isaaclab.sh -p -m tensorboard.main --logdir logs/rsl_rl/displayport_insertion_rizon4s
 
-For the validated Newton profile:
+For the Newton profile:
 
 .. code-block:: bash
 
@@ -1046,7 +1052,7 @@ Monitor ``Metrics/success_rate`` and reward curves to confirm learning. The curr
 Choosing a Control Space
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The control spaces share the same algorithm, reward, and curriculum. The PhysX profiles run at 30 Hz; the validated
+The control spaces share the same algorithm, reward, and curriculum. The PhysX profiles run at 30 Hz; the Newton
 Newton profile runs at approximately 33.3 Hz.
 
 .. list-table::

@@ -23,6 +23,17 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
+def _body_link_jacobian_for_ik(asset: Articulation, env_ids: torch.Tensor, body_idx: int) -> torch.Tensor:
+    """Select an end-effector Jacobian with only actuated-joint columns."""
+    jacobian_body_idx = body_idx - 1 if asset.is_fixed_base else body_idx
+    return asset.data.body_link_jacobian_w.torch[
+        env_ids,
+        jacobian_body_idx,
+        :,
+        asset.num_base_dofs :,
+    ]
+
+
 class randomize_gear_type(ManagerTermBase):
     """Randomize and manage the gear type being used for each environment.
 
@@ -201,9 +212,6 @@ class set_robot_to_grasp_pose(ManagerTermBase):
             raise ValueError(f"End effector body '{self.end_effector_body_name}' not found in robot")
         self.eef_idx = eef_indices[0]
 
-        # Find jacobian body index (for fixed-base robots, subtract 1)
-        self.jacobi_body_idx = self.eef_idx - 1
-
         # Find all joints once
         all_joints, all_joints_names = self.robot_asset.find_joints([".*"])
         self.all_joints = all_joints
@@ -327,11 +335,7 @@ class set_robot_to_grasp_pose(ManagerTermBase):
             if torch.all(pos_error_norm < pos_threshold) and torch.all(rot_error_norm < rot_threshold):
                 break
 
-            # Solve IK using jacobian. ``body_link_jacobian_w`` prepends ``num_base_dofs``
-            # floating-base columns on the DoF axis (0 for fixed-base, 6 for floating-base);
-            # slice past them so the column axis aligns with the actuated-joint state.
-            jacobians = self.robot_asset.data.body_link_jacobian_w.torch.clone()
-            jacobian = jacobians[env_ids, self.jacobi_body_idx, :, self.robot_asset.num_base_dofs :]
+            jacobian = _body_link_jacobian_for_ik(self.robot_asset, env_ids, self.eef_idx)
 
             delta_dof_pos = fc._get_delta_dof_pos(
                 delta_pose=delta_hand_pose,
@@ -577,7 +581,6 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         if len(eef_indices) == 0:
             raise ValueError(f"End effector body '{self.end_effector_body_name}' not found in robot")
         self.eef_idx = eef_indices[0]
-        self.jacobi_body_idx = self.eef_idx - 1 if self.robot_asset.is_fixed_base else self.eef_idx
 
         all_joints, _ = self.robot_asset.find_joints([".*"])
         self.all_joints = all_joints
@@ -644,8 +647,7 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             if torch.all(pos_error_norm < pos_threshold) and torch.all(rot_error_norm < rot_threshold):
                 break
 
-            jacobians = self.robot_asset.data.body_link_jacobian_w.torch.clone()
-            jacobian = jacobians[env_ids, self.jacobi_body_idx, :, self.robot_asset.num_base_dofs :]
+            jacobian = _body_link_jacobian_for_ik(self.robot_asset, env_ids, self.eef_idx)
 
             delta_dof_pos = fc._get_delta_dof_pos(
                 delta_pose=delta_hand_pose,

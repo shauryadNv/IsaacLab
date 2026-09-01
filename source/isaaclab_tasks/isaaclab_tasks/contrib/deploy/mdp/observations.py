@@ -368,6 +368,8 @@ class rigid_object_pos_w(ManagerTermBase):
 
         offset = cfg.params.get("offset", [0.0, 0.0, 0.0])
         self.offset_tensor = torch.tensor(offset, device=env.device, dtype=torch.float32)
+        self._has_offset = any(float(value) != 0.0 for value in offset)
+        self._offset_batch = self.offset_tensor.unsqueeze(0).expand(env.num_envs, -1)
 
         self.identity_quat = (
             torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=env.device, dtype=torch.float32)
@@ -384,9 +386,8 @@ class rigid_object_pos_w(ManagerTermBase):
         obj_pos = wp.to_torch(self.asset.data.root_pos_w)
         obj_quat = wp.to_torch(self.asset.data.root_quat_w)
 
-        if torch.any(self.offset_tensor != 0):
-            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
-            obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, offset_repeated, self.identity_quat)
+        if self._has_offset:
+            obj_pos, _ = combine_frame_transforms(obj_pos, obj_quat, self._offset_batch, self.identity_quat)
 
         return obj_pos - env.scene.env_origins
 
@@ -507,6 +508,8 @@ class eef_pos_w(ManagerTermBase):
 
         offset = cfg.params.get("offset", [0.0, 0.0, 0.0])
         self.offset_tensor = torch.tensor(offset, device=env.device, dtype=torch.float32)
+        self._has_offset = any(float(value) != 0.0 for value in offset)
+        self._offset_batch = self.offset_tensor.unsqueeze(0).expand(env.num_envs, -1)
         self.identity_quat = (
             torch.tensor([[0.0, 0.0, 0.0, 1.0]], device=env.device, dtype=torch.float32)
             .repeat(env.num_envs, 1)
@@ -522,10 +525,9 @@ class eef_pos_w(ManagerTermBase):
     ) -> torch.Tensor:
         body_pos = wp.to_torch(self.robot.data.body_pos_w)[:, self.body_idx, :]
 
-        if torch.any(self.offset_tensor != 0):
+        if self._has_offset:
             body_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
-            offset_repeated = self.offset_tensor.unsqueeze(0).repeat(env.num_envs, 1)
-            body_pos, _ = combine_frame_transforms(body_pos, body_quat, offset_repeated, self.identity_quat)
+            body_pos, _ = combine_frame_transforms(body_pos, body_quat, self._offset_batch, self.identity_quat)
 
         return body_pos - env.scene.env_origins
 

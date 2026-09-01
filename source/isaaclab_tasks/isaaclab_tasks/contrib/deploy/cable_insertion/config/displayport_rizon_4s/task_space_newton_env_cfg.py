@@ -3,11 +3,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Newton OSC configuration for Rizon 4S DisplayPort insertion.
+"""Newton point-SDF OSC configuration for Rizon 4S DisplayPort insertion.
 
-This module contains the validated point-SDF training profile only. It is kept
-separate from :mod:`task_space_env_cfg` because the Newton policy observes the
-flange origin in a different tensor order than the PhysX task-space policy.
+It is separate from :mod:`task_space_env_cfg` because its checkpoint ABI observes
+the flange origin in a different tensor order than the PhysX task-space policy.
 """
 
 import os
@@ -41,14 +40,20 @@ _ARM_JOINTS = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "join
 _OSC_ACTION_SCALE = 0.025
 _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 _OSC_DAMPING_RATIO = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+_NEWTON_NUM_ENVS = 256
+_NEWTON_MAX_TRIANGLE_PAIRS = 2**25
 
+# These small USDA layers apply Newton collision schemas to the versioned
+# DisplayPort geometry already shipped in this package. Keeping each layer next
+# to its relative sublayer makes installed-package and offline resolution
+# deterministic without duplicating the underlying geometry.
 _NEWTON_PLUG_USD_PATH = os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda")
 _NEWTON_SOCKET_USD_PATH = os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda")
 
 
 @configclass
 class DisplayportNewtonPhysicsCfg(PresetCfg):
-    """Validated Newton point-SDF physics profile for DisplayPort insertion."""
+    """Newton point-SDF physics profile for DisplayPort insertion."""
 
     newton_sdf: NewtonCfg = NewtonCfg(
         solver_cfg=MJWarpSolverCfg(
@@ -66,7 +71,10 @@ class DisplayportNewtonPhysicsCfg(PresetCfg):
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
             reduce_contacts=True,
-            max_triangle_pairs=2**25,
+            # Scene-wide candidate-pair capacity for the 256-environment default.
+            # If this overflows, Newton warns and may omit candidate contacts;
+            # increase it when increasing environment count or mesh complexity.
+            max_triangle_pairs=_NEWTON_MAX_TRIANGLE_PAIRS,
         ),
         num_substeps=20,
         collision_decimation=10,
@@ -83,7 +91,7 @@ class NewtonTaskSpaceObservationsCfg:
 
     @configclass
     class PolicyCfg(ObsGroup):
-        """Actor observations in the exact validated 18-dimensional order."""
+        """Actor observations in the 18-dimensional checkpoint ABI order."""
 
         socket_pos = ObsTerm(
             func=deploy_mdp.rigid_object_pos_w,
@@ -110,7 +118,7 @@ class NewtonTaskSpaceObservationsCfg:
             self.concatenate_terms = True
 
     policy: PolicyCfg = PolicyCfg()
-    # Keep every robot joint in the privileged critic, matching the validated
+    # Keep every robot joint in the privileged critic to preserve the
     # checkpoint's 40-dimensional critic input.
     critic: ObservationsCfg.CriticCfg = ObservationsCfg.CriticCfg()
 
@@ -136,7 +144,7 @@ class NewtonTaskSpaceEventCfg(TaskSpaceEventCfg):
 
 @configclass
 class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplayportInsertionEnvCfg):
-    """Validated Newton point-SDF OSC training configuration.
+    """Newton point-SDF OSC training configuration.
 
     The actor contract is ``socket_pos, flange_pos, flange_rot_6d,
     socket_rot_6d``. This differs from the TCP-first PhysX task-space contract,
@@ -151,6 +159,9 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
         # 200 Hz, and 33.3 Hz respectively.
         self.sim.dt = 0.01
         self.sim.physics = DisplayportNewtonPhysicsCfg()
+        # The collision candidate-pair capacity is scene-wide and supports this
+        # per-rank default. Scale the capacity when increasing this value.
+        self.scene.num_envs = _NEWTON_NUM_ENVS
         self.decimation = 3
         self.sim.render_interval = self.decimation
 
@@ -160,6 +171,9 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
         self.observations = NewtonTaskSpaceObservationsCfg()
         self.task_space_obs_order = ["socket_pos", "tool_pos", "tool_rot_6d", "socket_rot_6d"]
 
+        # RSL-RL clips raw actor outputs to +/-1 before OSC applies these scales.
+        # Keep the action-term clip unset so the checkpoint contract has one
+        # effective clipping stage and cannot acquire a latent +/-0.5 limit.
         self.actions.arm_action = deploy_mdp.DeployOperationalSpaceControllerActionCfg(
             asset_name="robot",
             joint_names=_ARM_JOINTS,
@@ -176,33 +190,26 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
                 nullspace_control="none",
             ),
             nullspace_joint_pos_target="none",
+            clip=None,
             position_scale=_OSC_ACTION_SCALE,
             orientation_scale=_OSC_ACTION_SCALE,
         )
 
-        self.events = NewtonTaskSpaceEventCfg()
+        # Retain the fully wired base events and replace only Newton-specific
+        # randomization terms. Replacing the group would duplicate grasp wiring.
+        newton_events = NewtonTaskSpaceEventCfg()
+        self.events.randomize_arm_joint_friction = newton_events.randomize_arm_joint_friction
+        self.events.randomize_arm_pd_gains = None
         self.events.plug_physics_material.params["static_friction_range"] = (3.0, 3.0)
         self.events.plug_physics_material.params["dynamic_friction_range"] = (3.0, 3.0)
         self.events.robot_physics_material.params["static_friction_range"] = (1.0, 1.0)
         self.events.robot_physics_material.params["dynamic_friction_range"] = (1.0, 1.0)
-
-        grasp_params = self.events.set_robot_to_grasp_pose.params
-        grasp_params["end_effector_body_name"] = self.end_effector_body_name
-        grasp_params["num_arm_joints"] = self.num_arm_joints
-        grasp_params["grasp_rot_offset"] = self.grasp_rot_offset
-        grasp_params["grasp_offset"] = self.grasp_offset
-        grasp_params["gripper_joint_setter_func"] = self.gripper_joint_setter_func
-        grasp_params["max_iterations"] = 150
 
         # Newton cancels robot-body gravity directly. OSC gravity compensation
         # stays disabled to avoid applying gravity twice.
         self.scene.robot.spawn.usd_path = _RIZON4S_CALIBRATED_USD_PATH
         self.scene.robot.spawn.rigid_props = sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0)
         self.scene.robot.spawn.joint_drive_props = sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False)
-
-        for actuator_name in ("shoulder", "elbow", "wrist"):
-            self.scene.robot.actuators[actuator_name].stiffness = 0.0
-            self.scene.robot.actuators[actuator_name].damping = 0.0
 
         self.scene.robot.actuators["gripper_drive"] = ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],

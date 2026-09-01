@@ -209,6 +209,18 @@ def task_space_action_scale(env_cfg, device, dtype):
     return _export.torch.tensor(scale_values, device=device, dtype=dtype).unsqueeze(0)
 
 
+def process_task_space_action(actions, scale, clip_actions: float | None):
+    """Apply the runner's action clip and the OSC pose-delta scale.
+
+    This mirrors :class:`RslRlVecEnvWrapper`: clipping is a runner contract,
+    while the OSC action term applies the Cartesian position and rotation scales.
+    """
+    if clip_actions is not None:
+        clip_actions = float(clip_actions)
+        actions = actions.clamp(-clip_actions, clip_actions)
+    return actions * scale
+
+
 def export_displayport_agent(
     args_cli: argparse.Namespace,
     env_cfg,
@@ -375,7 +387,7 @@ def export_displayport_agent(
                     )
 
                 if args_cli.task_space_contract:
-                    processed_action = _export.torch.clamp(actions, -1.0, 1.0) * task_space_scale
+                    processed_action = process_task_space_action(actions, task_space_scale, agent_cfg.clip_actions)
                     export_task_space_action(graph_name, processed_action, export_method)
                     # Refresh inputs without invoking the action manager, which would apply the
                     # raw (unscaled) action and desynchronise the traced graph.
