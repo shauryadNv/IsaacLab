@@ -559,8 +559,9 @@ target. What differs is the space that delta lives in.
 
       * The arm's joint PD gains are **zeroed** (``actuators[...].stiffness = 0.0``); all compliance comes from the
         task-space stiffness above, so the controller — not the joint servo — sets the contact behavior.
-      * The action is applied at the **flange**, while ``eef_pos`` is observed at the **TCP**. Observation and
-        control therefore use different frames by design; the real-robot bridge must reproduce that split.
+      * In the PhysX task-space profile, the action is applied at the **flange**, while ``eef_pos`` is observed at
+        the **TCP**. The validated Newton profile instead observes and controls at the **flange origin**. The
+        real-robot bridge must reproduce the frame contract of the selected backend.
 
 **Action scale:** ``0.025`` in both cases — read as radians per joint per step in joint space, and as metres /
 radians per step in task space.
@@ -988,6 +989,7 @@ when ``--visualizer`` is omitted; there is no ``--headless`` argument on the uni
           ./isaaclab.sh train --rl_library rsl_rl \
               --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0 \
               --num_envs 256 \
+              --max_iterations 1000 \
               --video --video_length 200 --video_interval 76800 \
               presets=newton_sdf
 
@@ -1025,9 +1027,17 @@ iterations; the Newton reference defaults to 1,000. Videos are saved under ``log
 
 **Monitoring Training Progress with TensorBoard:**
 
+For PhysX profiles:
+
 .. code-block:: bash
 
     ./isaaclab.sh -p -m tensorboard.main --logdir logs/rsl_rl/displayport_insertion_rizon4s
+
+For the validated Newton profile:
+
+.. code-block:: bash
+
+    ./isaaclab.sh -p -m tensorboard.main --logdir logs/rsl_rl/displayport_insertion_rizon4s_newton_osc
 
 Monitor ``Metrics/success_rate`` and reward curves to confirm learning. The curriculum anneals over the first 500 iterations — expect success rate to rise as the at-goal reset probability decreases.
 
