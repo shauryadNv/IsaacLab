@@ -64,17 +64,47 @@ class NewtonVBDManager(NewtonManager):
         ]
 
     @classmethod
+    def _validate_solver_compatibility(cls, solver_cfg: VBDSolverCfg) -> None:
+        """Validate options whose availability depends on the installed Newton version."""
+        solver_kwargs = cls._filter_solver_kwargs(SolverVBD, solver_cfg)
+        if solver_cfg.rigid_compliant_alm is not None and "rigid_compliant_alm" not in solver_kwargs:
+            raise RuntimeError(
+                "VBDSolverCfg.rigid_compliant_alm requires a Newton version whose SolverVBD constructor "
+                "supports that option."
+            )
+
+    @classmethod
+    def _validate_contact_history_config(cls, solver_cfg: VBDSolverCfg) -> None:
+        """Require collision matching when rigid contact history is enabled."""
+        collision_cfg = NewtonManager._collision_cfg
+        contact_matching = getattr(collision_cfg, "contact_matching", "disabled")
+        if solver_cfg.rigid_contact_history and contact_matching not in ("latest", "sticky"):
+            raise ValueError(
+                "VBDSolverCfg.rigid_contact_history requires "
+                "NewtonCollisionPipelineCfg.contact_matching='latest' or 'sticky'."
+            )
+
+    @classmethod
     def _create_solver(cls, model: Model, solver_cfg: VBDSolverCfg) -> SolverVBD:
         """Construct the configured VBD solver."""
+        cls._validate_solver_compatibility(solver_cfg)
         return SolverVBD(model, **cls._filter_solver_kwargs(SolverVBD, solver_cfg))
 
     @classmethod
     def _build_solver(cls, model: Model, solver_cfg: VBDSolverCfg) -> None:
         """Construct VBD and configure its base-manager state."""
-        NewtonManager._solver = cls._create_solver(model, solver_cfg)
+        # Preflight before allocating the collision pipeline or mutating the
+        # shared manager lifecycle state.
+        cls._validate_solver_compatibility(solver_cfg)
+        cls._validate_contact_history_config(solver_cfg)
         NewtonManager._use_single_state = False
         NewtonManager._needs_collision_pipeline = True
         NewtonManager._supports_rigid_body_force_input = not solver_cfg.integrate_with_external_rigid_solver
+        # Contact history is allocated by SolverVBD at construction. Build the
+        # externally managed pipeline first so CUDA graph capture never needs
+        # to resize those history buffers.
+        cls._initialize_contacts()
+        NewtonManager._solver = cls._create_solver(model, solver_cfg)
 
     @classmethod
     def _step_solver(

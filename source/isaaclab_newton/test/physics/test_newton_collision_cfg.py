@@ -23,3 +23,10 @@ def test_hydroelastic_buffer_multipliers_reach_newton():
     assert hydro_cfg.buffer_fraction == 0.125
     assert hydro_cfg.buffer_mult_broad == 8
     assert hydro_cfg.buffer_mult_iso == 2
+
+
+def test_contact_matching_reaches_newton():
+    """The collision-pipeline matching mode should be forwarded unchanged."""
+    cfg = NewtonCollisionPipelineCfg(contact_matching="latest")
+
+    assert cfg.to_pipeline_args()["contact_matching"] == "latest"

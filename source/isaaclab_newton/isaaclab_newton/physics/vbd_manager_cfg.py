@@ -61,6 +61,12 @@ class VBDSolverCfg(NewtonSolverCfg):
     particle_rest_shape_contact_exclusion_radius: float = 0.0
     """Rest-shape separation threshold for filtering contacts [m]."""
 
+    rigid_compliant_alm: bool | None = None
+    """Whether rigid constraints use Newton's unified compliant-ALM formulation.
+
+    ``None`` preserves the installed Newton version's default behavior.
+    """
+
     rigid_contact_k_start: float = 1.0e2
     """Initial stiffness seed for rigid-body contacts [N/m]."""
 

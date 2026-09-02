@@ -136,6 +136,14 @@ class NewtonCollisionPipelineCfg:
     Defaults to ``True`` (same as Newton's default).
     """
 
+    contact_matching: Literal["disabled", "latest", "sticky"] = "disabled"
+    """Contact matching mode used to associate rigid contacts across collision passes.
+
+    Use ``"latest"`` or ``"sticky"`` when VBD rigid contact history is enabled.
+    Non-disabled modes enable deterministic contact packing in Newton and can
+    therefore impose a lower maximum contact-buffer capacity.
+    """
+
     rigid_contact_max: int | None = None
     """Maximum number of rigid contacts to allocate.
 
