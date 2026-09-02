@@ -1312,10 +1312,20 @@ The export writes a ``DisplayPortTaskSpace`` LEAPP package (``.onnx`` graph, ``.
 ``_initial_values.safetensors`` for the recurrent state). The exporter derives named inputs from the selected
 task's observation metadata and rejects invalid 18-D contracts before tracing:
 
-- **PhysX inputs:** ``eef_pos`` (3), ``eef_rot_6d`` (6), ``socket_kp_pos`` (3), ``socket_kp_rot_6d`` (6), plus LSTM state.
-- **Newton inputs:** ``socket_pos`` (3), ``tool_pos`` (3), ``tool_rot_6d`` (6), ``socket_rot_6d`` (6), plus LSTM state.
+- **Deploy inputs:** ``eef_pos`` (3), ``eef_rot_6d`` (6), ``socket_kp_pos`` (3), and
+  ``socket_kp_rot_6d`` (6), plus LSTM state. Both backends expose these canonical port names and sources.
+- **Newton actor order:** ``socket_kp_pos`` (3), ``eef_pos`` (3), ``eef_rot_6d`` (6), then
+  ``socket_kp_rot_6d`` (6). The exporter maps the training terms ``socket_pos``, ``tool_pos``,
+  ``tool_rot_6d``, and ``socket_rot_6d`` to the canonical Deploy ports without changing their slices or
+  reordering the vector presented to the actor.
 - **Output:** ``arm_action`` (6) — a ``pose_rel`` Cartesian delta ``[dx, dy, dz, dθx, dθy, dθz]`` consumed by the
-  task-space bridge (``isaaclab_connection: action:arm_action:pose_rel``).
+  task-space bridge (``isaaclab_connection: action:arm_action:pose_rel``). The exporter accepts either one scalar or
+  three per-axis values for each OSC position and orientation scale and bakes those configured scales into this output.
+
+The Newton policy observes and controls the Flexiv ``flange`` origin with a zero body offset. Configure the hardware
+bridge's EEF pose source and relative-pose action frame to that same origin; do not add a legacy TCP translation (such
+as 0.15 m) unless the observation and action configuration used during training is changed to match it. The socket
+input remains the insertion keypoint, offset 0.0375 m along the socket's local positive x-axis.
 
 For either backend, keep exporter ``--validation_steps`` greater than zero and separately evaluate the original
 ``.pt`` checkpoint in the matching simulator. The current local ``--leapp_model`` adapters are joint-space only;

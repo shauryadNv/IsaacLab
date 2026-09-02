@@ -101,12 +101,39 @@ def _is_leapp_observation_input_consumed(env, name: str) -> bool:
     return name in getattr(real_env, _LEAPP_CONSUMED_OBSERVATION_INPUTS, set())
 
 
-def _pose_rel_action_extra(*, position_scale: float, orientation_scale: float, target_types: Sequence[str]):
+def _axis_scale_values(scale, *, name: str) -> list[float]:
+    """Normalize a scalar or per-axis Cartesian scale to three finite values."""
+    scale_tensor = torch.as_tensor(scale, dtype=torch.float32).flatten()
+    if scale_tensor.numel() == 1:
+        scale_tensor = scale_tensor.repeat(3)
+    elif scale_tensor.numel() != 3:
+        raise ValueError(f"{name} must contain either one or three values; got {scale_tensor.numel()}.")
+    if not bool(torch.isfinite(scale_tensor).all()):
+        raise ValueError(f"{name} must contain only finite values.")
+    return [float(value) for value in scale_tensor.tolist()]
+
+
+def _compact_axis_scale(scale_values: list[float]) -> float | list[float]:
+    """Return a scalar for uniform axes and a list for anisotropic axes."""
+    if len({round(value, 12) for value in scale_values}) == 1:
+        return scale_values[0]
+    return scale_values
+
+
+def _pose_rel_action_extra(
+    *,
+    position_scale: float | Sequence[float],
+    orientation_scale: float | Sequence[float],
+    target_types: Sequence[str],
+):
+    position_scale_values = _axis_scale_values(position_scale, name="position_scale")
+    orientation_scale_values = _axis_scale_values(orientation_scale, name="orientation_scale")
     return {
         "isaaclab_connection": "action:arm_action:pose_rel",
         "target_types": list(target_types),
-        "position_scale": float(position_scale),
-        "orientation_scale": float(orientation_scale),
+        "scale": position_scale_values + orientation_scale_values,
+        "position_scale": _compact_axis_scale(position_scale_values),
+        "orientation_scale": _compact_axis_scale(orientation_scale_values),
     }
 
 
