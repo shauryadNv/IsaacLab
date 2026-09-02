@@ -55,18 +55,18 @@ _TASK_SPACE_INPUT_SPEC = (
     ("socket_kp_rot_6d", slice(12, 18), _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
 )
 
-# Observation-term metadata used to construct a contract for configurations that
-# explicitly publish their trained actor order. The PhysX task has no such metadata
-# and continues to use ``_TASK_SPACE_INPUT_SPEC`` byte-for-byte.
+# Map each training observation term to its Deploy-facing input name and semantics.
+# The input slices still follow the declared training order, so aliases only change
+# the external port contract and never reorder the vector presented to the actor.
 _TASK_SPACE_INPUT_TERM_METADATA = {
-    "eef_pos": (3, ["x", "y", "z"], "eef_pose_pos", "state/body/position"),
-    "eef_rot_6d": (6, _ROT6D_ELEMENTS, "eef_pose_rot6d", "state/body/rotation_6d"),
-    "socket_kp_pos": (3, ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
-    "socket_kp_rot_6d": (6, _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
-    "socket_pos": (3, ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
-    "tool_pos": (3, ["x", "y", "z"], "flange_pose_pos", "state/body/position"),
-    "tool_rot_6d": (6, _ROT6D_ELEMENTS, "flange_pose_rot6d", "state/body/rotation_6d"),
-    "socket_rot_6d": (6, _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
+    "eef_pos": ("eef_pos", 3, ["x", "y", "z"], "eef_pose_pos", "state/body/position"),
+    "eef_rot_6d": ("eef_rot_6d", 6, _ROT6D_ELEMENTS, "eef_pose_rot6d", "state/body/rotation_6d"),
+    "socket_kp_pos": ("socket_kp_pos", 3, ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
+    "socket_kp_rot_6d": ("socket_kp_rot_6d", 6, _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
+    "socket_pos": ("socket_kp_pos", 3, ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
+    "tool_pos": ("eef_pos", 3, ["x", "y", "z"], "eef_pose_pos", "state/body/position"),
+    "tool_rot_6d": ("eef_rot_6d", 6, _ROT6D_ELEMENTS, "eef_pose_rot6d", "state/body/rotation_6d"),
+    "socket_rot_6d": ("socket_kp_rot_6d", 6, _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
 }
 
 
@@ -130,6 +130,7 @@ def resolve_task_space_input_spec(env_cfg):
 
     input_spec = []
     seen_terms = set()
+    seen_input_names = set()
     start = 0
     for term_name in obs_order:
         if not isinstance(term_name, str):
@@ -137,19 +138,27 @@ def resolve_task_space_input_spec(env_cfg):
         if term_name in seen_terms:
             raise ValueError(f"Duplicate task-space observation term: {term_name!r}.")
         try:
-            width, element_names, source, kind = _TASK_SPACE_INPUT_TERM_METADATA[term_name]
+            input_name, width, element_names, source, kind = _TASK_SPACE_INPUT_TERM_METADATA[term_name]
         except KeyError as exc:
             known_terms = ", ".join(sorted(_TASK_SPACE_INPUT_TERM_METADATA))
             raise ValueError(f"Unknown task-space observation term {term_name!r}. Known terms: {known_terms}.") from exc
+        if input_name in seen_input_names:
+            raise ValueError(f"Duplicate Deploy input resolved from task-space observation metadata: {input_name!r}.")
 
         stop = start + width
-        input_spec.append((term_name, slice(start, stop), element_names, source, kind))
+        input_spec.append((input_name, slice(start, stop), element_names, source, kind))
         seen_terms.add(term_name)
+        seen_input_names.add(input_name)
         start = stop
 
     if start != 18:
         raise ValueError(
             f"env_cfg.task_space_obs_order must describe exactly 18 values; resolved {start} from {list(obs_order)!r}."
+        )
+    expected_input_names = {entry[0] for entry in _TASK_SPACE_INPUT_SPEC}
+    if seen_input_names != expected_input_names:
+        raise ValueError(
+            "env_cfg.task_space_obs_order must resolve to exactly the four canonical DisplayPort Deploy inputs."
         )
     return tuple(input_spec)
 
@@ -197,7 +206,7 @@ def export_task_space_action(graph_name: str, tensor, export_method: str) -> Non
 
 
 def task_space_action_scale(env_cfg, device, dtype):
-    """Return ``[pos_scale] * 3 + [rot_scale] * 3`` from the task configuration."""
+    """Return the configured three-axis position and orientation scales."""
     action_cfg = env_cfg.actions.arm_action
     for attr in ("position_scale", "orientation_scale"):
         if not hasattr(action_cfg, attr):
@@ -205,8 +214,20 @@ def task_space_action_scale(env_cfg, device, dtype):
                 f"--task_space_contract requires an operational-space action term exposing '{attr}'; "
                 f"got {type(action_cfg).__name__}."
             )
-    scale_values = [float(action_cfg.position_scale)] * 3 + [float(action_cfg.orientation_scale)] * 3
-    return _export.torch.tensor(scale_values, device=device, dtype=dtype).unsqueeze(0)
+
+    def expand_scale(value, name):
+        scale = _export.torch.as_tensor(value, device=device, dtype=dtype).flatten()
+        if scale.numel() == 1:
+            scale = scale.repeat(3)
+        elif scale.numel() != 3:
+            raise ValueError(f"{name} must contain either one or three values; got {scale.numel()}.")
+        if not bool(_export.torch.isfinite(scale).all()):
+            raise ValueError(f"{name} must contain only finite values.")
+        return scale
+
+    position_scale = expand_scale(action_cfg.position_scale, "position_scale")
+    orientation_scale = expand_scale(action_cfg.orientation_scale, "orientation_scale")
+    return _export.torch.cat((position_scale, orientation_scale)).unsqueeze(0)
 
 
 def process_task_space_action(actions, scale, clip_actions: float | None):

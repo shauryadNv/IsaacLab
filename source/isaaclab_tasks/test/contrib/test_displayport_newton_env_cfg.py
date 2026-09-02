@@ -48,6 +48,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     SOCKET_INSERTION_OFFSET,
 )
 from isaaclab_tasks.contrib.deploy.mdp import DeployOperationalSpaceControllerActionCfg
+from isaaclab_tasks.contrib.deploy.mdp.actions import _pose_rel_action_extra
 from isaaclab_tasks.contrib.deploy.mdp.events import _body_link_jacobian_for_ik
 from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
 from isaaclab_tasks.contrib.deploy.mdp.observations import eef_pos_w, rigid_object_pos_w
@@ -468,3 +469,16 @@ def test_displayport_newton_runner_and_play_preserve_physx_defaults():
     assert physx_cfg.scene.robot.spawn.usd_path != train_cfg.scene.robot.spawn.usd_path
     assert physx_cfg.events.plug_physics_material.params["static_friction_range"] == pytest.approx((0.001, 0.001))
     assert physx_cfg.events.robot_physics_material.params["static_friction_range"] == pytest.approx((0.75, 0.75))
+
+
+def test_osc_leapp_metadata_expands_per_axis_action_scales():
+    """OSC export metadata must serialize scalar and per-axis scales consistently."""
+    extra = _pose_rel_action_extra(
+        position_scale=[0.025, 0.025, 0.01],
+        orientation_scale=0.025,
+        target_types=["pose_rel"],
+    )
+
+    assert extra["scale"] == pytest.approx([0.025, 0.025, 0.01, 0.025, 0.025, 0.025])
+    assert extra["position_scale"] == pytest.approx([0.025, 0.025, 0.01])
+    assert extra["orientation_scale"] == pytest.approx(0.025)
