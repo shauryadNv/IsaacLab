@@ -15,10 +15,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     compute_socket_root,
 )
 
-from .task_space_newton_env_cfg import (
-    _OSC_ACTION_SCALE,
-    Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg,
-)
+from .task_space_newton_env_cfg import Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg
 
 _DEPLOY_GEOMETRY_POS = (0.475, 0.125, 0.06)
 _DEPLOY_SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)
@@ -39,9 +36,9 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSp
     def __post_init__(self) -> None:
         super().__post_init__()
 
-        # This order is part of the policy ABI. Both the ROS bridge and LEAPP
-        # exporter consume it; changing it invalidates existing checkpoints.
-        self.obs_order = list(self.task_space_obs_order)
+        # Keep internal observation-term aliases in ``task_space_obs_order``;
+        # expose only the canonical Isaac ROS Deploy port names here.
+        self.obs_order = ["socket_kp_pos", "eef_pos", "eef_rot_6d", "socket_kp_rot_6d"]
         self.policy_action_space = "task"
         self.arm_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
         self.action_space = 6
@@ -49,8 +46,6 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSp
         # The critic observes 13 robot joints and their velocities plus true
         # socket and plug position/quaternion pairs.
         self.state_space = 40
-        self.action_scale = [_OSC_ACTION_SCALE] * self.action_space
-
         self.scene.robot.init_state.pos = (0.0, 0.0, 0.0)
         self.scene.robot.init_state.rot = (0.0, 0.0, 0.0, 1.0)
         self.scene.robot.init_state.joint_pos = {

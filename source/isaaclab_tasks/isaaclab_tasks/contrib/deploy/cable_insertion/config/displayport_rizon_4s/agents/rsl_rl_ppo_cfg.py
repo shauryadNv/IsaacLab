@@ -17,7 +17,7 @@ class Rizon4sGravDisplayportInsertionRNNPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     clip_actions = 1.0
     resume = False
     obs_groups = {
-        "policy": ["policy"],
+        "actor": ["policy"],
         "critic": ["critic"],
     }
     policy = RslRlPpoActorCriticRecurrentCfg(
