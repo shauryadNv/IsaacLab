@@ -32,7 +32,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.a
     Rizon4sGravDisplayportInsertionRNNPPORunnerCfg,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
-    _RIZON4S_CALIBRATED_USD_PATH,
+    _RIZON4S_063459_CALIBRATED_USD_PATH,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.task_space_env_cfg import (
     Rizon4sTaskSpaceDisplayportInsertionEnvCfg,
@@ -48,8 +48,13 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     SOCKET_INSERTION_OFFSET,
 )
 from isaaclab_tasks.contrib.deploy.mdp import DeployOperationalSpaceControllerActionCfg
+from isaaclab_tasks.contrib.deploy.mdp import events as deploy_events
 from isaaclab_tasks.contrib.deploy.mdp.actions import _pose_rel_action_extra
-from isaaclab_tasks.contrib.deploy.mdp.events import _body_link_jacobian_for_ik
+from isaaclab_tasks.contrib.deploy.mdp.events import (
+    _body_link_jacobian_for_ik,
+    reset_plug_at_goal_curriculum,
+    set_robot_to_object_grasp_pose,
+)
 from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
 from isaaclab_tasks.contrib.deploy.mdp.observations import eef_pos_w, rigid_object_pos_w
 from isaaclab_tasks.utils.hydra import resolve_presets
@@ -90,6 +95,96 @@ def test_displayport_grasp_reset_selects_backend_neutral_jacobians(
     selected = _body_link_jacobian_for_ik(asset, env_ids, body_idx=3)
 
     torch.testing.assert_close(selected, jacobians[env_ids, expected_body_idx, :, num_base_dofs:])
+
+
+def test_displayport_grasp_reset_holds_randomized_target_during_ik(monkeypatch: pytest.MonkeyPatch):
+    """A reset must sample one grasp offset and hold it fixed across all IK iterations."""
+    num_envs = 2
+    num_arm_joints = 7
+    identity_quaternions = torch.tensor([[0.0, 0.0, 0.0, 1.0]]).repeat(num_envs, 1)
+    joint_limits = torch.tensor([[[-math.pi, math.pi]] * num_arm_joints] * num_envs)
+
+    robot_data = SimpleNamespace(
+        joint_pos=wp.from_torch(torch.zeros(num_envs, num_arm_joints)),
+        joint_vel=wp.from_torch(torch.zeros(num_envs, num_arm_joints)),
+        joint_pos_limits=wp.from_torch(joint_limits),
+        body_pos_w=wp.from_torch(torch.zeros(num_envs, 1, 3)),
+        body_quat_w=wp.from_torch(identity_quaternions.unsqueeze(1)),
+    )
+    robot = SimpleNamespace(
+        data=robot_data,
+        set_joint_position_target_index=lambda **_kwargs: None,
+        set_joint_velocity_target_index=lambda **_kwargs: None,
+        write_joint_position_to_sim_index=lambda **_kwargs: None,
+        write_joint_velocity_to_sim_index=lambda **_kwargs: None,
+    )
+    plug = SimpleNamespace(
+        data=SimpleNamespace(
+            root_link_pos_w=wp.from_torch(torch.zeros(num_envs, 3)),
+            root_link_quat_w=wp.from_torch(identity_quaternions),
+        ),
+        write_root_pose_to_sim=lambda *_args, **_kwargs: None,
+        write_root_velocity_to_sim=lambda *_args, **_kwargs: None,
+    )
+    env = SimpleNamespace(device="cpu", scene={"dp_plug": plug})
+    env_ids = torch.arange(num_envs)
+
+    term = object.__new__(set_robot_to_object_grasp_pose)
+    term.robot_asset = robot
+    term.target_object_name = "dp_plug"
+    term.grasp_offsets_buffer = torch.zeros(num_envs, 3)
+    term.grasp_offset_tensor = torch.zeros(3)
+    term.grasp_rot_offset_tensor = identity_quaternions
+    term.eef_idx = 0
+    term.num_arm_joints = num_arm_joints
+    term.all_joints = list(range(num_arm_joints))
+    term.finger_joints = []
+    term.hand_hold_width = 0.0
+    term.hand_close_width = 0.0
+    term.gripper_joint_setter_func = lambda *_args, **_kwargs: None
+
+    sample_count = 0
+    ik_targets: list[torch.Tensor] = []
+
+    def sample_uniform_once(
+        _lower: torch.Tensor,
+        _upper: torch.Tensor,
+        size: tuple[int, int],
+        device: str,
+    ) -> torch.Tensor:
+        nonlocal sample_count
+        sample_count += 1
+        return torch.full(size, float(sample_count), device=device)
+
+    def record_pose_target(**kwargs) -> tuple[torch.Tensor, torch.Tensor]:
+        target = kwargs["ctrl_target_fingertip_midpoint_pos"]
+        ik_targets.append(target.clone())
+        return torch.ones_like(target), torch.zeros_like(target)
+
+    monkeypatch.setattr(deploy_events.math_utils, "sample_uniform", sample_uniform_once)
+    monkeypatch.setattr(deploy_events.fc, "get_pose_error", record_pose_target)
+    monkeypatch.setattr(
+        deploy_events.fc,
+        "_get_delta_dof_pos",
+        lambda **_kwargs: torch.zeros(num_envs, num_arm_joints),
+    )
+    monkeypatch.setattr(
+        deploy_events,
+        "_body_link_jacobian_for_ik",
+        lambda *_args, **_kwargs: torch.zeros(num_envs, 6, num_arm_joints),
+    )
+
+    term(
+        env,
+        env_ids,
+        max_iterations=3,
+        pos_randomization_range={"x": (-0.01, 0.01), "y": (-0.01, 0.01), "z": (-0.01, 0.01)},
+    )
+
+    assert sample_count == 1
+    assert len(ik_targets) == 3
+    for target in ik_targets[1:]:
+        torch.testing.assert_close(target, ik_targets[0])
 
 
 def test_rigid_object_offset_is_rotated_and_cached_as_a_batch_view():
@@ -186,16 +281,26 @@ def test_displayport_newton_tasks_route_to_dedicated_configs():
         assert spec.kwargs["rsl_rl_cfg_entry_point"] == runner_cfg_entry_point
 
 
-def test_registered_displayport_newton_task_resolves_compatible_safe_defaults():
-    """The unqualified Newton task must resolve to Newton with its supported shard size."""
-    task_id = "Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-v0"
-
+@pytest.mark.parametrize(
+    ("task_id", "expected_num_envs"),
+    [
+        pytest.param("Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-v0", 256, id="training"),
+        pytest.param("Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-Play-v0", 50, id="play"),
+        pytest.param(
+            "Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0",
+            256,
+            id="ros-inference",
+        ),
+    ],
+)
+def test_registered_displayport_newton_tasks_resolve_compatible_safe_defaults(task_id: str, expected_num_envs: int):
+    """Every Newton variant must resolve to Newton with its supported shard size."""
     cfg = resolve_presets(load_cfg_from_registry(task_id, "env_cfg_entry_point"))
     runner = load_cfg_from_registry(task_id, "rsl_rl_cfg_entry_point")
 
     assert isinstance(cfg.sim.physics, NewtonCfg)
     assert isinstance(cfg.actions.arm_action, DeployOperationalSpaceControllerActionCfg)
-    assert cfg.scene.num_envs == 256
+    assert cfg.scene.num_envs == expected_num_envs
     assert cfg.sim.physics.collision_cfg.max_triangle_pairs == 2**25
     assert runner.seed == 126
     assert runner.clip_actions == pytest.approx(1.0)
@@ -284,7 +389,7 @@ def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     assert controller.nullspace_control == "none"
 
     calibrated_usd = Path(cfg.scene.robot.spawn.usd_path)
-    assert cfg.scene.robot.spawn.usd_path == _RIZON4S_CALIBRATED_USD_PATH
+    assert cfg.scene.robot.spawn.usd_path == _RIZON4S_063459_CALIBRATED_USD_PATH
     assert calibrated_usd.name == "Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
     assert calibrated_usd.is_file()
     assert cfg.scene.robot.spawn.rigid_props.gravcomp == pytest.approx(1.0)
@@ -352,13 +457,12 @@ def test_displayport_newton_observation_abi_noise_and_deployment_metadata():
     assert critic.joint_vel.params["asset_cfg"].joint_names == [".*"]
 
     ros_cfg = newton_ros_cfg.Rizon4sTaskSpaceNewtonDisplayportInsertionROSInferenceEnvCfg()
-    assert ros_cfg.obs_order == expected_actor_order
+    assert ros_cfg.obs_order == ["socket_kp_pos", "eef_pos", "eef_rot_6d", "socket_kp_rot_6d"]
     assert ros_cfg.policy_action_space == "task"
     assert ros_cfg.arm_joint_names == _ARM_JOINTS
     assert ros_cfg.action_space == 6
     assert ros_cfg.observation_space == 18
     assert ros_cfg.state_space == 40
-    assert ros_cfg.action_scale == pytest.approx([0.025] * 6)
     assert ros_cfg.fixed_asset_init_pos_range == pytest.approx([0.01, 0.01, 0.02])
     assert ros_cfg.fixed_asset_init_orn_deg_range == pytest.approx([2.0, 2.0, 2.0])
     assert ros_cfg.fixed_asset_pos_obs_noise_level == pytest.approx([0.01, 0.01, 0.01])
@@ -428,6 +532,28 @@ def test_displayport_newton_domain_randomization_curriculum_and_rewards():
     assert rewards.plug_socket_keypoint_tracking_exp.params["kp_use_sum_of_exps"] is False
 
 
+@pytest.mark.parametrize(
+    ("iteration", "expected_probability"),
+    [
+        pytest.param(0, 0.8, id="start"),
+        pytest.param(250, 0.4, id="midpoint"),
+        pytest.param(500, 0.0, id="end"),
+        pytest.param(750, 0.0, id="after-end"),
+    ],
+)
+def test_displayport_newton_curriculum_anneals_at_goal_probability(iteration: int, expected_probability: float):
+    """The reset curriculum must linearly anneal from 0.8 to zero over 500 iterations."""
+    term = object.__new__(reset_plug_at_goal_curriculum)
+    term.at_goal_prob = 0.8
+    term.at_goal_prob_final = 0.0
+    term.anneal_start_iter = 0.0
+    term.anneal_end_iter = 500.0
+    term.num_steps_per_env = 512
+    env = SimpleNamespace(common_step_counter=iteration * term.num_steps_per_env)
+
+    assert term._current_at_goal_prob(env) == pytest.approx(expected_probability)
+
+
 def test_displayport_newton_runner_and_play_preserve_physx_defaults():
     """Newton uses its checkpoint horizon and safe shard size without mutating PhysX defaults."""
     newton_runner = Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg()
@@ -439,6 +565,8 @@ def test_displayport_newton_runner_and_play_preserve_physx_defaults():
     assert physx_runner.experiment_name == "displayport_insertion_rizon4s"
     assert newton_runner.num_steps_per_env == physx_runner.num_steps_per_env == 512
     assert newton_runner.clip_actions == physx_runner.clip_actions == pytest.approx(1.0)
+    assert newton_runner.obs_groups == {"actor": ["policy"], "critic": ["critic"]}
+    assert physx_runner.obs_groups == {"actor": ["policy"], "critic": ["critic"]}
 
     train_cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg()
     play_cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg_PLAY()

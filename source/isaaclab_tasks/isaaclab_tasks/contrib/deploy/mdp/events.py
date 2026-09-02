@@ -606,26 +606,26 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         grasp_offsets = self.grasp_offsets_buffer[:num_reset_envs]
         grasp_rot_offset_tensor = self.grasp_rot_offset_tensor[env_ids]
 
+        # Sample one grasp target per environment and keep it fixed throughout
+        # the iterative IK solve instead of moving the target while it converges.
+        grasp_offsets[:] = self.grasp_offset_tensor
+        if pos_randomization_range is not None:
+            range_list_pos = [pos_randomization_range.get(key, (0.0, 0.0)) for key in ("x", "y", "z")]
+            ranges_pos = self.grasp_offset_tensor.new_tensor(range_list_pos)
+            grasp_offsets.add_(
+                math_utils.sample_uniform(ranges_pos[:, 0], ranges_pos[:, 1], (num_reset_envs, 3), device=env.device)
+            )
+
+        target_object: RigidObject = env.scene[self.target_object_name]
+
         for _ in range(max_iterations):
             joint_pos = wp.to_torch(self.robot_asset.data.joint_pos)[env_ids].clone()
             joint_vel = wp.to_torch(self.robot_asset.data.joint_vel)[env_ids].clone()
 
-            target_object: RigidObject = env.scene[self.target_object_name]
             grasp_object_pos_world = wp.to_torch(target_object.data.root_link_pos_w)[env_ids]
             grasp_object_quat = wp.to_torch(target_object.data.root_link_quat_w)[env_ids]
 
             grasp_object_quat = math_utils.quat_mul(grasp_object_quat, grasp_rot_offset_tensor)
-
-            grasp_offsets[:] = self.grasp_offset_tensor
-
-            if pos_randomization_range is not None:
-                pos_keys = ["x", "y", "z"]
-                range_list_pos = [pos_randomization_range.get(key, (0.0, 0.0)) for key in pos_keys]
-                ranges_pos = torch.tensor(range_list_pos, device=env.device)
-                rand_pos_offsets = math_utils.sample_uniform(
-                    ranges_pos[:, 0], ranges_pos[:, 1], (len(env_ids), 3), device=env.device
-                )
-                grasp_offsets = grasp_offsets + rand_pos_offsets
 
             grasp_object_pos_world = grasp_object_pos_world + math_utils.quat_apply(grasp_object_quat, grasp_offsets)
 

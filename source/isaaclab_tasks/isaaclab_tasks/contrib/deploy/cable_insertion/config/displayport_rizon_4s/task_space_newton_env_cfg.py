@@ -33,7 +33,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
 from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from .joint_pos_env_cfg import _RIZON4S_CALIBRATED_USD_PATH
+from .joint_pos_env_cfg import _RIZON4S_063459_CALIBRATED_USD_PATH
 from .task_space_env_cfg import Rizon4sTaskSpaceDisplayportInsertionEnvCfg, TaskSpaceEventCfg
 
 _ARM_JOINTS = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
@@ -149,6 +149,10 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
     The actor contract is ``socket_pos, flange_pos, flange_rot_6d,
     socket_rot_6d``. This differs from the TCP-first PhysX task-space contract,
     so the configurations must not share checkpoints despite both being 18-D.
+
+    The default robot asset contains measured kinematics for the reference
+    Rizon4s with serial number 063459. Override ``scene.robot.spawn.usd_path``
+    with the calibrated USD for a different robot.
     """
 
     def __post_init__(self) -> None:
@@ -207,7 +211,7 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
 
         # Newton cancels robot-body gravity directly. OSC gravity compensation
         # stays disabled to avoid applying gravity twice.
-        self.scene.robot.spawn.usd_path = _RIZON4S_CALIBRATED_USD_PATH
+        self.scene.robot.spawn.usd_path = _RIZON4S_063459_CALIBRATED_USD_PATH
         self.scene.robot.spawn.rigid_props = sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0)
         self.scene.robot.spawn.joint_drive_props = sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False)
 

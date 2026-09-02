@@ -46,8 +46,9 @@ _PLUG_ROOT, _PLUG_ROT = compute_plug_pose(
 # Blade engagement along the insertion axis used by the at-goal curriculum [m].
 _INSERTION_LENGTH = 0.011
 
-# Calibrated Rizon4s USD (measured kinematics) used in place of the stock Nucleus robot USD.
-_RIZON4S_CALIBRATED_USD_PATH = os.path.join(
+# Measured kinematics for the reference Rizon4s with serial number 063459.
+# Other robots must provide their own calibrated USD through the task configuration.
+_RIZON4S_063459_CALIBRATED_USD_PATH = os.path.join(
     DISPLAY_ASSETS_DIR,
     "Rizon4s-063459_with_Grav_calibrated_kinematics.usd",
 )
@@ -316,7 +317,7 @@ class Rizon4sGravDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
         self.scene.robot = FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=FLEXIV_RIZON4S_GRAV_GRIPPER_CFG.spawn.replace(
-                usd_path=_RIZON4S_CALIBRATED_USD_PATH,
+                usd_path=_RIZON4S_063459_CALIBRATED_USD_PATH,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True,
                     max_depenetration_velocity=5.0,

@@ -81,7 +81,13 @@ joint-space training, where the policy commands joints directly. Flexiv's
 `flexiv_calibration <https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.3/flexiv_calibration>`__
 workflow exports a calibrated robot description for a specific arm; convert the result to USD and set
 ``scene.robot.spawn.usd_path`` in a derived environment configuration. The Newton profile uses the
-calibrated Rizon 4s USD bundled with this task by default.
+calibrated USD for the reference Rizon 4s with serial number ``063459`` by default. That asset is not a generic
+calibration for every Rizon 4s. For another robot, pass its calibrated USD as a Hydra override when training or
+playing a policy:
+
+.. code-block:: text
+
+   env.scene.robot.spawn.usd_path=/absolute/path/to/your_calibrated_robot.usd
 
 **Practical workflow:**
 
@@ -355,8 +361,7 @@ Newton Point-SDF Profile
 
 Use the dedicated Newton task-space profile when training an operational-space policy with the Newton backend.
 It is additive to the existing PhysX environments and preserves the training and deployment ABI of the reference
-``dp_up_osc_cal_s025_c200s2000/model_999.pt`` policy. The checkpoint is not bundled; train a new policy with the
-task id below.
+hardware-validated configuration. A checkpoint is not bundled; train a new policy with the task id below.
 
 .. important::
 
@@ -409,9 +414,10 @@ different training distribution. The privileged critic retains all 13 robot join
      - enabled / ``2**25``
      - scene-wide capacity for the 256-environment per-rank default
 
-This is an MJWarp point-SDF configuration. VBD and hydroelastic SDF are separate experiments and do not reproduce
-the reference checkpoint. ``max_triangle_pairs`` is scene-wide: when Newton reports an overflow, reduce the
-per-rank environment count or increase the capacity. Overflow can omit candidate contacts.
+This is an MJWarp point-SDF configuration. VBD and hydroelastic SDF are separate experiments and must be evaluated
+independently. ``max_triangle_pairs`` is scene-wide: when Newton reports an overflow, first reduce the per-rank
+environment count. If memory permits, the capacity can instead be doubled from the default with
+``env.sim.physics.collision_cfg.max_triangle_pairs=67108864``. Overflow can omit candidate contacts.
 
 The policy emits a six-dimensional relative pose command at the flange origin. RSL-RL first clips each raw actor
 output to ``[-1, 1]``; the OSC action then applies ``0.025`` translation and rotation scales. The action-term clip
@@ -484,7 +490,7 @@ The PhysX Rizon 4s profiles use ``ImplicitActuatorCfg`` with per-joint-group arm
         damping=0.0,
     )
 
-The Newton profile intentionally uses the gripper settings from the reference training run instead:
+The Newton profile uses the following backend-specific gripper settings:
 
 - ``gripper_drive`` controls ``finger_joint`` with effort / velocity limits of ``200.0`` / ``2.0``, stiffness /
   damping of ``2000.0`` / ``10.0``, zero friction, and armature ``0.1``.
@@ -492,14 +498,14 @@ The Newton profile intentionally uses the gripper settings from the reference tr
   limits of ``20.0`` / ``1.0``, stiffness / damping of ``2000.0`` / ``10.0``, zero friction, and armature ``0.05``.
 - ``hand_hold_width`` and ``hand_close_width`` are both ``-0.1``.
 
-These values are part of the Newton checkpoint contract; do not substitute the PhysX gripper settings when
-reproducing the reference policy.
+These values define the Newton gripper behavior; do not substitute the PhysX gripper settings when training or
+playing a Newton policy.
 
 .. note::
 
    **Flexiv Rizon 4s (PhysX profiles)**: actuator-gain and joint-friction randomization is not included. The Newton
    profile retains additive uniform arm-joint friction randomization in ``[0.0, 0.15]`` and disables PD-gain
-   randomization, preserving the checkpoint contract.
+   randomization.
 
 .. _taskspace-action-space:
 
@@ -533,8 +539,8 @@ target. What differs is the space that delta lives in.
    .. tab-item:: Task space
 
       The policy emits a **6-DoF Cartesian pose delta** which an Operational Space Controller (OSC) converts into
-      joint efforts. This removes joint-level system identification from the sim-to-real path: the same policy can
-      drive the real robot through a task-space bridge.
+      joint efforts. A task-space bridge reduces sensitivity to differences in the simulated and real joint servo
+      response, but transfer still depends on the robot kinematics, dynamics, controller, and frame conventions.
 
       .. code-block:: python
 
@@ -1015,7 +1021,7 @@ deployment contract. Swap in the plain ``...-NoJointVel-v0`` / ``...-TaskSpace-v
 **Command breakdown:**
 
 - ``--rl_library rsl_rl``: Selects the RSL-RL backend (required by the unified trainer)
-- ``--num_envs 256``: Runs 256 parallel environments per rank (the Newton-safe default)
+- ``--num_envs 256``: Runs the default 256 parallel environments on each process / rank for the Newton profile
 - Omitting ``--visualizer``: Uses headless execution by default for throughput
 - ``--video_length 200`` / ``222``: Approximately one full episode for PhysX / Newton respectively
 - ``--video_interval 76800``: Records every 150 iterations with 512 steps per environment
@@ -1052,8 +1058,9 @@ Monitor ``Metrics/success_rate`` and reward curves to confirm learning. The curr
 Choosing a Control Space
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The control spaces share the same algorithm, reward, and curriculum. The PhysX profiles run at 30 Hz; the Newton
-Newton profile runs at approximately 33.3 Hz.
+The examples use the same recurrent PPO implementation and related insertion objectives. Individual profiles can
+differ in observations, controller settings, reset distributions, and curriculum parameters. The PhysX profiles
+run at 30 Hz; the Newton profile runs at approximately 33.3 Hz.
 
 .. list-table::
    :widths: 20 40 40
@@ -1078,9 +1085,9 @@ Newton profile runs at approximately 33.3 Hz.
        ``...-Grav-TaskSpace-Newton-ROS-Inference-v0`` (Newton)
 
 **Task space is the recommended route.** In our sim-to-real testing on the Flexiv Rizon 4s, task-space policies
-transfer better than joint-space ones: commanding a Cartesian pose delta keeps the policy independent of the arm's
-joint servo behavior and of small errors in the robot's kinematic model, both of which are difficult to reproduce
-exactly in simulation. Prefer it unless you specifically need joint-level control.
+transfer better than joint-space ones: commanding a Cartesian pose delta reduces sensitivity to differences in the
+arm's joint servo behavior. It does not remove sensitivity to kinematic calibration, dynamics, controller tuning,
+or frame conventions. Prefer it unless you specifically need joint-level control.
 
 Use **joint space** when you must control the arm through its joint interface. Because the policy then commands
 joints directly, transfer depends on the simulated robot matching yours closely — see the note below on robot
@@ -1088,22 +1095,19 @@ kinematics.
 
 .. important::
 
-   **Joint-space training needs a robot USD that matches your specific arm.** Joint-space policies command joint
-   positions, so any mismatch between the simulated kinematic parameters and your physical robot shows up directly
-   as end-effector error during insertion — where the clearances are sub-millimetre. Individual arms differ from
-   the nominal CAD model, so the shipped asset will not describe your unit exactly.
+   **Use a robot USD calibrated for the arm you will deploy.** Joint-space policies command joint positions, so any
+   mismatch between the simulated kinematic parameters and your physical robot shows up directly as end-effector
+   error during insertion — where the clearances are sub-millimetre. Task-space policies are less exposed to the
+   joint-command mismatch, but still depend on accurate kinematics and frame transforms.
 
    Before training a joint-space policy, confirm the robot USD reflects your arm's measured kinematics. Flexiv
    publishes a per-robot calibration workflow for exporting an accurate robot description:
    `flexiv_calibration <https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.3/flexiv_calibration>`__.
    Follow it to generate the calibrated description for your setup and convert it to USD. Derive the relevant
-   environment configuration and replace ``scene.robot.spawn.usd_path``. The task does not implement a
-   ``DP_ROBOT_USD`` environment-variable override; the bundled default is configured in
-   ``config/displayport_rizon_4s/joint_pos_env_cfg.py``.
-
-   Task-space policies are less exposed to this: they are commanded in Cartesian space, so kinematic error affects
-   the observed end-effector pose rather than being injected straight into the commanded joint targets. Getting the
-   kinematics right is still worthwhile in both cases.
+   environment configuration and replace ``scene.robot.spawn.usd_path``. The bundled Newton default is calibrated
+   for the reference Rizon 4s with serial number ``063459``; it should not be assumed to match another arm. Override
+   it from the command line with
+   ``env.scene.robot.spawn.usd_path=/absolute/path/to/your_calibrated_robot.usd``.
 
 In each case, train on the ``-ROS-Inference-v0`` id so the trained environment carries the deployment contract,
 and use the matching ``-Play-v0`` id for evaluation and visualization. PhysX task space uses
