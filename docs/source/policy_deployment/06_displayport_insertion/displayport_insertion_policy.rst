@@ -32,6 +32,19 @@ see :ref:`choosing-control-space` for the trade-offs and for the extra robot-cal
 
 This tutorial covers **training and LEAPP export** in Isaac Lab. For the complete on-robot workflow (vision pipeline, robot interface, ROS inference), refer to the `Isaac ROS Documentation <https://nvidia-isaac-ros.github.io/reference_workflows/isaac_for_manipulation/packages/isaac_ros_manipulation_dnn_policy/index.html>`_ after exporting your policy.
 
+**Prerequisites:**
+
+This walkthrough assumes a working Isaac Lab installation; see
+:doc:`/source/setup/installation/index`. Every command below is run from the Isaac Lab
+root. The container workflow (``./docker/container.py start base``) works as well; note
+that under Docker ``logs/`` is the ``isaac-lab-logs`` named volume rather than a host
+directory, so checkpoints, TensorBoard event files and recorded videos must be retrieved
+with ``./docker/container.py copy`` or ``docker cp`` before you can open them on the host.
+
+The plug, socket and robot USDs ship in the repository under
+``cable_insertion/display_cable_insertion_assets/`` via Git LFS; no separate asset
+download is required.
+
 **Code Layout:**
 
 The task follows the same structure as the gear assembly deploy environments:
@@ -815,7 +828,17 @@ Stop training (Ctrl+C) once the environment looks correct, then proceed to full-
 Step 2: Full-Scale Training with Video Recording
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Launch full training in headless mode with video recording:
+.. note::
+
+   **``--video`` requires MoviePy**, which is not installed by default. Install it once
+   before running the commands below, or drop the ``--video*`` flags:
+
+   .. code-block:: bash
+
+       ./isaaclab.sh -p -m pip install "moviepy>=1.0.3,<2.0.0.dev0"
+
+Launch full training (training is headless unless you pass ``--visualizer``) with video
+recording:
 
 .. tab-set::
 
@@ -826,7 +849,6 @@ Launch full training in headless mode with video recording:
           ./isaaclab.sh train --rl_library rsl_rl \
               --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-NoJointVel-ROS-Inference-v0 \
               --num_envs 256 \
-              --headless \
               --video --video_length 200 --video_interval 76800
 
    .. tab-item:: Task space
@@ -836,7 +858,6 @@ Launch full training in headless mode with video recording:
           ./isaaclab.sh train --rl_library rsl_rl \
               --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-ROS-Inference-v0 \
               --num_envs 256 \
-              --headless \
               --video --video_length 200 --video_interval 76800
 
 **Multi-GPU (distributed) training** — for example on a cluster / OSMO workflow (substitute either task id):
@@ -847,7 +868,7 @@ Launch full training in headless mode with video recording:
         scripts/reinforcement_learning/train.py --rl_library rsl_rl \
         --task <TASK_ID> \
         --num_envs <NUM_ENVS> \
-        --headless --distributed \
+        --distributed \
         agent.max_iterations=<MAX_ITERS> \
         --video --video_length 200 --video_interval 25600
 
@@ -859,12 +880,23 @@ not intend to deploy.
 
 - ``--rl_library rsl_rl``: Selects the RSL-RL backend (required by the unified trainer)
 - ``--num_envs 256``: Runs 256 parallel environments
-- ``--headless``: Disables the interactive viewer for throughput
+- Training runs **headless by default**; pass ``--visualizer kit`` to open a viewer
 - ``--video_length 200``: One episode per video (``episode_length_s / (sim.dt * decimation)`` ≈ 200 steps)
 - ``--video_interval 76800``: Records a video every 76,800 environment steps (~every 150 iterations with 512 steps/env)
 - ``--distributed``: Required when launching under ``torch.distributed.run``
 
 Training uses a recurrent PPO agent (LSTM, 1500 max iterations, 512 steps per environment). Videos are saved under ``logs/``.
+
+.. note::
+
+   Checkpoints are written every ``save_interval`` iterations, which the shipped agent
+   configuration sets to ``50``. A ``model_0.pt`` appears immediately, but it holds an
+   untrained network, so the first checkpoint that reflects any learning is
+   ``model_50.pt``. Every step from Step 3 onwards needs a ``--checkpoint``, so to walk
+   the export and inference sections through sooner, append
+   ``agent.save_interval=<N>`` with a smaller ``N`` to the training command above. A
+   checkpoint taken that early will not insert reliably; it is for exercising the export
+   and deployment plumbing, not for evaluating the policy.
 
 .. note::
 
@@ -926,12 +958,18 @@ kinematics.
    publishes a per-robot calibration workflow for exporting an accurate robot description:
    `flexiv_calibration <https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.3/flexiv_calibration>`__.
    Follow it to generate the calibrated description for your setup, convert it to USD, and point the environment at
-   it with the ``DP_ROBOT_USD`` environment variable (it overrides the default calibrated asset in
-   ``config/displayport_rizon_4s/joint_pos_env_cfg.py``).
+   it with the ``DP_ROBOT_USD`` environment variable. It overrides the robot USD in both control spaces, so the
+   same calibrated asset can be used for either.
 
    Task-space policies are less exposed to this: they are commanded in Cartesian space, so kinematic error affects
    the observed end-effector pose rather than being injected straight into the commanded joint targets. Getting the
    kinematics right is still worthwhile in both cases.
+
+   The two control spaces do not start from the same robot asset. The joint-space configuration spawns the
+   calibrated ``Rizon4s-063459_with_Grav_calibrated_kinematics.usd`` shipped with the task, set in
+   ``config/displayport_rizon_4s/joint_pos_env_cfg.py``, while the task-space configuration spawns the stock
+   Rizon 4s asset. Neither default is guaranteed to describe the arm in use, so set ``DP_ROBOT_USD`` unless the
+   shipped asset has been confirmed to match that unit.
 
 In each case, train on the ``-ROS-Inference-v0`` id so the trained environment carries the deployment contract,
 and use the ``-Play-v0`` id for evaluation and visualization. The task-space environment already uses the
@@ -1146,8 +1184,7 @@ CUDA Out of Memory
 
        ./isaaclab.sh train --rl_library rsl_rl \
            --task <TASK_ID> \
-           --num_envs 128 \
-           --headless
+           --num_envs 128
 
 2. Reduce plug/socket ``solver_position_iteration_count`` in ``displayport_insertion_env_cfg.py`` (trade-off: more penetration)
 
@@ -1161,9 +1198,11 @@ For DisplayPort insertion, prefer the dedicated play script over the generic
 ``./isaaclab.sh play`` path. It keeps DP-specific pose overrides, perception-error
 injection, and ``policy_io.csv`` logging out of the shared play entrypoint.
 
-The examples below use the joint-space ROS-inference task. They apply unchanged to a task-space policy —
-substitute ``...-Grav-TaskSpace-ROS-Inference-v0`` for the ``--task`` id and point ``--checkpoint`` (or
-``--leapp_model``) at the corresponding run.
+The examples below use the joint-space ROS-inference task. To run a task-space policy,
+substitute ``...-Grav-TaskSpace-ROS-Inference-v0`` for the ``--task`` id, point
+``--checkpoint`` (or ``--leapp_model``) at the corresponding run, and pass that
+environment's own station pose (``--socket_pos 0.475 0.125 0.06``) rather than the
+joint-space one used below. The flags are otherwise identical.
 
 **RSL-RL checkpoint** (recommended shipping task):
 
@@ -1230,17 +1269,29 @@ Generic play (no DP pose / CSV knobs) still works for a quick smoke test:
         --num_envs 1 \
         --checkpoint <path_to_model.pt>
 
-To match a specific real-world station layout, edit the workspace constants in ``config/displayport_rizon_4s/joint_pos_env_cfg.py`` (training layout) or ``config/displayport_rizon_4s/ros_inference_env_cfg.py`` (deployment layout):
+To match a specific real-world station layout, edit the workspace constants of the
+environment you are running. Each of the three configurations below carries its own
+station pose, so re-measuring your station means updating the one you train and deploy
+with; editing another has no effect:
 
 .. code-block:: python
 
-    # Training station layout (joint_pos_env_cfg.py)
+    # Training layout, both control spaces (joint_pos_env_cfg.py)
     _GEOMETRY_POS = (0.475, 0.125, 0.06)
     _SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)
 
-    # Deployment layout (ros_inference_env_cfg.py)
+    # Joint-space deployment layout (ros_inference_env_cfg.py)
     _DEPLOY_GEOMETRY_POS = (0.476, 0.127, 0.07)
     _DEPLOY_SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)
+
+    # Task-space deployment layout (task_space_ros_inference_env_cfg.py)
+    _HUBBLE_GEOMETRY_POS = (0.475, 0.125, 0.06)
+    _HUBBLE_SOCKET_ROT = (0.5, 0.5, 0.5, -0.5)
+    _HUBBLE_PLUG_CLEARANCE_Z = 0.068
+
+The two deployment stations do not currently hold the same position. Pass the pose of the
+environment you are actually running to ``--socket_pos``, and re-measure both if you
+deploy both control spaces against one physical station.
 
 This workflow is useful for:
 
