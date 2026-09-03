@@ -7,6 +7,7 @@ from isaaclab_newton.envs.mdp.actions.newton_ik_actions_cfg import NewtonInverse
 from isaaclab_newton.ik.newton_ik_objectives_cfg import NewtonIKJointLimitObjectiveCfg, NewtonIKPoseObjectiveCfg
 from isaaclab_newton.ik.newton_ik_solver_cfg import NewtonIKSolverCfg
 
+from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
 from isaaclab.envs import mdp
 from isaaclab.envs.mdp.actions.actions_cfg import OperationalSpaceControllerActionCfg
@@ -23,6 +24,10 @@ _TCP_15CM_OFFSET = (0.0, 0.0, 0.15)
 
 _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 _OSC_DAMPING_RATIO = (1.0,) * 6
+# Compensate axis-dependent task inertia so the nominal calibrated-arm pose is
+# approximately critically damped when inertial dynamics decoupling is disabled.
+_TASK_IMPEDANCE_STIFFNESS = (50.0, 30.0, 60.0, 3.0, 8.0, 0.3)
+_TASK_IMPEDANCE_DAMPING_RATIO = (3.0, 2.25, 3.25, 0.3, 0.45, 0.055)
 _OSC_ACTION_SCALE = 0.005
 _PHYSX_REFERENCE_ARM_GAINS = {
     "shoulder": (1320.0, 72.0),
@@ -418,6 +423,31 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonTcp15cmOb
         _set_ik_action_scale(self, 0.025)
 
 
+def _use_explicit_effort_control_arm_actuators(env_cfg) -> None:
+    """Use zero-gain explicit arm actuators that clamp OSC joint efforts."""
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        source_cfg = env_cfg.scene.robot.actuators[actuator_name]
+        effort_limit = source_cfg.effort_limit
+        if effort_limit is None:
+            effort_limit = source_cfg.effort_limit_sim
+        velocity_limit = source_cfg.velocity_limit
+        if velocity_limit is None:
+            velocity_limit = source_cfg.velocity_limit_sim
+        env_cfg.scene.robot.actuators[actuator_name] = IdealPDActuatorCfg(
+            joint_names_expr=list(source_cfg.joint_names_expr),
+            effort_limit=effort_limit,
+            velocity_limit=velocity_limit,
+            effort_limit_sim=source_cfg.effort_limit_sim,
+            velocity_limit_sim=source_cfg.velocity_limit_sim,
+            stiffness=0.0,
+            damping=0.0,
+            armature=source_cfg.armature,
+            friction=source_cfg.friction,
+            dynamic_friction=source_cfg.dynamic_friction,
+            viscous_friction=source_cfg.viscous_friction,
+        )
+
+
 def _configure_osc_control(env_cfg) -> None:
     """Configure direct operational-space effort control for the arm.
 
@@ -433,9 +463,7 @@ def _configure_osc_control(env_cfg) -> None:
     env_cfg.events.randomize_arm_pd_gains = None
     if not env_cfg.osc_randomize_arm_joint_friction:
         env_cfg.events.randomize_arm_joint_friction = None
-    for actuator_name in ("shoulder", "elbow", "wrist"):
-        env_cfg.scene.robot.actuators[actuator_name].stiffness = 0.0
-        env_cfg.scene.robot.actuators[actuator_name].damping = 0.0
+    _use_explicit_effort_control_arm_actuators(env_cfg)
 
 
 @configclass
@@ -486,6 +514,21 @@ class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePo
     def __post_init__(self):
         super().__post_init__()
         _use_pose_6d_actor_observation(self, (0.0, 0.0, 0.0))
+
+
+@configclass
+class Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTaskImpedanceFlangePose6DEnvCfg(
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg
+):
+    """Calibrated flange-pose task impedance with axis-normalized damping."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        controller_cfg = self.actions.arm_action.controller_cfg
+        controller_cfg.inertial_dynamics_decoupling = False
+        controller_cfg.partial_inertial_dynamics_decoupling = False
+        controller_cfg.motion_stiffness_task = _TASK_IMPEDANCE_STIFFNESS
+        controller_cfg.motion_damping_ratio_task = _TASK_IMPEDANCE_DAMPING_RATIO
 
 
 @configclass

@@ -14,6 +14,7 @@ from isaaclab_newton.physics import MJWarpSolverCfg, VBDSolverCfg
 
 from pxr import Usd
 
+from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
 from isaaclab.envs import mdp
 
 from isaaclab_contrib.coupling import CouplerAdmmCfg, CouplerProxyCfg
@@ -42,6 +43,7 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.i
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale0125ActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DScale025ActionClip1EnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCInertialFlangePose6DEnvCfg,
+    Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTaskImpedanceFlangePose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmObsPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTcp15cmPose6DEnvCfg,
     Rizon4sGravDisplayportInsertionCalibratedIKNewtonEnvCfg,
@@ -488,9 +490,57 @@ def test_displayport_newton_osc_uses_effort_control_without_arm_position_pd():
     assert env_cfg.events.randomize_arm_joint_friction is None
     assert env_cfg.events.randomize_arm_pd_gains is None
     assert env_cfg.scene.robot.spawn.rigid_props.gravcomp == 1.0
+    expected_limits = {"shoulder": (123.0, 2.094), "elbow": (64.0, 2.443), "wrist": (39.0, 4.887)}
+    for actuator_name, (effort_limit, velocity_limit) in expected_limits.items():
+        actuator_cfg = env_cfg.scene.robot.actuators[actuator_name]
+        assert isinstance(actuator_cfg, IdealPDActuatorCfg)
+        assert actuator_cfg.effort_limit == effort_limit
+        assert actuator_cfg.effort_limit_sim == effort_limit
+        assert actuator_cfg.velocity_limit == velocity_limit
+        assert actuator_cfg.velocity_limit_sim == velocity_limit
+        assert actuator_cfg.stiffness == 0.0
+        assert actuator_cfg.damping == 0.0
+
+
+def test_displayport_newton_ik_preserves_implicit_arm_position_actuators():
+    """The OSC effort-actuator fix should not change Newton IK joint tracking."""
+    env_cfg = resolve_presets(
+        Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedIKNewtonFlangePose6DEnvCfg(),
+        {"newton_sdf"},
+    )
     for actuator_name in ("shoulder", "elbow", "wrist"):
-        assert env_cfg.scene.robot.actuators[actuator_name].stiffness == 0.0
-        assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0
+        assert isinstance(env_cfg.scene.robot.actuators[actuator_name], ImplicitActuatorCfg)
+
+
+def test_displayport_newton_task_impedance_uses_safe_axis_normalized_gains():
+    """Task impedance should use effort limits and inertia-normalized gains."""
+    baseline_cfg = Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCFlangePose6DEnvCfg()
+    task_impedance_cfg = (
+        Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTaskImpedanceFlangePose6DEnvCfg()
+    )
+    baseline = baseline_cfg.actions.arm_action
+    task_impedance = task_impedance_cfg.actions.arm_action
+
+    assert baseline.controller_cfg.inertial_dynamics_decoupling is True
+    assert task_impedance.controller_cfg.inertial_dynamics_decoupling is False
+    assert task_impedance.controller_cfg.partial_inertial_dynamics_decoupling is False
+    assert task_impedance.controller_cfg.motion_stiffness_task == (50.0, 30.0, 60.0, 3.0, 8.0, 0.3)
+    assert task_impedance.controller_cfg.motion_damping_ratio_task == (3.0, 2.25, 3.25, 0.3, 0.45, 0.055)
+    assert task_impedance.controller_cfg.motion_stiffness_task != baseline.controller_cfg.motion_stiffness_task
+    assert task_impedance.controller_cfg.motion_damping_ratio_task != baseline.controller_cfg.motion_damping_ratio_task
+    assert task_impedance.position_scale == baseline.position_scale
+    assert task_impedance.orientation_scale == baseline.orientation_scale
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        assert isinstance(task_impedance_cfg.scene.robot.actuators[actuator_name], IdealPDActuatorCfg)
+
+    task_id = (
+        "IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Calibrated-DR-Newton-OSC-TaskImpedance-FlangePose6D"
+    )
+    assert (
+        gym.spec(task_id)
+        .kwargs["env_cfg_entry_point"]
+        .endswith(":Rizon4sGravDisplayportInsertionCalibratedDomainRandomizedNewtonOSCTaskImpedanceFlangePose6DEnvCfg")
+    )
 
 
 def test_displayport_nominal_and_calibrated_osc_vary_robot_kinematics_only():
@@ -628,14 +678,10 @@ def test_displayport_newton_osc_physx_profile_matches_reference_controller():
     assert action.position_scale == 0.025
     assert action.orientation_scale == 0.025
     assert action.clip == {".*": (-0.4, 0.4)}
-    assert controller.inertial_dynamics_decoupling is False
+    assert controller.inertial_dynamics_decoupling is True
     assert controller.partial_inertial_dynamics_decoupling is False
     assert controller.motion_stiffness_task == (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
-    expected_damping = (
-        *(35.0 / (2.0 * 300.0**0.5),) * 3,
-        *(1.1 / (2.0 * 30.0**0.5),) * 3,
-    )
-    assert controller.motion_damping_ratio_task == expected_damping
+    assert controller.motion_damping_ratio_task == (1.0,) * 6
     for actuator_name in ("shoulder", "elbow", "wrist"):
         assert env_cfg.scene.robot.actuators[actuator_name].stiffness == 0.0
         assert env_cfg.scene.robot.actuators[actuator_name].damping == 0.0

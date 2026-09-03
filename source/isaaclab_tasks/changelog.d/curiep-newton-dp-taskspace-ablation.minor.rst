@@ -12,6 +12,8 @@ Added
   for comparison with PhysX task-space policies.
 * Added nominal and calibrated Newton IK and operational-space variants that
   observe and command a matching TCP frame 150 mm from the Rizon 4s flange.
+* Added a calibrated task-impedance variant for comparison with
+  inertia-decoupled operational-space control.
 
 Fixed
 ^^^^^
@@ -22,3 +24,5 @@ Fixed
   competing nullspace motion, and adding an isolated action-scale ablation.
 * Fixed DisplayPort training accepting plugs that tunneled through the socket
   by terminating trajectories beyond the mate-plane tolerance.
+* Fixed Newton DisplayPort operational-space control bypassing configured arm
+  effort limits by using explicit zero-gain actuators for torque commands.
