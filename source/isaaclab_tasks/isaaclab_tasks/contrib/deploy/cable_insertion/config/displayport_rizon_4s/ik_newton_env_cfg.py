@@ -11,11 +11,14 @@ from isaaclab.controllers.operational_space_cfg import OperationalSpaceControlle
 from isaaclab.envs import mdp
 from isaaclab.envs.mdp.actions.actions_cfg import OperationalSpaceControllerActionCfg
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 
 import isaaclab_tasks.contrib.deploy.mdp as deploy_mdp
 
+from ... import rewards as cable_rewards
+from ...displayport_insertion_env_cfg import PLUG_GOAL_ROT_INV, PLUG_INSERTION_OFFSET, SOCKET_INSERTION_OFFSET
 from . import joint_pos_env_cfg
 
 _LEGACY_TCP_OBSERVATION_OFFSET = (0.0, 0.0, 0.1925)
@@ -429,6 +432,31 @@ def _configure_osc_control(env_cfg) -> None:
     the controller must reject on every reset.
     """
     env_cfg.actions.arm_action = _flange_osc_action()
+    mate_frame_params = {
+        "socket_cfg": SceneEntityCfg("dp_socket"),
+        "plug_cfg": SceneEntityCfg("dp_plug"),
+        "socket_offset": SOCKET_INSERTION_OFFSET,
+        "plug_offset": PLUG_INSERTION_OFFSET,
+        "plug_rot_offset": PLUG_GOAL_ROT_INV,
+        "position_threshold": 0.003,
+        "orientation_threshold": 0.0872664626,
+    }
+    env_cfg.rewards.stable_insertion = RewTerm(
+        func=cable_rewards.stable_insertion,
+        weight=0.0,
+        params=mate_frame_params,
+    )
+    env_cfg.rewards.post_success_retraction_action = RewTerm(
+        func=cable_rewards.post_success_retraction_action_l2,
+        weight=0.0,
+        params={
+            **mate_frame_params,
+            "dwell_steps": 1,
+            "action_name": "arm_action",
+            "robot_cfg": SceneEntityCfg("robot"),
+            "insertion_axis": (1.0, 0.0, 0.0),
+        },
+    )
     _enable_task_space_diagnostics(env_cfg)
     env_cfg.events.randomize_arm_pd_gains = None
     if not env_cfg.osc_randomize_arm_joint_friction:
