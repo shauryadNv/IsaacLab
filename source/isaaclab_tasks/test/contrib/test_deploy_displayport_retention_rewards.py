@@ -74,12 +74,8 @@ def test_outward_action_projection_is_frame_invariant() -> None:
     axis = torch.tensor([1.0, 0.0, 0.0])
     scale = torch.tensor([0.025, 0.010, 0.025])
 
-    baseline = _normalized_outward_action(
-        torch.tensor([[0.025, 0.0, 0.0]]), identity, identity, axis, scale
-    )
-    rotated_world = _normalized_outward_action(
-        torch.tensor([[0.025, 0.0, 0.0]]), rotate_z_90, rotate_z_90, axis, scale
-    )
+    baseline = _normalized_outward_action(torch.tensor([[0.025, 0.0, 0.0]]), identity, identity, axis, scale)
+    rotated_world = _normalized_outward_action(torch.tensor([[0.025, 0.0, 0.0]]), rotate_z_90, rotate_z_90, axis, scale)
     socket_rotated_relative_to_robot = _normalized_outward_action(
         torch.tensor([[0.0, 0.010, 0.0]]), rotate_z_90, identity, axis, scale
     )
