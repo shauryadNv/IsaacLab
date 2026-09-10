@@ -1143,11 +1143,12 @@ Export with LEAPP (Recommended)
 
 `LEAPP <https://github.com/nvidia-isaac/leapp>`__ (Lightweight Export Annotations for Policy Pipelines) is the **default and recommended** path from a trained checkpoint to real-robot inference. It packages the policy together with input/output semantics (observation ordering, action scaling, recurrent LSTM state) so Isaac ROS deployment does not need to reimplement Isaac Lab preprocessing by hand.
 
-**Prerequisites:** ``leapp>=0.5.2`` and a trained checkpoint for the matching ROS-inference task.
+**Prerequisites:** ``leapp==0.6.1`` (the repository-pinned version) and a trained checkpoint for the matching
+ROS-inference task. Earlier LEAPP versions do not preserve this task's observation-input contract.
 
 .. code-block:: bash
 
-    ./isaaclab.sh -p -m pip install leapp
+    ./isaaclab.sh -p -m pip install "leapp==0.6.1"
 
 **Export the policy:**
 
