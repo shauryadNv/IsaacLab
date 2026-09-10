@@ -7,7 +7,6 @@
 
 import math
 from dataclasses import fields
-from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -15,9 +14,9 @@ import pytest
 import torch
 import warp as wp
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_newton.sim.schemas import NewtonCollisionCfg, NewtonSDFCollisionCfg
 from isaaclab_physx.physics import PhysxCfg
-
-from pxr import Usd
+from isaaclab_physx.sim.schemas import PhysxCollisionCfg
 
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
 from isaaclab.managers import ObservationTermCfg, SceneEntityCfg
@@ -30,9 +29,6 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s i
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.agents.rsl_rl_ppo_cfg import (
     Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg,
     Rizon4sGravDisplayportInsertionRNNPPORunnerCfg,
-)
-from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
-    _RIZON4S_063459_CALIBRATED_USD_PATH,
 )
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.task_space_env_cfg import (
     Rizon4sTaskSpaceDisplayportInsertionEnvCfg,
@@ -302,7 +298,7 @@ def test_registered_displayport_newton_tasks_resolve_compatible_safe_defaults(ta
     assert isinstance(cfg.actions.arm_action, DeployOperationalSpaceControllerActionCfg)
     assert cfg.scene.num_envs == expected_num_envs
     assert cfg.sim.physics.collision_cfg.max_triangle_pairs == 2**25
-    assert runner.seed == 126
+    assert runner.seed == 123
     assert runner.clip_actions == pytest.approx(1.0)
     cfg.validate()
 
@@ -337,27 +333,27 @@ def test_displayport_newton_timing_solver_and_point_sdf_assets():
     assert collision.reduce_contacts is True
     assert collision.max_triangle_pairs == 2**25
 
-    asset_sublayers = {
-        "display_port_plug_newton_sdf.usda": "display_port_plug_fixed_sdf.usd",
-        "display_port_socket_newton_sdf.usda": "display_port_socket_fixed_sdf_noprotrusions.usd",
-    }
-    asset_paths = (Path(cfg.scene.dp_plug.spawn.usd_path), Path(cfg.scene.dp_socket.spawn.usd_path))
-    assert {path.name for path in asset_paths} == set(asset_sublayers)
-
-    for path in asset_paths:
-        assert path.is_file()
-        stage = Usd.Stage.Open(str(path))
-        assert stage is not None
-        assert stage.GetRootLayer().subLayerPaths == [f"./{asset_sublayers[path.name]}"]
-
-        collision_prims = [prim for prim in stage.Traverse() if prim.HasAttribute("newton:contactGap")]
-        assert collision_prims
-        for prim in collision_prims:
-            schemas = prim.GetMetadata("apiSchemas").GetAppliedItems()
-            assert "NewtonCollisionAPI" in schemas
-            assert "NewtonSDFCollisionAPI" in schemas
-            assert prim.GetAttribute("newton:contactGap").Get() == pytest.approx(0.005)
-            assert prim.GetAttribute("newton:hydroelasticEnabled").Get() is False
+    assert cfg.scene.dp_plug.spawn.usd_path.endswith("/displayport_plug.usd")
+    assert cfg.scene.dp_socket.spawn.usd_path.endswith("/displayport_socket_no_protrusions.usd")
+    collision_fragment_sets = (
+        (cfg.scene.dp_plug.spawn.collision_props, 0.00001, -0.00005),
+        (cfg.scene.dp_socket.spawn.collision_props, 0.0001, -0.0001),
+    )
+    for fragments, contact_offset, rest_offset in collision_fragment_sets:
+        physx = next(fragment for fragment in fragments if isinstance(fragment, PhysxCollisionCfg))
+        collision = next(fragment for fragment in fragments if isinstance(fragment, NewtonCollisionCfg))
+        sdf = next(fragment for fragment in fragments if isinstance(fragment, NewtonSDFCollisionCfg))
+        assert physx.contact_offset == pytest.approx(contact_offset)
+        assert physx.rest_offset == pytest.approx(rest_offset)
+        assert collision.contact_margin == pytest.approx(0.0)
+        assert collision.contact_gap == pytest.approx(0.005)
+        assert sdf.sdf_max_resolution == 256
+        assert sdf.sdf_narrow_band_inner == pytest.approx(-0.005)
+        assert sdf.sdf_narrow_band_outer == pytest.approx(0.005)
+        assert sdf.sdf_texture_format == "uint16"
+        assert sdf.sdf_padding == pytest.approx(0.005)
+        assert sdf.hydroelastic_enabled is False
+        assert sdf.hydroelastic_stiffness == pytest.approx(1.0e8)
 
 
 def test_displayport_newton_osc_abi_robot_and_gravity_settings():
@@ -372,7 +368,7 @@ def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     assert action.body_offset is not None
     assert tuple(action.body_offset.pos) == pytest.approx((0.0, 0.0, 0.0))
     assert tuple(action.body_offset.rot) == pytest.approx((0.0, 0.0, 0.0, 1.0))
-    assert action.position_scale == pytest.approx(0.025)
+    assert tuple(action.position_scale) == pytest.approx((0.025, 0.025, 0.010))
     assert action.orientation_scale == pytest.approx(0.025)
     assert action.clip is None
     assert action.nullspace_joint_pos_target == "none"
@@ -388,10 +384,6 @@ def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     assert tuple(controller.motion_damping_ratio_task) == pytest.approx((1.0,) * 6)
     assert controller.nullspace_control == "none"
 
-    calibrated_usd = Path(cfg.scene.robot.spawn.usd_path)
-    assert cfg.scene.robot.spawn.usd_path == _RIZON4S_063459_CALIBRATED_USD_PATH
-    assert calibrated_usd.name == "Rizon4s-063459_with_Grav_calibrated_kinematics.usd"
-    assert calibrated_usd.is_file()
     assert cfg.scene.robot.spawn.rigid_props.gravcomp == pytest.approx(1.0)
     assert cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is False
 
@@ -457,7 +449,7 @@ def test_displayport_newton_observation_abi_noise_and_deployment_metadata():
     assert critic.joint_vel.params["asset_cfg"].joint_names == [".*"]
 
     ros_cfg = newton_ros_cfg.Rizon4sTaskSpaceNewtonDisplayportInsertionROSInferenceEnvCfg()
-    assert ros_cfg.obs_order == ["socket_kp_pos", "eef_pos", "eef_rot_6d", "socket_kp_rot_6d"]
+    assert ros_cfg.obs_order == ["eef_pos", "eef_rot_6d", "socket_kp_pos", "socket_kp_rot_6d"]
     assert ros_cfg.policy_action_space == "task"
     assert ros_cfg.arm_joint_names == _ARM_JOINTS
     assert ros_cfg.action_space == 6
@@ -558,7 +550,7 @@ def test_displayport_newton_runner_and_play_preserve_physx_defaults():
     """Newton uses its checkpoint horizon and safe shard size without mutating PhysX defaults."""
     newton_runner = Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg()
     physx_runner = Rizon4sGravDisplayportInsertionRNNPPORunnerCfg()
-    assert newton_runner.seed == 126
+    assert newton_runner.seed == 123
     assert newton_runner.max_iterations == 1000
     assert newton_runner.experiment_name == "displayport_insertion_rizon4s_newton_osc"
     assert physx_runner.max_iterations == 1500
@@ -594,7 +586,7 @@ def test_displayport_newton_runner_and_play_preserve_physx_defaults():
     assert actor.socket_kp_pos.noise is None
     assert tuple(actor.eef_pos.params["offset"]) == pytest.approx((0.0, 0.0, 0.1925))
     assert physx_cfg.actions.arm_action.controller_cfg.inertial_dynamics_decoupling is False
-    assert physx_cfg.scene.robot.spawn.usd_path != train_cfg.scene.robot.spawn.usd_path
+    assert physx_cfg.scene.robot.spawn.usd_path == train_cfg.scene.robot.spawn.usd_path
     assert physx_cfg.events.plug_physics_material.params["static_friction_range"] == pytest.approx((0.001, 0.001))
     assert physx_cfg.events.robot_physics_material.params["static_friction_range"] == pytest.approx((0.75, 0.75))
 

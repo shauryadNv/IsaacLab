@@ -9,9 +9,9 @@ It is separate from :mod:`task_space_env_cfg` because its checkpoint ABI observe
 the flange origin in a different tensor order than the PhysX task-space policy.
 """
 
-import os
-
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg, NewtonCollisionPipelineCfg, NewtonShapeCfg
+from isaaclab_newton.sim.schemas import NewtonCollisionCfg, NewtonSDFCollisionCfg
+from isaaclab_physx.sim.schemas import PhysxCollisionCfg
 
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
@@ -26,29 +26,40 @@ from isaaclab.utils.noise import UniformNoiseCfg
 
 import isaaclab_tasks.contrib.deploy.mdp as deploy_mdp
 from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg import (
-    DISPLAY_ASSETS_DIR,
     SOCKET_INSERTION_OFFSET,
     ObservationsCfg,
 )
 from isaaclab_tasks.contrib.deploy.mdp.noise_models import ResetSampledConstantNoiseModelCfg
 from isaaclab_tasks.utils import PresetCfg
 
-from .joint_pos_env_cfg import _RIZON4S_063459_CALIBRATED_USD_PATH
 from .task_space_env_cfg import Rizon4sTaskSpaceDisplayportInsertionEnvCfg, TaskSpaceEventCfg
 
 _ARM_JOINTS = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
-_OSC_ACTION_SCALE = 0.025
+_OSC_POSITION_SCALE = (0.025, 0.025, 0.010)
+_OSC_ORIENTATION_SCALE = 0.025
 _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 _OSC_DAMPING_RATIO = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 _NEWTON_NUM_ENVS = 256
 _NEWTON_MAX_TRIANGLE_PAIRS = 2**25
 
-# These small USDA layers apply Newton collision schemas to the versioned
-# DisplayPort geometry already shipped in this package. Keeping each layer next
-# to its relative sublayer makes installed-package and offline resolution
-# deterministic without duplicating the underlying geometry.
-_NEWTON_PLUG_USD_PATH = os.path.join(DISPLAY_ASSETS_DIR, "display_port_plug_newton_sdf.usda")
-_NEWTON_SOCKET_USD_PATH = os.path.join(DISPLAY_ASSETS_DIR, "display_port_socket_newton_sdf.usda")
+
+def _newton_sdf_properties(
+    contact_offset: float, rest_offset: float
+) -> list[PhysxCollisionCfg | NewtonCollisionCfg | NewtonSDFCollisionCfg]:
+    """Create point-SDF properties while preserving source collision offsets."""
+    return [
+        PhysxCollisionCfg(contact_offset=contact_offset, rest_offset=rest_offset),
+        NewtonCollisionCfg(contact_margin=0.0, contact_gap=0.005),
+        NewtonSDFCollisionCfg(
+            sdf_max_resolution=256,
+            sdf_narrow_band_inner=-0.005,
+            sdf_narrow_band_outer=0.005,
+            sdf_texture_format="uint16",
+            sdf_padding=0.005,
+            hydroelastic_enabled=False,
+            hydroelastic_stiffness=1.0e8,
+        ),
+    ]
 
 
 @configclass
@@ -150,9 +161,8 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
     socket_rot_6d``. This differs from the TCP-first PhysX task-space contract,
     so the configurations must not share checkpoints despite both being 18-D.
 
-    The default robot asset contains measured kinematics for the reference
-    Rizon4s with serial number 063459. Override ``scene.robot.spawn.usd_path``
-    with the calibrated USD for a different robot.
+    Override ``scene.robot.spawn.usd_path`` with a USD calibrated for the
+    robot that will execute the policy.
     """
 
     def __post_init__(self) -> None:
@@ -169,8 +179,11 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
         self.decimation = 3
         self.sim.render_interval = self.decimation
 
-        self.scene.dp_plug.spawn.usd_path = _NEWTON_PLUG_USD_PATH
-        self.scene.dp_socket.spawn.usd_path = _NEWTON_SOCKET_USD_PATH
+        # Newton's importer applies SDF cooking to enabled collision meshes;
+        # disabled visual colliders remain inert. Preserve the source task's PhysX
+        # offsets because Newton also consumes those compatibility attributes.
+        self.scene.dp_plug.spawn.collision_props = _newton_sdf_properties(0.00001, -0.00005)
+        self.scene.dp_socket.spawn.collision_props = _newton_sdf_properties(0.0001, -0.0001)
 
         self.observations = NewtonTaskSpaceObservationsCfg()
         self.task_space_obs_order = ["socket_pos", "tool_pos", "tool_rot_6d", "socket_rot_6d"]
@@ -195,8 +208,8 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
             ),
             nullspace_joint_pos_target="none",
             clip=None,
-            position_scale=_OSC_ACTION_SCALE,
-            orientation_scale=_OSC_ACTION_SCALE,
+            position_scale=_OSC_POSITION_SCALE,
+            orientation_scale=_OSC_ORIENTATION_SCALE,
         )
 
         # Retain the fully wired base events and replace only Newton-specific
@@ -211,7 +224,6 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
 
         # Newton cancels robot-body gravity directly. OSC gravity compensation
         # stays disabled to avoid applying gravity twice.
-        self.scene.robot.spawn.usd_path = _RIZON4S_063459_CALIBRATED_USD_PATH
         self.scene.robot.spawn.rigid_props = sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0)
         self.scene.robot.spawn.joint_drive_props = sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False)
 

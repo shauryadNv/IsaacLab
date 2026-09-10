@@ -101,7 +101,6 @@ Pose conventions
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import importlib.metadata as metadata
 import json

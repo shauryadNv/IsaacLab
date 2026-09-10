@@ -38,7 +38,7 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionROSInferenceEnvCfg(Rizon4sTaskSp
 
         # Keep internal observation-term aliases in ``task_space_obs_order``;
         # expose only the canonical Isaac ROS Deploy port names here.
-        self.obs_order = ["socket_kp_pos", "eef_pos", "eef_rot_6d", "socket_kp_rot_6d"]
+        self.obs_order = ["eef_pos", "eef_rot_6d", "socket_kp_pos", "socket_kp_rot_6d"]
         self.policy_action_space = "task"
         self.arm_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
         self.action_space = 6

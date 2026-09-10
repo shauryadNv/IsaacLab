@@ -47,12 +47,21 @@ TASK_SPACE_EXPORT_MODEL_NAME = "DisplayPortTaskSpace"
 
 _ROT6D_ELEMENTS = ["r00", "r01", "r02", "r10", "r11", "r12"]
 
-# (tensor name, slice of the 18D actor observation, element names, source tag, LEAPP kind)
+# Public tensor name, source slice in the 18D actor observation, element names,
+# source tag, LEAPP kind, and destination offset in the actor observation. Public
+# inputs stay EEF-first even when a checkpoint was trained with another order.
 _TASK_SPACE_INPUT_SPEC = (
-    ("eef_pos", slice(0, 3), ["x", "y", "z"], "eef_pose_pos", "state/body/position"),
-    ("eef_rot_6d", slice(3, 9), _ROT6D_ELEMENTS, "eef_pose_rot6d", "state/body/rotation_6d"),
-    ("socket_kp_pos", slice(9, 12), ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position"),
-    ("socket_kp_rot_6d", slice(12, 18), _ROT6D_ELEMENTS, "socket_kp_pose_rot6d", "state/body/rotation_6d"),
+    ("eef_pos", slice(0, 3), ["x", "y", "z"], "eef_pose_pos", "state/body/position", 0),
+    ("eef_rot_6d", slice(3, 9), _ROT6D_ELEMENTS, "eef_pose_rot6d", "state/body/rotation_6d", 3),
+    ("socket_kp_pos", slice(9, 12), ["x", "y", "z"], "socket_kp_pose_pos", "state/body/position", 9),
+    (
+        "socket_kp_rot_6d",
+        slice(12, 18),
+        _ROT6D_ELEMENTS,
+        "socket_kp_pose_rot6d",
+        "state/body/rotation_6d",
+        12,
+    ),
 )
 
 # Map each training observation term to its Deploy-facing input name and semantics.
@@ -128,7 +137,7 @@ def resolve_task_space_input_spec(env_cfg):
     if isinstance(obs_order, (str, bytes)) or not isinstance(obs_order, Sequence):
         raise TypeError("env_cfg.task_space_obs_order must be a sequence of observation-term names.")
 
-    input_spec = []
+    input_specs_by_name = {}
     seen_terms = set()
     seen_input_names = set()
     start = 0
@@ -146,7 +155,7 @@ def resolve_task_space_input_spec(env_cfg):
             raise ValueError(f"Duplicate Deploy input resolved from task-space observation metadata: {input_name!r}.")
 
         stop = start + width
-        input_spec.append((input_name, slice(start, stop), element_names, source, kind))
+        input_specs_by_name[input_name] = (input_name, slice(start, stop), element_names, source, kind, start)
         seen_terms.add(term_name)
         seen_input_names.add(input_name)
         start = stop
@@ -155,34 +164,36 @@ def resolve_task_space_input_spec(env_cfg):
         raise ValueError(
             f"env_cfg.task_space_obs_order must describe exactly 18 values; resolved {start} from {list(obs_order)!r}."
         )
-    expected_input_names = {entry[0] for entry in _TASK_SPACE_INPUT_SPEC}
-    if seen_input_names != expected_input_names:
+    public_input_names = [entry[0] for entry in _TASK_SPACE_INPUT_SPEC]
+    if seen_input_names != set(public_input_names):
         raise ValueError(
             "env_cfg.task_space_obs_order must resolve to exactly the four canonical DisplayPort Deploy inputs."
         )
-    return tuple(input_spec)
+    return tuple(input_specs_by_name[name] for name in public_input_names)
 
 
 def split_and_annotate_task_space_obs(graph_name: str, policy_obs, input_spec=_TASK_SPACE_INPUT_SPEC):
-    """Expose the exact 18D trained observation as four Deploy-facing input tensors."""
+    """Expose EEF-first inputs while reconstructing the checkpoint's trained actor order."""
     from leapp.utils.tensor_description import TensorSemantics
 
-    parts = []
-    for name, index, element_names, source, kind in input_spec:
-        parts.append(
-            _export.annotate.input_tensors(
-                graph_name,
-                TensorSemantics(
-                    name=name,
-                    ref=policy_obs[:, index],
-                    kind=kind,
-                    element_names=[element_names],
-                    extra={"source": source},
-                ),
-            )
+    actor_parts = []
+    for name, index, element_names, source, kind, actor_offset in input_spec:
+        part = _export.annotate.input_tensors(
+            graph_name,
+            TensorSemantics(
+                name=name,
+                ref=policy_obs[:, index],
+                kind=kind,
+                element_names=[element_names],
+                extra={"source": source},
+            ),
         )
-    # Re-concatenate so the policy still sees the byte-identical vector it was trained on.
-    return _export.torch.cat(parts, dim=-1)
+        actor_parts.append((actor_offset, part))
+
+    # LEAPP observes the EEF-first annotation order above. Sort only for the
+    # internal concatenation consumed by the checkpoint.
+    actor_parts.sort(key=lambda item: item[0])
+    return _export.torch.cat([part for _, part in actor_parts], dim=-1)
 
 
 def export_task_space_action(graph_name: str, tensor, export_method: str) -> None:

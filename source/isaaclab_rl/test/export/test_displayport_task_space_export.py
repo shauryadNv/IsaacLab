@@ -63,25 +63,58 @@ def test_task_space_input_spec_defaults_to_physx_contract():
 
 
 def test_task_space_input_spec_uses_newton_observation_order():
-    """Test Newton metadata produces canonical Deploy ports in trained actor order."""
+    """Test Newton metadata exposes EEF-first ports mapped from the trained actor order."""
     export_module = _load_export_module()
     obs_order = ["socket_pos", "tool_pos", "tool_rot_6d", "socket_rot_6d"]
 
     resolved = export_module.resolve_task_space_input_spec(SimpleNamespace(task_space_obs_order=obs_order))
 
     assert [entry[0] for entry in resolved] == [
-        "socket_kp_pos",
         "eef_pos",
         "eef_rot_6d",
+        "socket_kp_pos",
         "socket_kp_rot_6d",
     ]
-    assert [(entry[1].start, entry[1].stop) for entry in resolved] == [(0, 3), (3, 6), (6, 12), (12, 18)]
+    assert [(entry[1].start, entry[1].stop) for entry in resolved] == [(3, 6), (6, 12), (0, 3), (12, 18)]
     assert [entry[3] for entry in resolved] == [
-        "socket_kp_pose_pos",
         "eef_pose_pos",
         "eef_pose_rot6d",
+        "socket_kp_pose_pos",
         "socket_kp_pose_rot6d",
     ]
+    assert [entry[5] for entry in resolved] == [3, 6, 0, 12]
+
+
+def test_task_space_inputs_are_annotated_eef_first_and_rebuilt_in_newton_actor_order(monkeypatch):
+    """Test public input order does not alter the vector consumed by a Newton checkpoint."""
+    export_module = _load_export_module()
+    resolved = export_module.resolve_task_space_input_spec(
+        SimpleNamespace(task_space_obs_order=["socket_pos", "tool_pos", "tool_rot_6d", "socket_rot_6d"])
+    )
+    annotation_order = []
+    annotated_values = {}
+
+    def _annotate_input(_graph_name, semantics):
+        annotation_order.append(semantics.name)
+        annotated_values[semantics.name] = semantics.ref.clone()
+        return semantics.ref
+
+    monkeypatch.setattr(
+        export_module._export, "annotate", SimpleNamespace(input_tensors=_annotate_input), raising=False
+    )
+    monkeypatch.setattr(export_module._export, "torch", torch, raising=False)
+    trained_actor_obs = torch.arange(18, dtype=torch.float32).reshape(1, 18)
+
+    rebuilt = export_module.split_and_annotate_task_space_obs(
+        "DisplayPortTaskSpace", trained_actor_obs, input_spec=resolved
+    )
+
+    assert annotation_order == ["eef_pos", "eef_rot_6d", "socket_kp_pos", "socket_kp_rot_6d"]
+    torch.testing.assert_close(annotated_values["eef_pos"], trained_actor_obs[:, 3:6])
+    torch.testing.assert_close(annotated_values["eef_rot_6d"], trained_actor_obs[:, 6:12])
+    torch.testing.assert_close(annotated_values["socket_kp_pos"], trained_actor_obs[:, 0:3])
+    torch.testing.assert_close(annotated_values["socket_kp_rot_6d"], trained_actor_obs[:, 12:18])
+    torch.testing.assert_close(rebuilt, trained_actor_obs)
 
 
 @pytest.mark.parametrize(

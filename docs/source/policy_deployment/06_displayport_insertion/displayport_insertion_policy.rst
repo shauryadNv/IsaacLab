@@ -77,13 +77,12 @@ The DisplayPort plug and socket assets used by these environments are published 
 
 **The robot asset matters too.** The checks above concern the plug and socket, but the arm's USD must also
 represent *your* robot — particularly its kinematic parameters, which may vary unit to unit. This matters most for
-joint-space training, where the policy commands joints directly. The PhysX environments spawn the stock
-:obj:`~isaaclab_assets.robots.flexiv.FLEXIV_RIZON4S_GRAV_GRIPPER_CFG` asset, which describes a nominal Rizon 4s
-rather than any particular unit. Flexiv's
+joint-space training, where the policy commands joints directly. All provided environments spawn the stock
+:obj:`~isaaclab_assets.robots.flexiv.FLEXIV_RIZON4S_GRAV_GRIPPER_CFG` asset by default; it describes a nominal
+Rizon 4s rather than a particular unit. Flexiv's
 `flexiv_calibration <https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.3/flexiv_calibration>`__
-workflow exports a calibrated robot description for a specific arm; convert the result to USD and set
-``scene.robot.spawn.usd_path`` in a derived environment configuration. The Newton profile uses the bundled
-calibration for Rizon 4s serial number 063459 by default; override it for a different arm.
+workflow exports a calibrated robot description for a specific arm. Convert the result to USD and override
+``env.scene.robot.spawn.usd_path`` when training a policy for hardware deployment.
 
 **Practical workflow:**
 
@@ -356,9 +355,9 @@ Newton Point-SDF Profile
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use the dedicated Newton task-space profile when training an operational-space policy with the Newton backend.
-It is additive to the existing PhysX environments and preserves the training and deployment ABI of the reference
-``dp_up_osc_cal_s025_c200s2000/model_999.pt`` policy. The checkpoint is not bundled; train a new policy with the
-task id below.
+It is additive to the existing PhysX environments and preserves the internal actor ABI and controller settings of
+the real-robot reference ``dp_hwbest2_axscale10_cal_mjw_n10_c500_i1000_4g_e1024/model_999.pt`` policy. The
+checkpoint is not bundled; train a new policy with the task id below.
 
 .. important::
 
@@ -374,9 +373,9 @@ task id below.
    task id without a shape error and still receive semantically incorrect inputs. Always use a Newton task id for
    a checkpoint trained with the Newton contract.
 
-The ``display_port_*_newton_sdf.usda`` files are small metadata overlays on the versioned DisplayPort geometry
-shipped with this package. They stay next to their relative sublayers so installed-package and offline asset
-resolution are deterministic; a Nucleus dependency is not required for these task-specific schemas.
+The plug and socket geometry is loaded from the same Isaac asset-server files as the PhysX task. The Newton
+profile applies point-SDF cooking metadata through collision fragments at spawn time; it does not require a second
+copy of those assets in the repository.
 
 The Newton actor applies reset-held socket-position noise in ``[-0.01, 0.01]`` m. For parity with the reference
 training run, one scalar is sampled per environment and broadcast across XYZ. Independent per-axis noise is a
@@ -411,13 +410,14 @@ different training distribution. The privileged critic retains all 13 robot join
      - enabled / ``2**25``
      - scene-wide capacity for the 256-environment per-rank default
 
-This is an MJWarp point-SDF configuration. VBD and hydroelastic SDF are separate experiments and do not reproduce
-the reference checkpoint. ``max_triangle_pairs`` is scene-wide: when Newton reports an overflow, reduce the
-per-rank environment count or increase the capacity. Overflow can omit candidate contacts.
+This is an MJWarp point-SDF configuration on the repository's pinned stable Newton 1.6 stack. VBD and
+hydroelastic SDF are separate experiments and do not reproduce the reference checkpoint. ``max_triangle_pairs``
+is scene-wide: when Newton reports an overflow, reduce the per-rank environment count or increase the capacity.
+Overflow can omit candidate contacts.
 
 The policy emits a six-dimensional relative pose command at the flange origin. RSL-RL first clips each raw actor
-output to ``[-1, 1]``; the OSC action then applies ``0.025`` translation and rotation scales. The action-term clip
-is intentionally unset so this transform has only one clipping stage.
+output to ``[-1, 1]``; the OSC action then applies translation scales ``(0.025, 0.025, 0.010)`` m and a rotation
+scale of ``0.025`` rad. The action-term clip is intentionally unset so this transform has only one clipping stage.
 The OSC stiffness is ``(300, 300, 300, 30, 30, 30)`` with damping ratio ``1.0`` on every axis.
 Full inertial-dynamics decoupling is enabled; partial decoupling and null-space control are disabled. Arm joint-PD
 stiffness and damping are zero so OSC supplies the arm effort. Newton rigid-body gravity compensation is enabled
@@ -428,16 +428,18 @@ of ``3.0`` / ``0.001`` / ``1.0``, additive arm-joint friction randomization in `
 randomization, and at-goal resets annealed from ``0.8`` to ``0.0`` over iterations 0 through 500.
 
 Train the deployment-compatible task for 1,000 iterations. Passing ``presets=newton_sdf`` explicitly records the
-selected contact profile even though it is also the Newton task's default:
+selected contact profile even though it is also the Newton task's default. The public task uses the nominal robot
+asset; replace the path below with the calibrated USD for the arm that will execute the policy:
 
 .. code-block:: bash
 
     ./isaaclab.sh train --rl_library rsl_rl \
         --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0 \
         --num_envs 256 \
-        --seed 126 \
+        --seed 123 \
         --max_iterations 1000 \
-        presets=newton_sdf
+        presets=newton_sdf \
+        env.scene.robot.spawn.usd_path=/absolute/path/to/calibrated_robot.usd
 
 Evaluate a checkpoint with deterministic actor observations:
 
@@ -449,9 +451,11 @@ Evaluate a checkpoint with deterministic actor observations:
         --checkpoint logs/rsl_rl/displayport_insertion_rizon4s_newton_osc/<run>/model_999.pt \
         --deterministic \
         --visualizer kit \
-        presets=newton_sdf
+        presets=newton_sdf \
+        env.scene.robot.spawn.usd_path=/absolute/path/to/calibrated_robot.usd
 
-Export from the matching ROS-inference task so LEAPP uses the socket-first/flange-origin observation metadata:
+Export from the matching ROS-inference task. LEAPP exposes the canonical EEF-first named inputs and reconstructs
+the checkpoint's socket-first/flange-origin actor vector inside the graph:
 
 .. code-block:: bash
 
@@ -540,7 +544,8 @@ target. What differs is the space that delta lives in.
 
       .. code-block:: python
 
-          _ACTION_SCALE = 0.025          # 25 mm and 0.025 rad per step
+          _POSITION_SCALE = (0.025, 0.025, 0.010)  # Newton reference [m]
+          _ORIENTATION_SCALE = 0.025                  # [rad]
           _STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 
           self.actions.arm_action = mdp.DeployOperationalSpaceControllerActionCfg(
@@ -552,8 +557,8 @@ target. What differs is the space that delta lives in.
                   motion_stiffness_task=_STIFFNESS,
                   ...
               ),
-              position_scale=_ACTION_SCALE,
-              orientation_scale=_ACTION_SCALE,
+              position_scale=_POSITION_SCALE,
+              orientation_scale=_ORIENTATION_SCALE,
           )
 
       **Action dimension:** 6 — ``[dx, dy, dz, dθx, dθy, dθz]``, the first three in metres and the last three in
@@ -567,8 +572,9 @@ target. What differs is the space that delta lives in.
         the **TCP**. The Newton profile instead observes and controls at the **flange origin**. The
         real-robot bridge must reproduce the frame contract of the selected backend.
 
-**Action scale:** ``0.025`` in both cases — read as radians per joint per step in joint space, and as metres /
-radians per step in task space.
+**Action scale:** Joint space uses ``0.025`` rad per step. PhysX task space uses ``0.025`` for translation
+[m] and rotation [rad]; the Newton reference reduces only Z translation to ``0.010`` m while keeping X/Y and
+rotation at ``0.025``.
 
 **Control frequency:** the PhysX profiles use ``sim.dt = 1/240`` s with ``decimation = 8`` (30 Hz policy rate).
 The Newton profile uses a 100 Hz outer step, 20 solver substeps, and ``decimation = 3`` (approximately 33.3 Hz);
@@ -995,11 +1001,12 @@ when ``--visualizer`` is omitted; there is no ``--headless`` argument on the uni
           ./isaaclab.sh train --rl_library rsl_rl \
               --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0 \
               --num_envs 256 \
-              --seed 126 \
+              --seed 123 \
               --viz none \
               --max_iterations 1000 \
               --video --video_length 222 --video_interval 76800 \
-              presets=newton_sdf
+              presets=newton_sdf \
+              env.scene.robot.spawn.usd_path=/absolute/path/to/calibrated_robot.usd
 
 **Multi-GPU (distributed) training** — for example on a cluster / OSMO workflow (substitute any task id above):
 
@@ -1058,7 +1065,7 @@ Choosing a Control Space
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The control spaces share the same algorithm, reward, and curriculum. The PhysX profiles run at 30 Hz; the Newton
-Newton profile runs at approximately 33.3 Hz.
+profile runs at approximately 33.3 Hz.
 
 .. list-table::
    :widths: 20 40 40
@@ -1072,7 +1079,7 @@ Newton profile runs at approximately 33.3 Hz.
      - 6-DoF Cartesian pose delta (OSC)
    * - Actor observation
      - 14 dims (or 21 with ``joint_vel``)
-     - 18 dims (PhysX: TCP-first; Newton: socket-first with flange-origin pose)
+     - 18 dims (PhysX: TCP-first; Newton actor: socket-first with flange-origin pose; deployment ports: EEF-first)
    * - Real-robot requirement
      - Joint servo behavior must match sim; benefits from joint-level system identification
      - Task-space bridge that reproduces the selected OSC contract: TCP-observe / flange-control for PhysX, or
@@ -1098,16 +1105,16 @@ kinematics.
    as end-effector error during insertion — where the clearances are sub-millimetre. Individual arms differ from
    the nominal CAD model, so the shipped asset will not describe your unit exactly.
 
-   The PhysX environments spawn the stock
+   The provided environments spawn the stock
    :obj:`~isaaclab_assets.robots.flexiv.FLEXIV_RIZON4S_GRAV_GRIPPER_CFG` asset, which describes a nominal Rizon 4s
    rather than any particular unit. Before training a joint-space policy you intend to deploy, replace it with a
    description of your own arm. Flexiv publishes a per-robot calibration workflow for exporting an accurate robot
    description:
    `flexiv_calibration <https://github.com/flexivrobotics/flexiv_ros2/tree/release/lyrical-v1.9.3/flexiv_calibration>`__.
-   Follow it to generate the calibrated description for your setup and convert it to USD. Derive the relevant
-   environment configuration and replace ``scene.robot.spawn.usd_path``. The task does not implement a
-   ``DP_ROBOT_USD`` environment-variable override. The Newton profile uses the bundled calibration for serial
-   number 063459; override ``scene.robot.spawn.usd_path`` when deploying to another arm.
+   Follow it to generate the calibrated description for your setup and convert it to USD. Override
+   ``env.scene.robot.spawn.usd_path=/absolute/path/to/calibrated_robot.usd`` on the training and play commands.
+   The task does not implement a ``DP_ROBOT_USD`` environment-variable override and does not bundle a
+   serial-specific calibration.
 
    Task-space policies are less exposed to this: they are commanded in Cartesian space, so kinematic error affects
    the observed end-effector pose rather than being injected straight into the commanded joint targets. Getting the
@@ -1273,13 +1280,14 @@ The ROS inference environments define the deployment metadata LEAPP traces durin
 
       ``Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0``
 
-      - ``obs_order``: ``["socket_pos", "tool_pos", "tool_rot_6d", "socket_rot_6d"]``
+      - ``obs_order``: ``["eef_pos", "eef_rot_6d", "socket_kp_pos", "socket_kp_rot_6d"]``
       - ``policy_action_space``: ``"task"`` (``pose_rel``)
       - ``observation_space``: 18
       - ``action_space``: 6
-      - ``action_scale``: 0.025 (metres for translation, radians for rotation)
+      - translation scale: ``[0.025, 0.025, 0.010]`` m; rotation scale: ``0.025`` rad
 
-      Fixed deployment poses are set in
+      The public ports are EEF-first; the exported graph reconstructs the socket-first observation vector used
+      during Newton training. Fixed deployment poses are set in
       ``config/displayport_rizon_4s/task_space_newton_ros_inference_env_cfg.py``.
 
 .. _export-taskspace-leapp:
