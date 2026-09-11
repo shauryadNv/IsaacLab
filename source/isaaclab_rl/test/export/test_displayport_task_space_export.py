@@ -9,7 +9,7 @@ import importlib.util
 import inspect
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
@@ -99,6 +99,15 @@ def test_task_space_inputs_are_annotated_eef_first_and_rebuilt_in_newton_actor_o
         annotated_values[semantics.name] = semantics.ref.clone()
         return semantics.ref
 
+    leapp_module = ModuleType("leapp")
+    leapp_module.__path__ = []
+    leapp_utils_module = ModuleType("leapp.utils")
+    leapp_utils_module.__path__ = []
+    tensor_description_module = ModuleType("leapp.utils.tensor_description")
+    tensor_description_module.TensorSemantics = SimpleNamespace
+    monkeypatch.setitem(sys.modules, "leapp", leapp_module)
+    monkeypatch.setitem(sys.modules, "leapp.utils", leapp_utils_module)
+    monkeypatch.setitem(sys.modules, "leapp.utils.tensor_description", tensor_description_module)
     monkeypatch.setattr(
         export_module._export, "annotate", SimpleNamespace(input_tensors=_annotate_input), raising=False
     )
