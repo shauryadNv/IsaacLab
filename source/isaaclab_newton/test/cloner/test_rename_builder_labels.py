@@ -262,7 +262,10 @@ class TestReplicateBuilderMapping(unittest.TestCase):
                 source_site_indices={id(source): {"ee": [site_idx]}},
             )
 
-        replicate.assert_called_once()
+        if newton_clone_utils_module._REPLICATE_SUPPORTS_LABEL_PREFIXES:
+            replicate.assert_called_once()
+        else:
+            replicate.assert_not_called()
         self.assertEqual(
             local_site_map["ee"],
             [[base_shape + world * stride + site_idx] for world in range(3)],
@@ -294,7 +297,10 @@ class TestReplicateBuilderMapping(unittest.TestCase):
                 env_root_sites={"origin": env_root_offset},
             )
 
-        replicate.assert_called_once()
+        if newton_clone_utils_module._REPLICATE_SUPPORTS_LABEL_PREFIXES:
+            replicate.assert_called_once()
+        else:
+            replicate.assert_not_called()
         stride = source.shape_count
         self.assertEqual(source.shape_count, 1)
         self.assertEqual(
@@ -499,7 +505,7 @@ class TestReplicationNamesItsCopies(unittest.TestCase):
     _SRC = "/World/envs/env_0/Robot"
     _ENV = "/World/envs/env_{}"
 
-    def test_batched_prefixes_name_each_world_and_preserve_the_prototype(self):
+    def _assert_copies_name_each_world_and_preserve_the_prototype(self):
         source = newton.ModelBuilder()
         body = source.add_body(xform=wp.transform(), label=self._SRC)
         source.add_shape_box(body=body, label=f"{self._SRC}/shape")
@@ -531,6 +537,15 @@ class TestReplicationNamesItsCopies(unittest.TestCase):
             ]
             self.assertEqual(getattr(builder, name), expected)
             self.assertEqual(getattr(source, name), source_labels)
+
+    def test_batched_prefixes_name_each_world_and_preserve_the_prototype(self):
+        if not newton_clone_utils_module._REPLICATE_SUPPORTS_LABEL_PREFIXES:
+            self.skipTest("Installed Newton does not support batched label prefixes")
+        self._assert_copies_name_each_world_and_preserve_the_prototype()
+
+    def test_per_world_fallback_names_each_world_and_preserves_the_prototype(self):
+        with mock.patch.object(newton_clone_utils_module, "_REPLICATE_SUPPORTS_LABEL_PREFIXES", False, create=True):
+            self._assert_copies_name_each_world_and_preserve_the_prototype()
 
     def test_hook_labels_are_rewritten_after_the_slow_path(self):
         source = newton.ModelBuilder()

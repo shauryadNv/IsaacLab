@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from inspect import signature
 from typing import Any
 
 import numpy as np
@@ -18,6 +19,17 @@ from isaaclab.cloner import path as clone_path
 from isaaclab.sim.utils.newton_model_utils import replace_newton_builder_shape_colors
 
 from isaaclab_newton.renderers.visual_material import import_builder_visual_material_paths
+
+
+def _replicate_supports_label_prefixes() -> bool:
+    """Return whether Newton can assign one label prefix per replicated world."""
+    try:
+        return "label_prefixes" in signature(ModelBuilder.replicate).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+_REPLICATE_SUPPORTS_LABEL_PREFIXES = _replicate_supports_label_prefixes()
 
 
 def _has_visible_non_collision_geometry(stage: Usd.Stage, prim_path: str) -> bool:
@@ -286,7 +298,13 @@ def replicate_builder_mapping(
         try:
             prefix = _rebase_labels(source_builder, sources[0], destinations[0])
             prefixes = [prefix.format(int(env_id)) for env_id in env_ids]
-            builder.replicate(source_builder, num_worlds, xforms=xforms, label_prefixes=prefixes)
+            if _REPLICATE_SUPPORTS_LABEL_PREFIXES:
+                builder.replicate(source_builder, num_worlds, xforms=xforms, label_prefixes=prefixes)
+            else:
+                for xform, label_prefix in zip(xforms, prefixes, strict=True):
+                    builder.begin_world()
+                    builder.add_builder(source_builder, xform=xform, label_prefix=label_prefix)
+                    builder.end_world()
         finally:
             for name, labels in original_labels.items():
                 label_groups[name][:] = labels
