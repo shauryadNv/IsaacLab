@@ -13,7 +13,7 @@ import gymnasium as gym
 import pytest
 import torch
 import warp as wp
-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_newton.physics import FeatherPGSSolverCfg, MJWarpSolverCfg, NewtonCfg
 from isaaclab_newton.sim.schemas import NewtonCollisionCfg, NewtonSDFCollisionCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.schemas import PhysxCollisionCfg
@@ -347,12 +347,14 @@ def test_displayport_newton_timing_solver_and_point_sdf_assets():
     cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg()
 
     assert cfg.scene.num_envs == 256
+    assert isinstance(cfg.sim.physics, DisplayportNewtonPhysicsCfg)
+
+    cfg = resolve_presets(cfg)
     assert cfg.sim.dt == pytest.approx(0.01)
     assert cfg.decimation == 3
     assert cfg.sim.render_interval == cfg.decimation
-    assert isinstance(cfg.sim.physics, DisplayportNewtonPhysicsCfg)
 
-    physics = cfg.sim.physics.default
+    physics = cfg.sim.physics
     assert isinstance(physics, NewtonCfg)
     assert physics.num_substeps == 20
     assert physics.collision_decimation == 10
@@ -408,7 +410,7 @@ def test_displayport_newton_timing_solver_and_point_sdf_assets():
 
 def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     """OSC must command flange-relative pose deltas without double gravity compensation."""
-    cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg()
+    cfg = resolve_presets(Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg())
     action = cfg.actions.arm_action
 
     assert isinstance(action, DeployOperationalSpaceControllerActionCfg)
@@ -463,6 +465,84 @@ def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     assert cfg.hand_close_width == pytest.approx(-0.1)
 
 
+def test_displayport_feather_pgs_matches_physx_timing_and_gravity_contract():
+    """FeatherPGS must preserve the PhysX timing, gripper, contact, and gravity contracts."""
+    raw_cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg()
+    cfg = resolve_presets(Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(), selected=("feather_pgs",))
+    cfg.validate()
+
+    assert cfg.sim.dt == pytest.approx(1.0 / 240.0)
+    assert cfg.decimation == 8
+    assert cfg.sim.render_interval == cfg.decimation
+    assert 1.0 / (cfg.sim.dt * cfg.decimation) == pytest.approx(30.0)
+
+    physics = cfg.sim.physics
+    assert isinstance(physics, NewtonCfg)
+    assert physics.num_substeps == 1
+    assert physics.collision_decimation == 0
+    assert physics.use_cuda_graph is True
+    assert physics.default_shape_cfg.gap == pytest.approx(0.005)
+    assert physics.collision_cfg.reduce_contacts is True
+    assert physics.collision_cfg.max_triangle_pairs == 2**25
+
+    solver = physics.solver_cfg
+    assert isinstance(solver, FeatherPGSSolverCfg)
+    assert solver.pgs_mode == "matrix_free"
+    assert solver.pgs_iterations == 128
+    assert solver.pgs_velocity_iterations == 0
+    assert solver.enable_bilateral_preelimination is True
+    assert solver.update_mass_matrix_interval == 1
+    assert solver.enable_joint_limits is True
+    assert solver.enable_joint_velocity_limits is True
+    assert solver.velocity_limit_activation_fraction == pytest.approx(0.7)
+    assert solver.dense_max_constraints >= 192
+    assert solver.mf_max_constraints >= 1024
+
+    assert cfg.actions.arm_action.controller_cfg.gravity_compensation is True
+    assert cfg.scene.robot.spawn.rigid_props.disable_gravity is False
+    assert cfg.scene.robot.spawn.joint_drive_props is None
+
+    drive = cfg.scene.robot.actuators["gripper_drive"]
+    passive = cfg.scene.robot.actuators["gripper_passive"]
+    assert drive.effort_limit_sim == pytest.approx(2.0)
+    assert drive.velocity_limit_sim == pytest.approx(1.0)
+    assert drive.stiffness == pytest.approx(2000.0)
+    assert drive.damping == pytest.approx(10.0)
+    assert drive.armature == pytest.approx(0.0)
+    assert passive.effort_limit_sim == pytest.approx(1.0)
+    assert passive.stiffness == pytest.approx(0.0)
+    assert passive.damping == pytest.approx(0.0)
+    assert passive.armature == pytest.approx(0.0)
+    assert cfg.hand_hold_width == pytest.approx(-0.05)
+    assert cfg.hand_close_width == pytest.approx(-0.155)
+
+    plug_friction = cfg.events.plug_physics_material.params["dynamic_friction_range"][0]
+    socket_friction = cfg.events.socket_physics_material.params["dynamic_friction_range"][0]
+    finger_friction = cfg.events.robot_physics_material.params["dynamic_friction_range"][0]
+    assert (plug_friction + socket_friction) / 2.0 == pytest.approx(0.003)
+    assert (plug_friction + finger_friction) / 2.0 == pytest.approx(3.0)
+
+    raw_plug_defaults = raw_cfg.scene.dp_plug.spawn.collision_props["/.*"]
+    plug_physx = next(fragment for fragment in raw_plug_defaults if isinstance(fragment, PhysxCollisionCfg))
+    plug_collision = cfg.scene.dp_plug.spawn.collision_props["/collision_mesh"]
+    plug_sdf = next(fragment for fragment in plug_collision if isinstance(fragment, NewtonCollisionCfg))
+    assert plug_physx.rest_offset == pytest.approx(-0.00005)
+    assert plug_physx.contact_offset == pytest.approx(0.00001)
+    assert plug_sdf.contact_margin is None
+    assert plug_sdf.contact_gap is None
+
+    socket_sdf_paths = tuple(f"/tn__2584N111_DisplayportCord_jP/Body{body_id}/Mesh" for body_id in (5, 6, 8, 12, 13))
+    raw_socket_defaults = raw_cfg.scene.dp_socket.spawn.collision_props["/.*"]
+    socket_physx = next(fragment for fragment in raw_socket_defaults if isinstance(fragment, PhysxCollisionCfg))
+    for prim_path in socket_sdf_paths:
+        socket_collision = cfg.scene.dp_socket.spawn.collision_props[prim_path]
+        socket_sdf = next(fragment for fragment in socket_collision if isinstance(fragment, NewtonCollisionCfg))
+        assert socket_physx.rest_offset == pytest.approx(-0.0001)
+        assert socket_physx.contact_offset == pytest.approx(0.0001)
+        assert socket_sdf.contact_margin is None
+        assert socket_sdf.contact_gap is None
+
+
 def test_displayport_newton_observation_abi_noise_and_deployment_metadata():
     """Actor order, flange frame, reset-held noise, and dimensions form the checkpoint ABI."""
     cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg()
@@ -512,7 +592,7 @@ def test_displayport_newton_observation_abi_noise_and_deployment_metadata():
 
 def test_displayport_newton_domain_randomization_curriculum_and_rewards():
     """Checkpoint material, reset, friction, curriculum, and reward contracts must remain exact."""
-    cfg = Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg()
+    cfg = resolve_presets(Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg())
     events = cfg.events
 
     material_coefficients = {

@@ -262,7 +262,13 @@ class TestReplicateBuilderMapping(unittest.TestCase):
                 source_site_indices={id(source): {"ee": [site_idx]}},
             )
 
-        replicate.assert_called_once()
+        supports_label_prefixes = (
+            "label_prefixes" in newton_clone_utils_module.signature(newton.ModelBuilder.replicate).parameters
+        )
+        if supports_label_prefixes:
+            replicate.assert_called_once()
+        else:
+            replicate.assert_not_called()
         self.assertEqual(
             local_site_map["ee"],
             [[base_shape + world * stride + site_idx] for world in range(3)],
@@ -294,12 +300,23 @@ class TestReplicateBuilderMapping(unittest.TestCase):
                 env_root_sites={"origin": env_root_offset},
             )
 
-        replicate.assert_called_once()
+        supports_label_prefixes = (
+            "label_prefixes" in newton_clone_utils_module.signature(newton.ModelBuilder.replicate).parameters
+        )
+        if supports_label_prefixes:
+            replicate.assert_called_once()
+        else:
+            replicate.assert_not_called()
         stride = source.shape_count
-        self.assertEqual(source.shape_count, 1)
+        self.assertEqual(source.shape_count, 1 if supports_label_prefixes else 0)
+        expected_indices = (
+            [[base_shape + world * stride] for world in range(3)]
+            if supports_label_prefixes
+            else [[base_shape + world] for world in range(3)]
+        )
         self.assertEqual(
             local_site_map["origin"],
-            [[base_shape + world * stride] for world in range(3)],
+            expected_indices,
         )
         for world, world_indices in enumerate(local_site_map["origin"]):
             site_pos = builder.shape_transform[world_indices[0]].p
@@ -531,6 +548,69 @@ class TestReplicationNamesItsCopies(unittest.TestCase):
             ]
             self.assertEqual(getattr(builder, name), expected)
             self.assertEqual(getattr(source, name), source_labels)
+
+    def test_older_replicate_api_uses_public_per_world_clone_path(self):
+        """Pins without ``label_prefixes`` should still produce unique absolute labels."""
+        source = newton.ModelBuilder()
+        body = source.add_body(xform=wp.transform(), label=self._SRC)
+        source.add_shape_box(body=body, label=f"{self._SRC}/shape")
+        builder = newton.ModelBuilder()
+        env_ids = np.array([10, 20], dtype=np.int64)
+
+        original_replicate = newton.ModelBuilder.replicate
+
+        def legacy_replicate(self, source_builder, world_count, spacing=(0.0, 0.0, 0.0), *, xforms=None):
+            return original_replicate(self, source_builder, world_count, spacing, xforms=xforms)
+
+        with mock.patch.object(newton.ModelBuilder, "replicate", legacy_replicate):
+            replicate_builder_mapping(
+                builder,
+                [self._SRC],
+                np.ones((1, len(env_ids)), dtype=np.bool_),
+                np.zeros((len(env_ids), 3), dtype=np.float32),
+                np.array([[0.0, 0.0, 0.0, 1.0]] * len(env_ids), dtype=np.float32),
+                {self._SRC: source},
+                destinations=["/World/envs/env_{}/Robot"],
+                env_ids=env_ids,
+            )
+
+        self.assertEqual(
+            builder.body_label,
+            [f"/World/envs/env_{env_id}/Robot" for env_id in env_ids],
+        )
+        self.assertEqual(
+            builder.shape_label,
+            [f"/World/envs/env_{env_id}/Robot/shape" for env_id in env_ids],
+        )
+
+    def test_uninspectable_replicate_api_uses_public_per_world_clone_path(self):
+        """Native replicate callables without signatures should retain unique labels."""
+        source = newton.ModelBuilder()
+        body = source.add_body(xform=wp.transform(), label=self._SRC)
+        source.add_shape_box(body=body, label=f"{self._SRC}/shape")
+        builder = newton.ModelBuilder()
+        env_ids = np.array([10, 20], dtype=np.int64)
+
+        with mock.patch.object(newton_clone_utils_module, "signature", side_effect=ValueError("no signature")):
+            replicate_builder_mapping(
+                builder,
+                [self._SRC],
+                np.ones((1, len(env_ids)), dtype=np.bool_),
+                np.zeros((len(env_ids), 3), dtype=np.float32),
+                np.array([[0.0, 0.0, 0.0, 1.0]] * len(env_ids), dtype=np.float32),
+                {self._SRC: source},
+                destinations=["/World/envs/env_{}/Robot"],
+                env_ids=env_ids,
+            )
+
+        self.assertEqual(
+            builder.body_label,
+            [f"/World/envs/env_{env_id}/Robot" for env_id in env_ids],
+        )
+        self.assertEqual(
+            builder.shape_label,
+            [f"/World/envs/env_{env_id}/Robot/shape" for env_id in env_ids],
+        )
 
     def test_hook_labels_are_rewritten_after_the_slow_path(self):
         source = newton.ModelBuilder()

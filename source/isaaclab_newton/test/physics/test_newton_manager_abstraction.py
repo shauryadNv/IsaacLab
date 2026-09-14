@@ -29,12 +29,14 @@ import logging
 from inspect import signature
 from types import SimpleNamespace
 
+import isaaclab_newton.physics.feather_pgs_manager as feather_pgs_manager_module
 import isaaclab_newton.physics.newton_manager as newton_manager_module
 import numpy as np
 import pytest
 import warp as wp
 from isaaclab_newton.assets.articulation import articulation as articulation_module
 from isaaclab_newton.physics import (
+    FeatherPGSSolverCfg,
     FeatherstoneSolverCfg,
     KaminoDVICfg,
     KaminoDVISolverCfg,
@@ -45,6 +47,7 @@ from isaaclab_newton.physics import (
     MPMSolverCfg,
     NewtonCfg,
     NewtonCollisionPipelineCfg,
+    NewtonFeatherPGSManager,
     NewtonFeatherstoneManager,
     NewtonKaminoManager,
     NewtonManager,
@@ -59,7 +62,15 @@ from isaaclab_newton.physics import (
 )
 from isaaclab_newton.physics.mpm_manager import _make_solver_config
 from newton import JointTargetMode, JointType, ModelBuilder, ShapeFlags
-from newton.solvers import SolverFeatherstone, SolverImplicitMPM, SolverKamino, SolverMuJoCo, SolverVBD, SolverXPBD
+from newton.solvers import (
+    SolverFeatherPGS,
+    SolverFeatherstone,
+    SolverImplicitMPM,
+    SolverKamino,
+    SolverMuJoCo,
+    SolverVBD,
+    SolverXPBD,
+)
 
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.physics import PhysicsManager
@@ -113,6 +124,14 @@ SOLVER_MATRIX = [
         id="featherstone",
     ),
     pytest.param(
+        lambda: FeatherPGSSolverCfg(),
+        NewtonFeatherPGSManager,
+        SolverFeatherPGS,
+        False,
+        True,
+        id="feather_pgs",
+    ),
+    pytest.param(
         lambda: KaminoPADMMSolverCfg(use_collision_detector=True),
         NewtonKaminoManager,
         SolverKamino,
@@ -143,6 +162,7 @@ RIGID_BODY_FORCE_INPUT_SUPPORT = {
     NewtonVBDManager: True,
     NewtonXPBDManager: True,
     NewtonFeatherstoneManager: True,
+    NewtonFeatherPGSManager: True,
     NewtonKaminoManager: True,
     NewtonMPMManager: False,
 }
@@ -210,6 +230,104 @@ def test_solver_kwargs_include_newton_deterministic_mode(monkeypatch: pytest.Mon
     kwargs = NewtonManager._filter_solver_kwargs(SolverXPBD, XPBDSolverCfg())
 
     assert kwargs["deterministic"] == wp.DeterministicMode.GPU_TO_GPU
+
+
+def test_feather_pgs_cfg_matches_pinned_solver_signature() -> None:
+    """The public config should expose every pinned FeatherPGS constructor option and default."""
+    config_values = FeatherPGSSolverCfg().to_dict()
+    config_values.pop("class_type")
+    config_values.pop("solver_type")
+    solver_parameters = {
+        name: parameter
+        for name, parameter in signature(SolverFeatherPGS.__init__).parameters.items()
+        if name not in {"self", "model"}
+    }
+
+    assert set(config_values) == set(solver_parameters)
+    for name, parameter in solver_parameters.items():
+        assert parameter.default is not parameter.empty
+        assert config_values[name] == parameter.default
+
+
+@pytest.mark.parametrize("accepts_state", [False, True], ids=["contacts_only", "contacts_and_state"])
+def test_sensor_update_dispatches_supported_solver_contact_signature(
+    accepts_state: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contact reporting should support both FeatherPGS and legacy solver APIs."""
+    calls: list[tuple[object, ...]] = []
+    contacts = object()
+    state = object()
+
+    if accepts_state:
+
+        class RecordingSolver:
+            def update_contacts(self, received_contacts, received_state):
+                calls.append((received_contacts, received_state))
+
+        expected = (contacts, state)
+    else:
+
+        class RecordingSolver:
+            def update_contacts(self, received_contacts):
+                calls.append((received_contacts,))
+
+        expected = (contacts,)
+
+    solver = RecordingSolver()
+    monkeypatch.setattr(NewtonManager, "_solver", solver, raising=False)
+    monkeypatch.setattr(NewtonManager, "_state_0", state, raising=False)
+    monkeypatch.setattr(NewtonManager, "_report_contacts", True, raising=False)
+    monkeypatch.setattr(NewtonManager, "_newton_frame_transform_sensors", [], raising=False)
+    monkeypatch.setattr(NewtonManager, "_newton_imu_sensors", [], raising=False)
+    monkeypatch.setattr(NewtonManager, "_newton_contact_sensors", {}, raising=False)
+    monkeypatch.setattr(
+        NewtonManager,
+        "_solver_update_contacts_accepts_state",
+        NewtonManager._solver_accepts_update_contacts_state(solver),
+        raising=False,
+    )
+
+    NewtonManager._update_sensors(contacts)
+
+    assert calls == [expected]
+
+
+def test_feather_pgs_sets_contact_capacity_before_solver_construction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FeatherPGS scratch allocation should see the configured collision capacity."""
+    observed: dict[str, int] = {}
+
+    class RecordingSolver:
+        def __init__(self, model):
+            observed["rigid_contact_max"] = model.rigid_contact_max
+
+    model = SimpleNamespace(rigid_contact_max=1)
+    monkeypatch.setattr(feather_pgs_manager_module, "SolverFeatherPGS", RecordingSolver)
+    monkeypatch.setattr(NewtonManager, "_collision_cfg", SimpleNamespace(rigid_contact_max=4096), raising=False)
+
+    solver = NewtonFeatherPGSManager._create_solver(model, FeatherPGSSolverCfg())
+
+    assert isinstance(solver, RecordingSolver)
+    assert observed["rigid_contact_max"] == 4096
+    assert model.rigid_contact_max == 4096
+
+
+def test_feather_pgs_reset_truncates_global_world_mask(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FeatherPGS should receive one reset-mask entry per model world."""
+    reset: dict[str, object] = {}
+    state = object()
+
+    class RecordingSolver:
+        def reset(self, received_state, world_mask=None, flags=None):
+            reset.update(state=received_state, world_mask=world_mask.numpy().tolist(), flags=flags)
+
+    monkeypatch.setattr(NewtonManager, "_model", SimpleNamespace(world_count=2), raising=False)
+    monkeypatch.setattr(NewtonManager, "_state_0", state, raising=False)
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    world_mask = wp.array([True, False, True], dtype=wp.bool, device="cpu")
+
+    NewtonFeatherPGSManager._reset_solver_internals(world_mask)
+
+    assert reset == {"state": state, "world_mask": [True, False], "flags": 0}
 
 
 @pytest.mark.parametrize(
@@ -693,6 +811,11 @@ def test_mjwarp_register_builder_attributes_is_idempotent():
     [
         (NewtonMJWarpManager, "mujoco:condim", ("kamino:max_solver_iterations", "mpm:young_modulus")),
         (NewtonKaminoManager, "kamino:max_solver_iterations", ("mujoco:condim", "mpm:young_modulus")),
+        (
+            NewtonFeatherPGSManager,
+            "rigid_body_max_linear_velocity",
+            ("mujoco:condim", "kamino:max_solver_iterations", "mpm:young_modulus"),
+        ),
     ],
 )
 def test_rigid_solver_registers_only_its_builder_attributes(manager, active, inactive):
@@ -1176,6 +1299,66 @@ def test_cuda_graph_capture_uses_simulation_device(monkeypatch):
     assert NewtonManager._graph is captured_graph
 
 
+def test_feather_pgs_cuda_graph_seeds_double_buffer_events_before_simulation(monkeypatch):
+    """FeatherPGS should seed asynchronous buffer events before captured solver work."""
+    events: list[str] = []
+    captured_graph = object()
+
+    class RecordingSolver:
+        def seed_double_buffer_events(self):
+            events.append("seed")
+
+    class FakeScopedCapture:
+        def __init__(self, device=None):
+            self.graph = captured_graph
+
+        def __enter__(self):
+            events.append("capture_begin")
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            events.append("capture_end")
+            return False
+
+    monkeypatch.setattr(PhysicsManager, "_cfg", SimpleNamespace(use_cuda_graph=True), raising=False)
+    monkeypatch.setattr(PhysicsManager, "_device", "cuda:0", raising=False)
+    monkeypatch.setattr(NewtonManager, "_usdrt_stage", None, raising=False)
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_is_all_graphable", classmethod(lambda cls: False))
+    monkeypatch.setattr(
+        NewtonFeatherPGSManager,
+        "_simulate_physics_only",
+        classmethod(lambda cls: events.append("simulate")),
+    )
+    monkeypatch.setattr(wp, "ScopedCapture", FakeScopedCapture)
+
+    NewtonFeatherPGSManager._capture_or_defer_graph()
+
+    assert events == ["capture_begin", "seed", "simulate", "capture_end"]
+    assert NewtonManager._graph is captured_graph
+
+
+@pytest.mark.parametrize(
+    ("contact_compliance", "contact_torsion_radius", "expected"),
+    [
+        pytest.param(False, 0.0, True, id="default"),
+        pytest.param(True, 0.0, False, id="contact_compliance"),
+        pytest.param(False, 0.01, False, id="contact_torsion"),
+    ],
+)
+def test_feather_pgs_cuda_graph_support_rejects_host_driven_contact_features(
+    monkeypatch, contact_compliance, contact_torsion_radius, expected
+):
+    """Host-driven FeatherPGS contact features should fall back to eager stepping."""
+    solver = SimpleNamespace(
+        contact_compliance=contact_compliance,
+        contact_torsion_radius=contact_torsion_radius,
+    )
+    monkeypatch.setattr(NewtonManager, "_solver", solver, raising=False)
+
+    assert NewtonFeatherPGSManager._supports_cuda_graph_capture() is expected
+
+
 # ---------------------------------------------------------------------------
 # Manager state-refresh boundaries (no SimulationContext required)
 # ---------------------------------------------------------------------------
@@ -1251,6 +1434,7 @@ def test_forward_dispatches_active_mpm_reset_hook_through_base_manager(monkeypat
         NewtonXPBDManager,
         NewtonVBDManager,
         NewtonFeatherstoneManager,
+        NewtonFeatherPGSManager,
         NewtonKaminoManager,
         NewtonMPMManager,
     ],
@@ -1277,6 +1461,7 @@ def test_clear_resets_rigid_body_force_capability(monkeypatch):
         NewtonXPBDManager,
         NewtonVBDManager,
         NewtonFeatherstoneManager,
+        NewtonFeatherPGSManager,
         NewtonKaminoManager,
         NewtonMPMManager,
     ):
@@ -1384,6 +1569,7 @@ def test_abstract_create_solver_raises():
         NewtonXPBDManager,
         NewtonVBDManager,
         NewtonFeatherstoneManager,
+        NewtonFeatherPGSManager,
         NewtonKaminoManager,
         NewtonMPMManager,
     ],

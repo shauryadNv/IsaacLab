@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from inspect import signature
 from typing import Any
 
 import numpy as np
@@ -253,6 +254,16 @@ def replicate_builder_mapping(
     xforms_np = np.concatenate((positions, quaternions), axis=1)
     world_xforms = [wp.transform(*row) for row in xforms_np]
 
+    try:
+        replicate_parameters = signature(type(builder).replicate).parameters
+        supports_label_prefixes = "label_prefixes" in replicate_parameters or any(
+            parameter.kind == parameter.VAR_KEYWORD for parameter in replicate_parameters.values()
+        )
+    except (AttributeError, TypeError, ValueError):
+        # Native callables may not expose a Python signature. The public
+        # per-world path preserves labels without assuming optional arguments.
+        supports_label_prefixes = False
+
     can_batch = (
         len(sources) == 1
         and mapping.shape[0] == 1
@@ -261,6 +272,7 @@ def replicate_builder_mapping(
         and not per_world_builder_hooks
         and bool(destinations)
         and env_ids is not None
+        and supports_label_prefixes
     )
     if can_batch:
         source_builder = source_builders[sources[0]]
@@ -330,7 +342,11 @@ def replicate_builder_mapping(
     for col in range(num_worlds):
         builder.begin_world()
         for label, world_site_xforms in root_site_xforms.items():
-            site_idx = builder.add_site(body=-1, xform=world_site_xforms[col], label=label)
+            site_label = label
+            if destinations and len(sources) == 1 and env_ids is not None and not label.startswith("/"):
+                world_root = destinations[0].format(int(env_ids[col])).rstrip("/")
+                site_label = f"{world_root}/{label}"
+            site_idx = builder.add_site(body=-1, xform=world_site_xforms[col], label=site_label)
             local_site_map.setdefault(label, [[] for _ in range(num_worlds)])[col].append(site_idx)
         for row in rows_per_world[col]:
             source_builder = source_builders[sources[row]]
@@ -338,7 +354,14 @@ def replicate_builder_mapping(
             builder.add_builder(source_builder, xform=source_xforms[row, col])
             for label, source_shape_indices in source_site_indices.get(id(source_builder), {}).items():
                 local_indices = local_site_map.setdefault(label, [[] for _ in range(num_worlds)])[col]
-                local_indices.extend(offset + shape_idx for shape_idx in source_shape_indices)
+                copied_indices = [offset + shape_idx for shape_idx in source_shape_indices]
+                local_indices.extend(copied_indices)
+                if destinations and len(sources) == 1 and env_ids is not None:
+                    world_root = destinations[0].format(int(env_ids[col])).rstrip("/")
+                    for copied_index in copied_indices:
+                        copied_label = builder.shape_label[copied_index]
+                        if isinstance(copied_label, str) and copied_label and not copied_label.startswith("/"):
+                            builder.shape_label[copied_index] = f"{world_root}/{copied_label}"
         for hook in per_world_builder_hooks:
             hook(builder, col, xforms_np[col, :3].copy(), xforms_np[col, 3:].copy())
         builder.end_world()
@@ -374,6 +397,8 @@ def rename_builder_labels(
             )
             for index, value, world in rows:
                 suffix = clone_path.relative_to(value, src_root) if isinstance(value, str) else None
+                if suffix is None and isinstance(value, str) and value.startswith(src_root + "_"):
+                    suffix = value[len(src_root) :]
                 if world is None or suffix is None:
                     continue
                 world_root = roots.get(int(world))

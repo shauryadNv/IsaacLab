@@ -410,22 +410,23 @@ different training distribution. The privileged critic retains all 13 robot join
      - enabled / ``2**25``
      - scene-wide capacity for the 256-environment per-rank default
 
-This is an MJWarp point-SDF configuration on the repository's pinned stable Newton 1.6 stack. VBD and
-hydroelastic SDF are separate experiments and do not reproduce the reference checkpoint. ``max_triangle_pairs``
-is scene-wide: when Newton reports an overflow, reduce the per-rank environment count or increase the capacity.
-Overflow can omit candidate contacts.
+The default ``newton_sdf`` preset is the MJWarp point-SDF configuration used by the reference checkpoint. VBD,
+FeatherPGS, and hydroelastic SDF are separate experiments and do not reproduce that checkpoint.
+``max_triangle_pairs`` is scene-wide: when Newton reports an overflow, reduce the per-rank environment count or
+increase the capacity. Overflow can omit candidate contacts.
 
 The policy emits a six-dimensional relative pose command at the flange origin. RSL-RL first clips each raw actor
 output to ``[-1, 1]``; the OSC action then applies translation scales ``(0.025, 0.025, 0.010)`` m and a rotation
 scale of ``0.025`` rad. The action-term clip is intentionally unset so this transform has only one clipping stage.
 The OSC stiffness is ``(300, 300, 300, 30, 30, 30)`` with damping ratio ``1.0`` on every axis.
 Full inertial-dynamics decoupling is enabled; partial decoupling and null-space control are disabled. Arm joint-PD
-stiffness and damping are zero so OSC supplies the arm effort. Newton rigid-body gravity compensation is enabled
-for the robot, while OSC gravity compensation is disabled to avoid applying it twice.
+stiffness and damping are zero so OSC supplies the arm effort. With MJWarp, Newton rigid-body gravity compensation
+is enabled and OSC gravity compensation is disabled. FeatherPGS leaves robot gravity active and applies exactly one
+equivalent gravity term through OSC.
 
-The profile also preserves the reference domain randomization and curriculum: plug/socket/finger friction values
-of ``3.0`` / ``0.001`` / ``1.0``, additive arm-joint friction randomization in ``[0.0, 0.15]``, no arm PD-gain
-randomization, and at-goal resets annealed from ``0.8`` to ``0.0`` over iterations 0 through 500.
+The default profile also preserves the reference domain randomization and curriculum: plug/socket/finger friction
+values of ``3.0`` / ``0.001`` / ``1.0``, additive arm-joint friction randomization in ``[0.0, 0.15]``, no arm
+PD-gain randomization, and at-goal resets annealed from ``0.8`` to ``0.0`` over iterations 0 through 500.
 
 Train the deployment-compatible task for 1,000 iterations. Passing ``presets=newton_sdf`` explicitly records the
 selected contact profile even though it is also the Newton task's default. The public task uses the nominal robot
@@ -440,6 +441,40 @@ asset; replace the path below with the calibrated USD for the arm that will exec
         --max_iterations 1000 \
         presets=newton_sdf \
         env.scene.robot.spawn.usd_path=/absolute/path/to/calibrated_robot.usd
+
+Experimental FeatherPGS training
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``feather_pgs`` preset is an experimental alternative to the default MJWarp solver. It uses the same assets,
+observations, OSC gains, action scales, reward, randomization structure, and curriculum, except for the
+backend-specific contact-material mapping and gripper configuration described below. It matches the source PhysX
+timing: one 240 Hz solver step, collision refresh on every step, and one action every eight steps (30 Hz). It uses
+128 position iterations and no velocity-only iterations. The Robotiq mimic constraints are pre-eliminated so that
+the five passive linkage joints remain coupled to the single driven finger joint under load.
+
+FeatherPGS currently averages friction coefficients instead of consuming the task's ``multiply`` combine mode.
+The preset maps the plug and finger coefficients so the task-critical effective plug/socket and plug/finger pairs
+remain ``0.003`` and ``3.0`` respectively. This mapping should be removed when the pinned solver honors the USD
+combine mode directly.
+
+Train with FeatherPGS by selecting its preset:
+
+.. code-block:: bash
+
+    ./isaaclab.sh train --rl_library rsl_rl \
+        --task Isaac-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace-Newton-ROS-Inference-v0 \
+        --num_envs 256 \
+        --seed 123 \
+        --max_iterations 1000 \
+        presets=feather_pgs \
+        env.scene.robot.spawn.usd_path=/absolute/path/to/calibrated_robot.usd
+
+This experiment branch pins a Newton fork that includes FeatherPGS and shared runtime changes. To attribute a
+performance difference specifically to the solver, run an MJWarp control from the same Isaac Lab commit and Newton
+pin; do not compare this run to an official-release MJWarp run as a strict solver-only A/B.
+
+The per-world matrix-free row capacity is sized for this task. If FeatherPGS reports a constraint-row overflow,
+increase ``env.sim.physics.solver_cfg.mf_max_constraints`` before comparing throughput or policy quality.
 
 Evaluate a checkpoint with deterministic actor observations:
 
@@ -490,7 +525,7 @@ The PhysX Rizon 4s profiles use ``ImplicitActuatorCfg`` with per-joint-group arm
         damping=0.0,
     )
 
-The Newton profile intentionally uses the gripper settings from the reference training run instead:
+The default Newton MJWarp profile intentionally uses the gripper settings from the reference training run instead:
 
 - ``gripper_drive`` controls ``finger_joint`` with effort / velocity limits of ``200.0`` / ``2.0``, stiffness /
   damping of ``2000.0`` / ``10.0``, zero friction, and armature ``0.1``.
@@ -498,8 +533,9 @@ The Newton profile intentionally uses the gripper settings from the reference tr
   limits of ``20.0`` / ``1.0``, stiffness / damping of ``2000.0`` / ``10.0``, zero friction, and armature ``0.05``.
 - ``hand_hold_width`` and ``hand_close_width`` are both ``-0.1``.
 
-These values are part of the Newton checkpoint contract; do not substitute the PhysX gripper settings when
-reproducing the reference policy.
+These values are part of the MJWarp checkpoint contract; do not substitute the PhysX gripper settings when
+reproducing the reference policy. The experimental FeatherPGS preset uses the PhysX leader-only gripper drive and
+passive mimic-joint behavior described above because actively driving the mimic followers overconstrains the linkage.
 
 .. note::
 
@@ -576,9 +612,9 @@ target. What differs is the space that delta lives in.
 [m] and rotation [rad]; the Newton reference reduces only Z translation to ``0.010`` m while keeping X/Y and
 rotation at ``0.025``.
 
-**Control frequency:** the PhysX profiles use ``sim.dt = 1/240`` s with ``decimation = 8`` (30 Hz policy rate).
-The Newton profile uses a 100 Hz outer step, 20 solver substeps, and ``decimation = 3`` (approximately 33.3 Hz);
-collision detection runs every 10 substeps (200 Hz).
+**Control frequency:** the PhysX and experimental FeatherPGS profiles use ``sim.dt = 1/240`` s with
+``decimation = 8`` (30 Hz policy rate). The default Newton MJWarp profile uses a 100 Hz outer step, 20 solver
+substeps, and ``decimation = 3`` (approximately 33.3 Hz); collision detection runs every 10 substeps (200 Hz).
 
 Domain Randomization Strategy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1029,7 +1065,7 @@ deployment contract. Swap in the plain ``...-NoJointVel-v0`` / ``...-TaskSpace-v
 - ``--rl_library rsl_rl``: Selects the RSL-RL backend (required by the unified trainer)
 - ``--num_envs 256``: Runs 256 parallel environments per rank (the Newton-safe default)
 - ``--viz none``: Disables all visualizers for throughput (the unified entry point has no ``--headless`` flag)
-- ``--video_length 200`` / ``222``: Approximately one full episode for PhysX / Newton respectively
+- ``--video_length 200`` / ``222``: Approximately one full episode for PhysX / default Newton MJWarp respectively
 - ``--video_interval 76800``: Records every 150 iterations with 512 steps per environment
 - ``--distributed``: Required when launching under ``torch.distributed.run``
 
@@ -1064,8 +1100,8 @@ Monitor ``Metrics/success_rate`` and reward curves to confirm learning. The curr
 Choosing a Control Space
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The control spaces share the same algorithm, reward, and curriculum. The PhysX profiles run at 30 Hz; the Newton
-profile runs at approximately 33.3 Hz.
+The control spaces share the same algorithm, reward, and curriculum. PhysX and FeatherPGS run at 30 Hz; the default
+Newton MJWarp profile runs at approximately 33.3 Hz.
 
 .. list-table::
    :widths: 20 40 40

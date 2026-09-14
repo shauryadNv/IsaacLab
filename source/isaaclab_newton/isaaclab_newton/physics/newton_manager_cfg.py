@@ -197,6 +197,7 @@ class NewtonCfg(PhysicsCfg):
       ``use_collision_detector=False``,
     - :class:`XPBDSolverCfg` (always),
     - :class:`VBDSolverCfg` (always),
+    - :class:`FeatherPGSSolverCfg` (always),
     - :class:`FeatherstoneSolverCfg` (always).
 
     :class:`~isaaclab_newton.physics.MPMSolverCfg` does not use this pipeline;

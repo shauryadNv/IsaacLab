@@ -11,6 +11,7 @@
     NewtonCfg
     NewtonSoftContactCfg
     NewtonCollisionPipelineCfg
+    NewtonFeatherPGSManager
     NewtonFeatherstoneManager
     NewtonKaminoManager
     NewtonMPMManager
@@ -22,6 +23,7 @@
     MJWarpSolverCfg
     VBDSolverCfg
     XPBDSolverCfg
+    FeatherPGSSolverCfg
     FeatherstoneSolverCfg
     KaminoCollisionDetectorCfg
     KaminoConstraintsCfg
@@ -74,6 +76,11 @@ Physics Configuration
   :exclude-members: __init__
 
 .. autoclass:: XPBDSolverCfg
+  :members:
+  :show-inheritance:
+  :exclude-members: __init__
+
+.. autoclass:: FeatherPGSSolverCfg
   :members:
   :show-inheritance:
   :exclude-members: __init__
@@ -150,6 +157,11 @@ Physics Configuration
 
 Solver Managers
 ---------------
+
+.. autoclass:: NewtonFeatherPGSManager
+  :members:
+  :inherited-members:
+  :show-inheritance:
 
 .. autoclass:: NewtonMJWarpManager
   :members:
