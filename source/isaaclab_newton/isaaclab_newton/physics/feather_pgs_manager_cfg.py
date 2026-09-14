@@ -138,9 +138,9 @@ class FeatherPGSSolverCfg(NewtonSolverCfg):
     pgs_mode: Literal["split", "matrix_free"] = "split"
     """Constraint solve layout; ``"matrix_free"`` requires CUDA."""
 
-    articulated_contact_response: Literal[
-        "immediate", "propagation", "propagation-fused", "propagation-colored"
-    ] = "immediate"
+    articulated_contact_response: Literal["immediate", "propagation", "propagation-fused", "propagation-colored"] = (
+        "immediate"
+    )
     """Articulated contact-response implementation used in matrix-free mode."""
 
     propagation_same_articulation_rows: bool = False
