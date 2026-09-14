@@ -44,22 +44,28 @@ _NEWTON_MAX_TRIANGLE_PAIRS = 2**25
 
 
 def _newton_sdf_properties(
-    contact_offset: float, rest_offset: float
-) -> list[PhysxCollisionCfg | NewtonCollisionCfg | NewtonSDFCollisionCfg]:
-    """Create point-SDF properties while preserving source collision offsets."""
-    return [
-        PhysxCollisionCfg(contact_offset=contact_offset, rest_offset=rest_offset),
-        NewtonCollisionCfg(contact_margin=0.0, contact_gap=0.005),
-        NewtonSDFCollisionCfg(
-            sdf_max_resolution=256,
-            sdf_narrow_band_inner=-0.005,
-            sdf_narrow_band_outer=0.005,
-            sdf_texture_format="uint16",
-            sdf_padding=0.005,
-            hydroelastic_enabled=False,
-            hydroelastic_stiffness=1.0e8,
-        ),
-    ]
+    contact_offset: float,
+    rest_offset: float,
+    sdf_prim_paths: tuple[str, ...],
+) -> dict[str, list[PhysxCollisionCfg | NewtonCollisionCfg | NewtonSDFCollisionCfg]]:
+    """Create point-SDF properties only for meshes authored as SDF colliders."""
+    properties: dict[str, list[PhysxCollisionCfg | NewtonCollisionCfg | NewtonSDFCollisionCfg]] = {
+        "/.*": [PhysxCollisionCfg(contact_offset=contact_offset, rest_offset=rest_offset)]
+    }
+    for prim_path in sdf_prim_paths:
+        properties[prim_path] = [
+            NewtonCollisionCfg(contact_margin=0.0, contact_gap=0.005),
+            NewtonSDFCollisionCfg(
+                sdf_max_resolution=256,
+                sdf_narrow_band_inner=-0.005,
+                sdf_narrow_band_outer=0.005,
+                sdf_texture_format="uint16",
+                sdf_padding=0.005,
+                hydroelastic_enabled=False,
+                hydroelastic_stiffness=1.0e8,
+            ),
+        ]
+    return properties
 
 
 @configclass
@@ -179,11 +185,19 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
         self.decimation = 3
         self.sim.render_interval = self.decimation
 
-        # Newton's importer applies SDF cooking to enabled collision meshes;
-        # disabled visual colliders remain inert. Preserve the source task's PhysX
-        # offsets because Newton also consumes those compatibility attributes.
-        self.scene.dp_plug.spawn.collision_props = _newton_sdf_properties(0.00001, -0.00005)
-        self.scene.dp_socket.spawn.collision_props = _newton_sdf_properties(0.0001, -0.0001)
+        # Preserve source PhysX offsets on every collider, but apply Newton's
+        # point-SDF schema only to meshes authored for SDF collision. Applying
+        # it to convex-decomposition meshes is rejected by Newton 1.5.
+        self.scene.dp_plug.spawn.collision_props = _newton_sdf_properties(
+            0.00001,
+            -0.00005,
+            ("/collision_mesh",),
+        )
+        self.scene.dp_socket.spawn.collision_props = _newton_sdf_properties(
+            0.0001,
+            -0.0001,
+            tuple(f"/tn__2584N111_DisplayportCord_jP/Body{body_id}/Mesh" for body_id in (5, 6, 8, 12, 13)),
+        )
 
         self.observations = NewtonTaskSpaceObservationsCfg()
         self.task_space_obs_order = ["socket_pos", "tool_pos", "tool_rot_6d", "socket_rot_6d"]

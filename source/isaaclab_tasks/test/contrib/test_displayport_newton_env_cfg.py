@@ -30,6 +30,9 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.a
     Rizon4sGravDisplayportInsertionNewtonRNNPPORunnerCfg,
     Rizon4sGravDisplayportInsertionRNNPPORunnerCfg,
 )
+from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.joint_pos_env_cfg import (
+    set_finger_joint_pos_grav,
+)
 from isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.task_space_env_cfg import (
     Rizon4sTaskSpaceDisplayportInsertionEnvCfg,
 )
@@ -135,6 +138,7 @@ def test_displayport_grasp_reset_holds_randomized_target_during_ik(monkeypatch: 
     term.num_arm_joints = num_arm_joints
     term.all_joints = list(range(num_arm_joints))
     term.finger_joints = []
+    term.joint_name_to_idx = {}
     term.hand_hold_width = 0.0
     term.hand_close_width = 0.0
     term.gripper_joint_setter_func = lambda *_args, **_kwargs: None
@@ -181,6 +185,41 @@ def test_displayport_grasp_reset_holds_randomized_target_during_ik(monkeypatch: 
     assert len(ik_targets) == 3
     for target in ik_targets[1:]:
         torch.testing.assert_close(target, ik_targets[0])
+
+
+def test_displayport_grav_reset_sets_mimic_joints_by_name():
+    """The reset must preserve Grav mimic signs when Newton reorders the joints."""
+    joint_names = [
+        "finger_joint",
+        "left_outer_finger_joint",
+        "left_inner_knuckle_joint",
+        "right_inner_knuckle_joint",
+        "right_outer_knuckle_joint",
+        "right_outer_finger_joint",
+    ]
+    finger_joints = list(range(7, 13))
+    joint_name_to_idx = dict(zip(joint_names, finger_joints))
+    joint_pos = torch.full((2, 13), 42.0)
+
+    set_finger_joint_pos_grav(
+        joint_pos,
+        [0],
+        finger_joints,
+        -0.1,
+        joint_name_to_idx,
+    )
+
+    expected_gearing = {
+        "finger_joint": 1.0,
+        "left_inner_knuckle_joint": 1.0,
+        "right_inner_knuckle_joint": 1.0,
+        "right_outer_knuckle_joint": 1.0,
+        "left_outer_finger_joint": -1.0,
+        "right_outer_finger_joint": -1.0,
+    }
+    for joint_name, gearing in expected_gearing.items():
+        assert joint_pos[0, joint_name_to_idx[joint_name]] == pytest.approx(-0.1 * gearing)
+    torch.testing.assert_close(joint_pos[1], torch.full((13,), 42.0))
 
 
 def test_rigid_object_offset_is_rotated_and_cached_as_a_batch_view():
@@ -335,25 +374,36 @@ def test_displayport_newton_timing_solver_and_point_sdf_assets():
 
     assert cfg.scene.dp_plug.spawn.usd_path.endswith("/displayport_plug.usd")
     assert cfg.scene.dp_socket.spawn.usd_path.endswith("/displayport_socket_no_protrusions.usd")
+    plug_sdf_paths = ("/collision_mesh",)
+    socket_sdf_paths = tuple(f"/tn__2584N111_DisplayportCord_jP/Body{body_id}/Mesh" for body_id in (5, 6, 8, 12, 13))
     collision_fragment_sets = (
-        (cfg.scene.dp_plug.spawn.collision_props, 0.00001, -0.00005),
-        (cfg.scene.dp_socket.spawn.collision_props, 0.0001, -0.0001),
+        (cfg.scene.dp_plug.spawn.collision_props, 0.00001, -0.00005, plug_sdf_paths),
+        (cfg.scene.dp_socket.spawn.collision_props, 0.0001, -0.0001, socket_sdf_paths),
     )
-    for fragments, contact_offset, rest_offset in collision_fragment_sets:
-        physx = next(fragment for fragment in fragments if isinstance(fragment, PhysxCollisionCfg))
-        collision = next(fragment for fragment in fragments if isinstance(fragment, NewtonCollisionCfg))
-        sdf = next(fragment for fragment in fragments if isinstance(fragment, NewtonSDFCollisionCfg))
+    for mapping, contact_offset, rest_offset, sdf_paths in collision_fragment_sets:
+        assert set(mapping) == {"/.*", *sdf_paths}
+
+        physx_fragments = mapping["/.*"]
+        assert not any(isinstance(fragment, NewtonCollisionCfg) for fragment in physx_fragments)
+        assert not any(isinstance(fragment, NewtonSDFCollisionCfg) for fragment in physx_fragments)
+        physx = next(fragment for fragment in physx_fragments if isinstance(fragment, PhysxCollisionCfg))
         assert physx.contact_offset == pytest.approx(contact_offset)
         assert physx.rest_offset == pytest.approx(rest_offset)
-        assert collision.contact_margin == pytest.approx(0.0)
-        assert collision.contact_gap == pytest.approx(0.005)
-        assert sdf.sdf_max_resolution == 256
-        assert sdf.sdf_narrow_band_inner == pytest.approx(-0.005)
-        assert sdf.sdf_narrow_band_outer == pytest.approx(0.005)
-        assert sdf.sdf_texture_format == "uint16"
-        assert sdf.sdf_padding == pytest.approx(0.005)
-        assert sdf.hydroelastic_enabled is False
-        assert sdf.hydroelastic_stiffness == pytest.approx(1.0e8)
+
+        for prim_path in sdf_paths:
+            fragments = mapping[prim_path]
+            assert not any(isinstance(fragment, PhysxCollisionCfg) for fragment in fragments)
+            collision = next(fragment for fragment in fragments if isinstance(fragment, NewtonCollisionCfg))
+            sdf = next(fragment for fragment in fragments if isinstance(fragment, NewtonSDFCollisionCfg))
+            assert collision.contact_margin == pytest.approx(0.0)
+            assert collision.contact_gap == pytest.approx(0.005)
+            assert sdf.sdf_max_resolution == 256
+            assert sdf.sdf_narrow_band_inner == pytest.approx(-0.005)
+            assert sdf.sdf_narrow_band_outer == pytest.approx(0.005)
+            assert sdf.sdf_texture_format == "uint16"
+            assert sdf.sdf_padding == pytest.approx(0.005)
+            assert sdf.hydroelastic_enabled is False
+            assert sdf.hydroelastic_stiffness == pytest.approx(1.0e8)
 
 
 def test_displayport_newton_osc_abi_robot_and_gravity_settings():

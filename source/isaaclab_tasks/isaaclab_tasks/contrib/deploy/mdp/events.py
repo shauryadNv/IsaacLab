@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import torch
@@ -582,9 +583,10 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
             raise ValueError(f"End effector body '{self.end_effector_body_name}' not found in robot")
         self.eef_idx = eef_indices[0]
 
-        all_joints, _ = self.robot_asset.find_joints([".*"])
+        all_joints, all_joint_names = self.robot_asset.find_joints([".*"])
         self.all_joints = all_joints
         self.finger_joints = all_joints[self.num_arm_joints :]
+        self.joint_name_to_idx = dict(zip(all_joint_names, all_joints))
 
     def __call__(
         self,
@@ -600,7 +602,7 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         end_effector_body_name: str | None = None,
         num_arm_joints: int | None = None,
         grasp_rot_offset: list | None = None,
-        gripper_joint_setter_func: callable | None = None,
+        gripper_joint_setter_func: Callable[..., None] | None = None,
     ):
         num_reset_envs = len(env_ids)
         grasp_offsets = self.grasp_offsets_buffer[:num_reset_envs]
@@ -706,12 +708,22 @@ class set_robot_to_object_grasp_pose(ManagerTermBase):
         # Write gripper STATE at ``hand_hold_width`` (fingers just touching the
         # plug, no mesh overlap) and set the TARGET to ``hand_close_width``
         # (fully closed) so the actuator drive squeezes around the plug.
-        self.gripper_joint_setter_func(joint_pos, list(range(num_reset_envs)), self.finger_joints, self.hand_hold_width)
+        self.gripper_joint_setter_func(
+            joint_pos,
+            list(range(num_reset_envs)),
+            self.finger_joints,
+            self.hand_hold_width,
+            self.joint_name_to_idx,
+        )
         self.robot_asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
         self.robot_asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
 
         self.gripper_joint_setter_func(
-            joint_pos, list(range(num_reset_envs)), self.finger_joints, self.hand_close_width
+            joint_pos,
+            list(range(num_reset_envs)),
+            self.finger_joints,
+            self.hand_close_width,
+            self.joint_name_to_idx,
         )
         self.robot_asset.set_joint_position_target_index(target=joint_pos, joint_ids=self.all_joints, env_ids=env_ids)
 
