@@ -51,6 +51,18 @@ class NewtonFeatherPGSManager(NewtonManager):
         NewtonManager._needs_collision_pipeline = True
         NewtonManager._supports_rigid_body_force_input = True
         cls._row_watermark_log_step = 0
+        cfg = PhysicsManager._cfg
+        if cfg is not None and cfg.debug_mode and getattr(cls._solver, "_row_watermark", False):
+            logger.info(
+                "FeatherPGS constraint-row telemetry enabled: interval=%d, dense=%d, mf=%d, "
+                "cuda_graph=%s, double_buffer=%s, parallel_streams=%s",
+                cls._ROW_WATERMARK_LOG_INTERVAL,
+                cls._solver.dense_max_constraints,
+                cls._solver.mf_max_constraints,
+                cfg.use_cuda_graph,
+                cls._solver.double_buffer,
+                cls._solver.use_parallel_streams,
+            )
 
     @classmethod
     def _prepare_cuda_graph_capture(cls) -> None:

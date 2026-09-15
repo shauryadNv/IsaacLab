@@ -311,6 +311,33 @@ def test_feather_pgs_sets_contact_capacity_before_solver_construction(monkeypatc
     assert model.rigid_contact_max == 4096
 
 
+def test_feather_pgs_build_reports_enabled_watermark_configuration(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Debug startup should prove both telemetry gates and execution settings."""
+    solver = SimpleNamespace(
+        _row_watermark=True,
+        dense_max_constraints=256,
+        mf_max_constraints=2048,
+        double_buffer=True,
+        use_parallel_streams=True,
+    )
+    cfg = SimpleNamespace(debug_mode=True, use_cuda_graph=True)
+    monkeypatch.setattr(PhysicsManager, "_cfg", cfg, raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_create_solver", classmethod(lambda cls, model, solver_cfg: solver))
+
+    with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
+        NewtonFeatherPGSManager._build_solver(SimpleNamespace(), FeatherPGSSolverCfg())
+
+    message = caplog.records[-1].getMessage()
+    assert "interval=512" in message
+    assert "dense=256" in message
+    assert "mf=2048" in message
+    assert "cuda_graph=True" in message
+    assert "double_buffer=True" in message
+    assert "parallel_streams=True" in message
+
+
 def test_feather_pgs_reset_truncates_global_world_mask(monkeypatch: pytest.MonkeyPatch) -> None:
     """FeatherPGS should receive one reset-mask entry per model world."""
     reset: dict[str, object] = {}
