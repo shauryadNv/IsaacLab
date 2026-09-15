@@ -57,11 +57,11 @@ class NewtonFeatherPGSManager(NewtonManager):
                 "FeatherPGS constraint-row telemetry enabled: interval=%d, dense=%d, mf=%d, "
                 "cuda_graph=%s, double_buffer=%s, parallel_streams=%s",
                 cls._ROW_WATERMARK_LOG_INTERVAL,
-                cls._solver.dense_max_constraints,
-                cls._solver.mf_max_constraints,
+                solver_cfg.dense_max_constraints,
+                solver_cfg.mf_max_constraints,
                 cfg.use_cuda_graph,
-                cls._solver.double_buffer,
-                cls._solver.use_parallel_streams,
+                solver_cfg.double_buffer,
+                solver_cfg.use_parallel_streams,
             )
 
     @classmethod

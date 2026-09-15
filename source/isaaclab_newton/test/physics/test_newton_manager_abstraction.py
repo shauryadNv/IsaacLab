@@ -315,8 +315,10 @@ def test_feather_pgs_build_reports_enabled_watermark_configuration(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Debug startup should prove both telemetry gates and execution settings."""
-    solver = SimpleNamespace(
-        _row_watermark=True,
+    # The pinned runtime solver intentionally does not expose these
+    # construction-only configuration values as public attributes.
+    solver = SimpleNamespace(_row_watermark=True)
+    solver_cfg = FeatherPGSSolverCfg(
         dense_max_constraints=256,
         mf_max_constraints=2048,
         double_buffer=True,
@@ -327,7 +329,7 @@ def test_feather_pgs_build_reports_enabled_watermark_configuration(
     monkeypatch.setattr(NewtonFeatherPGSManager, "_create_solver", classmethod(lambda cls, model, solver_cfg: solver))
 
     with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
-        NewtonFeatherPGSManager._build_solver(SimpleNamespace(), FeatherPGSSolverCfg())
+        NewtonFeatherPGSManager._build_solver(SimpleNamespace(), solver_cfg)
 
     message = caplog.records[-1].getMessage()
     assert "interval=512" in message
