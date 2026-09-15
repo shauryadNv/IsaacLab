@@ -125,11 +125,15 @@ class DisplayportNewtonPhysicsCfg(PresetCfg):
             # them before contact solves keeps the passive fingers coupled to
             # the single driven joint under sustained grasp loads.
             enable_bilateral_preelimination=True,
-            dense_max_constraints=192,
+            dense_max_constraints=256,
             # Per-world capacity for free-body contact and friction rows. FeatherPGS
             # drops rows on overflow, so contact-rich insertion needs explicit headroom.
             mf_max_constraints=2048,
             serial_kernel_block_dim=64,
+            # Collect whole-run high-water marks for the bounded FPGS
+            # stability diagnostic. Readback happens only when the physics
+            # manager closes, outside CUDA graph capture.
+            row_watermark=True,
         ),
         collision_cfg=NewtonCollisionPipelineCfg(
             reduce_contacts=True,

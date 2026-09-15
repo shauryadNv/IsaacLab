@@ -7,12 +7,16 @@
 
 from __future__ import annotations
 
+import logging
+
 import warp as wp
 from newton import Model
 from newton.solvers import SolverFeatherPGS
 
 from .feather_pgs_manager_cfg import FeatherPGSSolverCfg
 from .newton_manager import NewtonManager
+
+logger = logging.getLogger(__name__)
 
 
 class NewtonFeatherPGSManager(NewtonManager):
@@ -61,3 +65,23 @@ class NewtonFeatherPGSManager(NewtonManager):
         if world_mask is None:
             return
         cls._solver.reset(cls._state_0, world_mask=world_mask[: cls._model.world_count], flags=0)
+
+    @classmethod
+    def _log_constraint_row_watermarks(cls) -> None:
+        """Report opt-in constraint-row watermarks outside graph capture."""
+        solver = NewtonManager._solver
+        if solver is None or not getattr(solver, "_row_watermark", False):
+            return
+        try:
+            logger.info("FeatherPGS constraint-row watermarks: %s", solver.constraint_row_watermarks())
+        except Exception:
+            # A preceding asynchronous CUDA failure can leave the context
+            # unable to service telemetry readback. Preserve the original
+            # failure while making the missing diagnostic explicit.
+            logger.exception("Unable to read FeatherPGS constraint-row watermarks during shutdown")
+
+    @classmethod
+    def close(cls) -> None:
+        """Report opt-in row watermarks before releasing solver resources."""
+        cls._log_constraint_row_watermarks()
+        super().close()

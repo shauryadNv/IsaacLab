@@ -3,6 +3,7 @@ Added
 
 * Added :class:`~isaaclab_newton.physics.FeatherPGSSolverCfg` and its Newton
   physics manager for experimental FeatherPGS simulation.
+* Added opt-in FeatherPGS constraint-row watermark reporting at shutdown.
 
 Fixed
 ^^^^^

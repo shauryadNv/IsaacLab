@@ -330,6 +330,40 @@ def test_feather_pgs_reset_truncates_global_world_mask(monkeypatch: pytest.Monke
     assert reset == {"state": state, "world_mask": [True, False], "flags": 0}
 
 
+def test_feather_pgs_logs_opt_in_constraint_row_watermarks(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """FeatherPGS should report whole-run row telemetry before clearing the solver."""
+    expected = {"dense_high_water": 196, "dense_raw_high_water": 196, "dense_overflow_world_steps": 0}
+
+    class RecordingSolver:
+        _row_watermark = True
+
+        def constraint_row_watermarks(self):
+            return expected
+
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+
+    with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
+        NewtonFeatherPGSManager._log_constraint_row_watermarks()
+
+    assert any(str(expected) in record.getMessage() for record in caplog.records)
+
+
+def test_feather_pgs_skips_constraint_row_readback_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disabled telemetry should not force a device synchronization at shutdown."""
+
+    class RecordingSolver:
+        _row_watermark = False
+
+        def constraint_row_watermarks(self):
+            raise AssertionError("watermark readback should stay disabled")
+
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+
+    NewtonFeatherPGSManager._log_constraint_row_watermarks()
+
+
 @pytest.mark.parametrize(
     "solver_cfg",
     [

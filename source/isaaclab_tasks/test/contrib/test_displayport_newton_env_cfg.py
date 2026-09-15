@@ -495,7 +495,10 @@ def test_displayport_feather_pgs_matches_physx_timing_and_gravity_contract():
     assert solver.enable_joint_limits is True
     assert solver.enable_joint_velocity_limits is True
     assert solver.velocity_limit_activation_fraction == pytest.approx(0.7)
-    assert solver.dense_max_constraints >= 192
+    assert solver.dense_max_constraints == 256
+    assert solver.row_watermark is True
+    assert solver.double_buffer is True
+    assert solver.use_parallel_streams is True
     assert solver.mf_max_constraints >= 1024
 
     assert cfg.actions.arm_action.controller_cfg.gravity_compensation is True

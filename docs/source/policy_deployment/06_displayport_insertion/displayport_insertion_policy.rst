@@ -473,8 +473,10 @@ This experiment branch pins a Newton fork that includes FeatherPGS and shared ru
 performance difference specifically to the solver, run an MJWarp control from the same Isaac Lab commit and Newton
 pin; do not compare this run to an official-release MJWarp run as a strict solver-only A/B.
 
-The per-world matrix-free row capacity is sized for this task. If FeatherPGS reports a constraint-row overflow,
-increase ``env.sim.physics.solver_cfg.mf_max_constraints`` before comparing throughput or policy quality.
+The preset enables whole-run constraint-row watermarks and reports them when the physics manager closes. Its
+per-world dense and matrix-free capacities are sized for the bounded diagnostic. If FeatherPGS reports an overflow,
+increase the matching ``dense_max_constraints`` or ``mf_max_constraints`` capacity before comparing throughput or
+policy quality.
 
 Evaluate a checkpoint with deterministic actor observations:
 
