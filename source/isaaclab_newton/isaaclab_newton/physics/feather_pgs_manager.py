@@ -29,7 +29,7 @@ class NewtonFeatherPGSManager(NewtonManager):
     """
 
     _builder_attribute_solvers = (SolverFeatherPGS,)
-    _ROW_WATERMARK_LOG_INTERVAL = 512
+    _ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS = 512
     _row_watermark_log_step = 0
 
     @classmethod
@@ -54,9 +54,9 @@ class NewtonFeatherPGSManager(NewtonManager):
         cfg = PhysicsManager._cfg
         if cfg is not None and cfg.debug_mode and getattr(cls._solver, "_row_watermark", False):
             logger.info(
-                "FeatherPGS constraint-row telemetry enabled: interval=%d, dense=%d, mf=%d, "
+                "FeatherPGS constraint-row telemetry enabled: interval_manager_steps=%d, dense=%d, mf=%d, "
                 "cuda_graph=%s, double_buffer=%s, parallel_streams=%s",
-                cls._ROW_WATERMARK_LOG_INTERVAL,
+                cls._ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS,
                 solver_cfg.dense_max_constraints,
                 solver_cfg.mf_max_constraints,
                 cfg.use_cuda_graph,
@@ -85,13 +85,13 @@ class NewtonFeatherPGSManager(NewtonManager):
 
     @classmethod
     def _log_solver_debug(cls) -> None:
-        """Periodically report row watermarks outside CUDA graph capture."""
+        """Report row watermarks every configured number of physics-manager steps."""
         cfg = PhysicsManager._cfg
         solver = NewtonManager._solver
         if cfg is None or not cfg.debug_mode or solver is None or not getattr(solver, "_row_watermark", False):
             return
         cls._row_watermark_log_step += 1
-        if cls._row_watermark_log_step % cls._ROW_WATERMARK_LOG_INTERVAL == 0:
+        if cls._row_watermark_log_step % cls._ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS == 0:
             cls._log_constraint_row_watermarks()
 
     @classmethod

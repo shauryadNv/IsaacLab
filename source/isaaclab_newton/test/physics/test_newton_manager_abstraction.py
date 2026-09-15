@@ -332,7 +332,7 @@ def test_feather_pgs_build_reports_enabled_watermark_configuration(
         NewtonFeatherPGSManager._build_solver(SimpleNamespace(), solver_cfg)
 
     message = caplog.records[-1].getMessage()
-    assert "interval=512" in message
+    assert "interval_manager_steps=512" in message
     assert "dense=256" in message
     assert "mf=2048" in message
     assert "cuda_graph=True" in message
@@ -393,10 +393,10 @@ def test_feather_pgs_skips_constraint_row_readback_when_disabled(monkeypatch: py
     NewtonFeatherPGSManager._log_constraint_row_watermarks()
 
 
-def test_feather_pgs_debug_logs_watermarks_once_per_rollout(
+def test_feather_pgs_debug_logs_watermarks_at_manager_step_interval(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Debug telemetry should synchronize once per 512 policy steps, not every step."""
+    """Debug telemetry should synchronize every 512 physics-manager steps."""
     expected = {"dense_high_water": 196, "dense_raw_high_water": 196, "dense_overflow_world_steps": 0}
 
     class RecordingSolver:
@@ -407,7 +407,12 @@ def test_feather_pgs_debug_logs_watermarks_once_per_rollout(
 
     monkeypatch.setattr(PhysicsManager, "_cfg", SimpleNamespace(debug_mode=True), raising=False)
     monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
-    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_log_step", 510, raising=False)
+    monkeypatch.setattr(
+        NewtonFeatherPGSManager,
+        "_row_watermark_log_step",
+        NewtonFeatherPGSManager._ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS - 2,
+        raising=False,
+    )
 
     with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
         NewtonFeatherPGSManager._log_solver_debug()

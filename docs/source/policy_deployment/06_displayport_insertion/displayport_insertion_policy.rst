@@ -473,10 +473,13 @@ This experiment branch pins a Newton fork that includes FeatherPGS and shared ru
 performance difference specifically to the solver, run an MJWarp control from the same Isaac Lab commit and Newton
 pin; do not compare this run to an official-release MJWarp run as a strict solver-only A/B.
 
-The preset enables whole-run constraint-row watermarks and reports them when the physics manager closes. Its
-per-world dense and matrix-free capacities are sized for the bounded diagnostic. If FeatherPGS reports an overflow,
-increase the matching ``dense_max_constraints`` or ``mf_max_constraints`` capacity before comparing throughput or
-policy quality.
+Constraint-row watermark telemetry is disabled during normal training because its bookkeeping adds per-step work and
+its readback synchronizes CUDA. For a bounded capacity diagnostic, enable both
+``env.sim.physics.debug_mode=true`` and ``env.sim.physics.solver_cfg.row_watermark=true``. The manager reports
+watermarks every 512 physics-manager steps and again at shutdown. With this task's decimation of eight, a
+512-policy-step PPO rollout contains 4,096 manager steps and therefore eight periodic readbacks. If FeatherPGS reports
+an overflow, increase the matching ``dense_max_constraints`` or ``mf_max_constraints`` capacity before comparing
+throughput or policy quality.
 
 Evaluate a checkpoint with deterministic actor observations:
 
