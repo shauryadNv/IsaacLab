@@ -364,6 +364,31 @@ def test_feather_pgs_skips_constraint_row_readback_when_disabled(monkeypatch: py
     NewtonFeatherPGSManager._log_constraint_row_watermarks()
 
 
+def test_feather_pgs_debug_logs_watermarks_once_per_rollout(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Debug telemetry should synchronize once per 512 policy steps, not every step."""
+    expected = {"dense_high_water": 196, "dense_raw_high_water": 196, "dense_overflow_world_steps": 0}
+
+    class RecordingSolver:
+        _row_watermark = True
+
+        def constraint_row_watermarks(self):
+            return expected
+
+    monkeypatch.setattr(PhysicsManager, "_cfg", SimpleNamespace(debug_mode=True), raising=False)
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_log_step", 510, raising=False)
+
+    with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
+        NewtonFeatherPGSManager._log_solver_debug()
+        assert not caplog.records
+        NewtonFeatherPGSManager._log_solver_debug()
+
+    assert len(caplog.records) == 1
+    assert str(expected) in caplog.records[0].getMessage()
+
+
 @pytest.mark.parametrize(
     "solver_cfg",
     [

@@ -13,6 +13,8 @@ import warp as wp
 from newton import Model
 from newton.solvers import SolverFeatherPGS
 
+from isaaclab.physics import PhysicsManager
+
 from .feather_pgs_manager_cfg import FeatherPGSSolverCfg
 from .newton_manager import NewtonManager
 
@@ -27,6 +29,8 @@ class NewtonFeatherPGSManager(NewtonManager):
     """
 
     _builder_attribute_solvers = (SolverFeatherPGS,)
+    _ROW_WATERMARK_LOG_INTERVAL = 512
+    _row_watermark_log_step = 0
 
     @classmethod
     def _create_solver(cls, model: Model, solver_cfg: FeatherPGSSolverCfg) -> SolverFeatherPGS:
@@ -46,6 +50,7 @@ class NewtonFeatherPGSManager(NewtonManager):
         NewtonManager._use_single_state = False
         NewtonManager._needs_collision_pipeline = True
         NewtonManager._supports_rigid_body_force_input = True
+        cls._row_watermark_log_step = 0
 
     @classmethod
     def _prepare_cuda_graph_capture(cls) -> None:
@@ -65,6 +70,17 @@ class NewtonFeatherPGSManager(NewtonManager):
         if world_mask is None:
             return
         cls._solver.reset(cls._state_0, world_mask=world_mask[: cls._model.world_count], flags=0)
+
+    @classmethod
+    def _log_solver_debug(cls) -> None:
+        """Periodically report row watermarks outside CUDA graph capture."""
+        cfg = PhysicsManager._cfg
+        solver = NewtonManager._solver
+        if cfg is None or not cfg.debug_mode or solver is None or not getattr(solver, "_row_watermark", False):
+            return
+        cls._row_watermark_log_step += 1
+        if cls._row_watermark_log_step % cls._ROW_WATERMARK_LOG_INTERVAL == 0:
+            cls._log_constraint_row_watermarks()
 
     @classmethod
     def _log_constraint_row_watermarks(cls) -> None:
