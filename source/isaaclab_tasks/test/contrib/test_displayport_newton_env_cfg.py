@@ -18,6 +18,7 @@ from isaaclab_newton.sim.schemas import NewtonCollisionCfg, NewtonSDFCollisionCf
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.schemas import PhysxCollisionCfg
 
+from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
 from isaaclab.managers import ObservationTermCfg, SceneEntityCfg
 from isaaclab.utils.noise import UniformNoiseCfg
@@ -335,6 +336,8 @@ def test_registered_displayport_newton_tasks_resolve_compatible_safe_defaults(ta
 
     assert isinstance(cfg.sim.physics, NewtonCfg)
     assert isinstance(cfg.actions.arm_action, DeployOperationalSpaceControllerActionCfg)
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        assert isinstance(cfg.scene.robot.actuators[actuator_name], IdealPDActuatorCfg)
     assert cfg.scene.num_envs == expected_num_envs
     assert cfg.sim.physics.collision_cfg.max_triangle_pairs == 2**25
     assert runner.seed == 123
@@ -437,8 +440,18 @@ def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     assert cfg.scene.robot.spawn.rigid_props.gravcomp == pytest.approx(1.0)
     assert cfg.scene.robot.spawn.joint_drive_props.actuatorgravcomp is False
 
-    for actuator_name in ("shoulder", "elbow", "wrist"):
+    expected_arm_limits = {
+        "shoulder": (123.0, 2.094),
+        "elbow": (64.0, 2.443),
+        "wrist": (39.0, 4.887),
+    }
+    for actuator_name, (effort_limit, velocity_limit) in expected_arm_limits.items():
         actuator = cfg.scene.robot.actuators[actuator_name]
+        assert isinstance(actuator, IdealPDActuatorCfg)
+        assert actuator.actuator_effort_limit == pytest.approx(effort_limit)
+        assert actuator.actuator_velocity_limit == pytest.approx(velocity_limit)
+        assert actuator.joint_effort_limit == pytest.approx(effort_limit)
+        assert actuator.joint_velocity_limit == pytest.approx(velocity_limit)
         assert actuator.stiffness == pytest.approx(0.0)
         assert actuator.damping == pytest.approx(0.0)
 
@@ -461,6 +474,14 @@ def test_displayport_newton_osc_abi_robot_and_gravity_settings():
     assert passive.armature == pytest.approx(0.05)
     assert cfg.hand_hold_width == pytest.approx(-0.1)
     assert cfg.hand_close_width == pytest.approx(-0.1)
+
+
+def test_displayport_newton_explicit_arm_actuators_do_not_mutate_physx():
+    """The explicit effort path is scoped to Newton; PhysX keeps its implicit drives."""
+    cfg = Rizon4sTaskSpaceDisplayportInsertionEnvCfg()
+
+    for actuator_name in ("shoulder", "elbow", "wrist"):
+        assert isinstance(cfg.scene.robot.actuators[actuator_name], ImplicitActuatorCfg)
 
 
 def test_displayport_newton_observation_abi_noise_and_deployment_metadata():

@@ -4,6 +4,12 @@ Added
 * Added a Newton point-SDF operational-space-control training,
   playback, and ROS-inference profile for DisplayPort insertion.
 
+Changed
+^^^^^^^
+
+* Changed the Newton OSC arm to use explicit, zero-gain actuators with Rizon
+  effort and velocity limits.
+
 Fixed
 ^^^^^
 

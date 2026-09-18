@@ -419,9 +419,10 @@ The policy emits a six-dimensional relative pose command at the flange origin. R
 output to ``[-1, 1]``; the OSC action then applies translation scales ``(0.025, 0.025, 0.010)`` m and a rotation
 scale of ``0.025`` rad. The action-term clip is intentionally unset so this transform has only one clipping stage.
 The OSC stiffness is ``(300, 300, 300, 30, 30, 30)`` with damping ratio ``1.0`` on every axis.
-Full inertial-dynamics decoupling is enabled; partial decoupling and null-space control are disabled. Arm joint-PD
-stiffness and damping are zero so OSC supplies the arm effort. Newton rigid-body gravity compensation is enabled
-for the robot, while OSC gravity compensation is disabled to avoid applying it twice.
+Full inertial-dynamics decoupling is enabled; partial decoupling and null-space control are disabled. The Newton
+arm uses explicit IdealPD actuators with zero stiffness and damping, so the OSC torque is the feed-forward effort;
+the actuator model and physics backend both enforce the Rizon effort and velocity limits. Newton rigid-body gravity
+compensation is enabled for the robot, while OSC gravity compensation is disabled to avoid applying it twice.
 
 The profile also preserves the reference domain randomization and curriculum: plug/socket/finger friction values
 of ``3.0`` / ``0.001`` / ``1.0``, additive arm-joint friction randomization in ``[0.0, 0.15]``, no arm PD-gain
@@ -566,8 +567,9 @@ target. What differs is the space that delta lives in.
 
       Two details matter for deployment:
 
-      * The arm's joint PD gains are **zeroed** (``actuators[...].stiffness = 0.0``); all compliance comes from the
-        task-space stiffness above, so the controller — not the joint servo — sets the contact behavior.
+      * The Newton arm uses zero-gain explicit ``IdealPDActuator`` groups. With stiffness and damping set to zero,
+        their output is the OSC feed-forward torque, clipped by the configured Rizon actuator and solver limits; they do
+        not add joint-position PD behavior.
       * In the PhysX task-space profile, the action is applied at the **flange**, while ``eef_pos`` is observed at
         the **TCP**. The Newton profile instead observes and controls at the **flange origin**. The
         real-robot bridge must reproduce the frame contract of the selected backend.

@@ -14,7 +14,7 @@ from isaaclab_newton.sim.schemas import NewtonCollisionCfg, NewtonSDFCollisionCf
 from isaaclab_physx.sim.schemas import PhysxCollisionCfg
 
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
 from isaaclab.controllers.operational_space_cfg import OperationalSpaceControllerCfg
 from isaaclab.envs import mdp as env_mdp
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -41,6 +41,30 @@ _OSC_STIFFNESS = (300.0, 300.0, 300.0, 30.0, 30.0, 30.0)
 _OSC_DAMPING_RATIO = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 _NEWTON_NUM_ENVS = 256
 _NEWTON_MAX_TRIANGLE_PAIRS = 2**25
+
+
+def _explicit_effort_actuator(source: ImplicitActuatorCfg) -> IdealPDActuatorCfg:
+    """Convert an implicit arm drive into a bounded explicit effort path for OSC."""
+    actuator_effort_limit = source.actuator_effort_limit
+    if actuator_effort_limit is None:
+        actuator_effort_limit = source.joint_effort_limit
+    actuator_velocity_limit = source.actuator_velocity_limit
+    if actuator_velocity_limit is None:
+        actuator_velocity_limit = source.joint_velocity_limit
+
+    return IdealPDActuatorCfg(
+        joint_names_expr=list(source.joint_names_expr),
+        actuator_effort_limit=actuator_effort_limit,
+        actuator_velocity_limit=actuator_velocity_limit,
+        joint_effort_limit=source.joint_effort_limit,
+        joint_velocity_limit=source.joint_velocity_limit,
+        stiffness=0.0,
+        damping=0.0,
+        armature=source.armature,
+        friction=source.friction,
+        dynamic_friction=source.dynamic_friction,
+        viscous_friction=source.viscous_friction,
+    )
 
 
 def _newton_sdf_properties(
@@ -240,6 +264,14 @@ class Rizon4sTaskSpaceNewtonDisplayportInsertionEnvCfg(Rizon4sTaskSpaceDisplaypo
         # stays disabled to avoid applying gravity twice.
         self.scene.robot.spawn.rigid_props = sim_utils.MujocoRigidBodyPropertiesCfg(gravcomp=1.0)
         self.scene.robot.spawn.joint_drive_props = sim_utils.MujocoJointDrivePropertiesCfg(actuatorgravcomp=False)
+
+        # Route OSC torques through explicit actuators so both the actuator model
+        # and the physics backend enforce the Rizon effort and velocity limits.
+        # Zero gains keep this a direct effort path rather than adding joint PD.
+        for actuator_name in ("shoulder", "elbow", "wrist"):
+            self.scene.robot.actuators[actuator_name] = _explicit_effort_actuator(
+                self.scene.robot.actuators[actuator_name]
+            )
 
         self.scene.robot.actuators["gripper_drive"] = ImplicitActuatorCfg(
             joint_names_expr=["finger_joint"],
