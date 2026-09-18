@@ -7,9 +7,7 @@ import gymnasium as gym
 
 from . import agents
 
-_INSERTION_ENV_ENTRY = (
-    "isaaclab_tasks.contrib.deploy.cable_insertion.insertion_env:DisplayportInsertionEnv"
-)
+_INSERTION_ENV_ENTRY = "isaaclab_tasks.contrib.deploy.cable_insertion.insertion_env:DisplayportInsertionEnv"
 
 ##
 # Register Gym environments.
@@ -112,9 +110,34 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": (
-            f"{__name__}.task_space_ros_inference_env_cfg:"
-            "Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg"
+            f"{__name__}.task_space_ros_inference_env_cfg:Rizon4sTaskSpaceDisplayportInsertionROSInferenceEnvCfg"
         ),
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Rizon4sGravDisplayportInsertionRNNPPORunnerCfg",
+    },
+)
+
+# Flexiv Rizon 4s - isolated geometric-fabric experiment
+gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Fabric",
+    entry_point=f"{__name__}.fabric_insertion_env:DisplayportFabricInsertionEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.fabric_env_cfg:Rizon4sFabricDisplayportInsertionEnvCfg",
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.fabric_rsl_rl_ppo_cfg:Rizon4sFabricDisplayportInsertionRNNPPORunnerCfg"
+        ),
+    },
+)
+
+# Flexiv Rizon 4s - geometric-fabric experiment play mode
+gym.register(
+    id="IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-Fabric-Play",
+    entry_point=f"{__name__}.fabric_insertion_env:DisplayportFabricInsertionEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.fabric_env_cfg:Rizon4sFabricDisplayportInsertionEnvCfg_PLAY",
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.fabric_rsl_rl_ppo_cfg:Rizon4sFabricDisplayportInsertionRNNPPORunnerCfg"
+        ),
     },
 )
