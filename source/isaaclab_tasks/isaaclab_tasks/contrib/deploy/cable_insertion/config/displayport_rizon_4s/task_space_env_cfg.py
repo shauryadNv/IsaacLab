@@ -31,6 +31,8 @@ from isaaclab_tasks.contrib.deploy.cable_insertion.displayport_insertion_env_cfg
     DisplayportInsertionEnvCfg,
 )
 
+from .domain_rand import apply_domain_randomization
+from .domain_rand_cfg import DomainRandCfg
 from .joint_pos_env_cfg import (
     _PLUG_ROOT,
     _PLUG_ROT,
@@ -288,6 +290,9 @@ class TaskSpaceTerminationsCfg:
 class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
     """Task-space DisplayPort insertion with OSC control, 6D observations, and curriculum."""
 
+    dr: DomainRandCfg = DomainRandCfg()
+    """Toggleable domain randomization. Off by default; see :mod:`.domain_rand_cfg`."""
+
     def __post_init__(self):
         super().__post_init__()
 
@@ -430,6 +435,16 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
 
         # Use 1:1 linear:exponential keypoint-tracking reward weighting.
         self.rewards.plug_socket_keypoint_tracking_exp.weight = abs(self.rewards.plug_socket_keypoint_tracking.weight)
+
+    def apply_domain_randomization(self) -> None:
+        """Expand :attr:`dr` into event, observation, action and curriculum terms.
+
+        Deliberately not called from ``__post_init__``: Isaac Lab applies ``env.*`` CLI
+        overrides *after* the config is constructed, so randomization wired during
+        ``__post_init__`` would never see them. The environment calls this instead, after
+        overrides have landed and before the managers are built.
+        """
+        apply_domain_randomization(self)
 
 
 @configclass

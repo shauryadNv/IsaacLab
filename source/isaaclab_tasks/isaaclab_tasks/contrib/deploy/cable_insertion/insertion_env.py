@@ -36,6 +36,13 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
     """
 
     def __init__(self, cfg, render_mode: str | None = None, **kwargs):
+        # Domain randomization is expanded here rather than in the config's __post_init__
+        # because Isaac Lab applies ``env.*`` CLI overrides after config construction.
+        # This runs after those overrides and before the managers are built.
+        expand_randomization = getattr(cfg, "apply_domain_randomization", None)
+        if callable(expand_randomization):
+            expand_randomization()
+
         super().__init__(cfg, render_mode=render_mode, **kwargs)
 
         self._log_success_metrics: bool = bool(getattr(cfg, "log_success_metrics", True))
@@ -59,6 +66,15 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
             self.num_envs, 1
         )
         self._success_kp_offsets = _keypoint_offsets_6d(device) * self._success_keypoint_scale
+
+        self.episode_succeeded = torch.zeros(self.num_envs, dtype=torch.bool, device=device)
+        """Sticky per-episode success flag, cleared at reset.
+
+        True once an environment has reached the success threshold at any point in the
+        current episode. Read by the domain-randomization curriculum, which advances on
+        whether the task was achieved rather than on whether it happened to be achieved
+        in the final frame.
+        """
 
     def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute per-env success mask, mate-point distance, and keypoint distance."""
@@ -106,6 +122,7 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         obs_buf, reward_buf, terminated, time_outs, extras = super().step(action)
         if getattr(self, "_log_success_metrics", False):
             is_success, pos_error, keypoint_dist = self._compute_success()
+            self.episode_succeeded |= is_success
             log = self.extras.setdefault("log", {})
             log["Metrics/success_rate"] = is_success.float().mean()
             log["Metrics/plug_socket_pos_error_m"] = pos_error.mean()
@@ -118,7 +135,10 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
             is_success, _, _ = self._compute_success()
             terminal_success = is_success[env_ids].float().mean()
 
+        # The curriculum manager runs inside the parent reset and reads
+        # ``episode_succeeded``, so it must stay valid until after this call.
         super()._reset_idx(env_ids)
+        self.episode_succeeded[env_ids] = False
 
         if terminal_success is not None:
             self.extras["log"]["Metrics/terminal_success_rate"] = terminal_success
