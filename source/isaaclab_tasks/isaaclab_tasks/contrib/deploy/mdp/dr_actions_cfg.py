@@ -23,9 +23,7 @@ class NoisyDelayedOperationalSpaceControllerActionCfg(DeployOperationalSpaceCont
     them at runtime through ``actions.<term>.<field>``.
     """
 
-    class_type: type | str = (
-        "isaaclab_tasks.contrib.deploy.mdp.dr_actions:NoisyDelayedOperationalSpaceControllerAction"
-    )
+    class_type: type | str = "isaaclab_tasks.contrib.deploy.mdp.dr_actions:NoisyDelayedOperationalSpaceControllerAction"
 
     action_bias_halfwidth: float = 0.0
     """Half-width of the per-episode uniform action bias, in action units.

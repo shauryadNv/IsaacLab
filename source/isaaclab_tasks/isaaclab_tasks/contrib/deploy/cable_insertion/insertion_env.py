@@ -76,6 +76,26 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         in the final frame.
         """
 
+    def load_training_state(self, checkpoint_path: str) -> None:
+        """Restore environment-side training state that the RL checkpoint does not carry.
+
+        RSL-RL checkpoints hold only the networks, the optimizer, and the iteration count,
+        so a resumed run would otherwise restart the randomization curriculum at level 0
+        while keeping hard-trained weights. Called by the training entry point after the
+        checkpoint is loaded; a no-op when no curriculum is configured.
+
+        Args:
+            checkpoint_path: Path to the checkpoint being resumed from.
+        """
+        manager = getattr(self, "curriculum_manager", None)
+        if manager is None or manager.cfg is None:
+            return
+        cfg = manager.cfg
+        term_cfg = cfg.get("adr") if isinstance(cfg, dict) else getattr(cfg, "adr", None)
+        restore = getattr(getattr(term_cfg, "func", None), "restore_from_checkpoint", None)
+        if callable(restore):
+            restore(checkpoint_path)
+
     def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute per-env success mask, mate-point distance, and keypoint distance."""
         socket = self.scene[self._success_socket_asset]

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 __all__ = ["SuccessDifficultyScheduler", "interpolate_range_fn"]
 
+import json
+import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -22,6 +24,9 @@ import torch
 
 from isaaclab.envs.mdp.curriculums import modify_env_param
 from isaaclab.managers import ManagerTermBase
+
+STATE_FILENAME = "adr_state.json"
+"""Name of the sidecar that carries the curriculum level alongside a run's checkpoints."""
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -62,6 +67,14 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         self._success_rate: float = 0.0
         self._last_change_step: int = 0
 
+        # RSL-RL checkpoints carry only network and optimizer state, so the level is
+        # persisted next to them instead. Only rank 0 writes: each rank derives its own
+        # timestamped log directory, and concurrent writers would race.
+        log_dir = getattr(env.cfg, "log_dir", None)
+        is_main_rank = int(os.getenv("RANK", "0")) == 0
+        self._state_path = os.path.join(log_dir, STATE_FILENAME) if log_dir and is_main_rank else None
+        self._write_state()
+
         if not hasattr(env, "episode_succeeded"):
             raise ValueError(
                 "SuccessDifficultyScheduler requires the environment to expose an 'episode_succeeded'"
@@ -85,6 +98,62 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         self._success_rate = float(values[1])
         self._last_change_step = int(values[2])
 
+    def _write_state(self) -> None:
+        """Persist the level next to the run's checkpoints. Never fatal to training."""
+        if self._state_path is None:
+            return
+        try:
+            os.makedirs(os.path.dirname(self._state_path), exist_ok=True)
+            with open(self._state_path, "w") as handle:
+                json.dump(
+                    {
+                        "level": self.level,
+                        "num_levels": self.num_levels,
+                        "success_rate": self._success_rate,
+                    },
+                    handle,
+                )
+        except OSError as exc:
+            print(f"[WARN] Could not write the ADR state file '{self._state_path}': {exc}")
+
+    def restore_from_checkpoint(self, checkpoint_path: str) -> bool:
+        """Restore the level from the sidecar beside ``checkpoint_path``.
+
+        Without this a resumed run silently restarts the curriculum at level 0, which
+        snaps every randomization range back to its easy endpoint while the policy keeps
+        its hard-trained weights.
+
+        Returns:
+            Whether a state file was found and applied.
+        """
+        state_file = os.path.join(os.path.dirname(checkpoint_path), STATE_FILENAME)
+        if not os.path.isfile(state_file):
+            print(
+                f"[WARN] No ADR state file beside '{checkpoint_path}'. The curriculum will restart at"
+                f" level {self.level}. Pass env.dr.adr.init_level to set it explicitly."
+            )
+            return False
+        try:
+            with open(state_file) as handle:
+                state = json.load(handle)
+        except (OSError, ValueError) as exc:
+            print(f"[WARN] Could not read the ADR state file '{state_file}': {exc}")
+            return False
+
+        saved_level = int(state.get("level", 0))
+        saved_num_levels = int(state.get("num_levels", self.num_levels))
+        if saved_num_levels != self.num_levels and saved_num_levels > 0:
+            # Preserve how far through the curriculum the run had progressed rather than
+            # the raw count, so num_levels can be changed between runs.
+            saved_level = round(saved_level * self.num_levels / saved_num_levels)
+        self.level = max(0, min(saved_level, self.num_levels))
+        self._success_rate = float(state.get("success_rate", 0.0))
+        # common_step_counter restarts on resume, so the guard restarts with it.
+        self._last_change_step = 0
+        print(f"[INFO] Restored ADR curriculum level {self.level}/{self.num_levels} from '{state_file}'.")
+        self._write_state()
+        return True
+
     def __call__(
         self,
         env: ManagerBasedRLEnv,
@@ -103,12 +172,17 @@ class SuccessDifficultyScheduler(ManagerTermBase):
 
         steps_since_change = env.common_step_counter - self._last_change_step
         if steps_since_change >= self.min_steps_between:
+            changed = False
             if self._success_rate > self.success_threshold and self.level < self.num_levels:
                 self.level += 1
-                self._last_change_step = env.common_step_counter
+                changed = True
             elif self.demote and self._success_rate < self.success_threshold and self.level > 0:
                 self.level -= 1
+                changed = True
+            if changed:
                 self._last_change_step = env.common_step_counter
+                # At most num_levels writes per run, so the cost is negligible.
+                self._write_state()
 
         return {"level": float(self.level), "frac": self.difficulty_frac, "success_rate": self._success_rate}
 
@@ -134,9 +208,7 @@ def interpolate_range_fn(
     """
     manager_cfg = env.curriculum_manager.cfg
     term_cfg = (
-        manager_cfg[difficulty_term_str]
-        if isinstance(manager_cfg, dict)
-        else getattr(manager_cfg, difficulty_term_str)
+        manager_cfg[difficulty_term_str] if isinstance(manager_cfg, dict) else getattr(manager_cfg, difficulty_term_str)
     )
     scheduler: SuccessDifficultyScheduler = term_cfg.func
     frac = scheduler.difficulty_frac

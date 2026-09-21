@@ -47,9 +47,7 @@ class NoisyDelayedOperationalSpaceControllerAction(DeployOperationalSpaceControl
 
         self._max_latency = int(cfg.max_latency_steps)
         # Ring of past commands; index 0 is the most recent.
-        self._command_history = torch.zeros(
-            self._max_latency + 1, self.num_envs, self.action_dim, device=self.device
-        )
+        self._command_history = torch.zeros(self._max_latency + 1, self.num_envs, self.action_dim, device=self.device)
         self._latency_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._action_bias = torch.zeros(self.num_envs, self.action_dim, device=self.device)
         self._env_index = torch.arange(self.num_envs, device=self.device)
@@ -69,9 +67,9 @@ class NoisyDelayedOperationalSpaceControllerAction(DeployOperationalSpaceControl
             self._action_bias[env_ids] = 0.0
             return
         num_envs = self.num_envs if isinstance(env_ids, slice) else len(env_ids)
-        self._action_bias[env_ids] = torch.empty(
-            num_envs, self.action_dim, device=self.device
-        ).uniform_(-halfwidth, halfwidth)
+        self._action_bias[env_ids] = torch.empty(num_envs, self.action_dim, device=self.device).uniform_(
+            -halfwidth, halfwidth
+        )
 
     def process_actions(self, actions: torch.Tensor):
         command = actions

@@ -31,3 +31,7 @@ Changed
   per-episode ``episode_succeeded`` flag and to expand ``env.dr`` during construction. Randomization is expanded there
   rather than in ``__post_init__`` because Isaac Lab applies ``env.*`` command-line overrides after the configuration
   object is built.
+* Changed :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.DisplayportInsertionEnv` to implement
+  ``load_training_state``, which restores the domain-randomization curriculum level from an ``adr_state.json`` sidecar
+  written beside the run's checkpoints. RSL-RL checkpoints carry only the networks, optimizer and iteration count, so a
+  resumed run would otherwise restart the curriculum at level 0 while keeping hard-trained policy weights.

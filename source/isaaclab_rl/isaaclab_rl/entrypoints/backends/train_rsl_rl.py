@@ -228,6 +228,13 @@ def _run(args_cli: argparse.Namespace) -> None:
             if args_cli.checkpoint:
                 print(f"[INFO]: Loading model checkpoint from: {resume_path}")
                 runner.load(resume_path)
+                # RSL-RL checkpoints carry only the networks, optimizer and iteration
+                # count. Let the environment restore any training state of its own (for
+                # example a domain-randomization curriculum level) from beside the
+                # checkpoint. No-op for environments that do not define the hook.
+                load_training_state = getattr(env.unwrapped, "load_training_state", None)
+                if callable(load_training_state):
+                    load_training_state(resume_path)
 
             dump_train_configs(log_dir, env_cfg, agent_cfg)
 
