@@ -75,12 +75,6 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         self._state_path = os.path.join(log_dir, STATE_FILENAME) if log_dir and is_main_rank else None
         self._write_state()
 
-        if not hasattr(env, "episode_succeeded"):
-            raise ValueError(
-                "SuccessDifficultyScheduler requires the environment to expose an 'episode_succeeded'"
-                " flag. Use DisplayportInsertionEnv or add an equivalent buffer."
-            )
-
     @property
     def difficulty_frac(self) -> float:
         """Current level as a fraction of the maximum, in ``[0, 1]``."""
@@ -165,7 +159,15 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         demote: bool = False,
         smoothing: float = 0.1,
     ) -> dict[str, float]:
-        succeeded = env.episode_succeeded[env_ids]
+        # Checked here rather than in the constructor: the environment builds its
+        # managers before its own buffers exist.
+        episode_succeeded = getattr(env, "episode_succeeded", None)
+        if episode_succeeded is None:
+            raise ValueError(
+                "SuccessDifficultyScheduler requires the environment to expose an 'episode_succeeded'"
+                " flag. Use DisplayportInsertionEnv or add an equivalent buffer."
+            )
+        succeeded = episode_succeeded[env_ids]
         if succeeded.numel() > 0:
             batch_rate = succeeded.float().mean().item()
             self._success_rate += self.smoothing * (batch_rate - self._success_rate)

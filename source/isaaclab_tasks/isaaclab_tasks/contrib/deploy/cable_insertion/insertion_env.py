@@ -43,6 +43,17 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         if callable(expand_randomization):
             expand_randomization()
 
+        # Allocated from the config before the base constructor runs, because that
+        # constructor builds the curriculum manager, whose scheduler reads this flag.
+        self.episode_succeeded = torch.zeros(cfg.scene.num_envs, dtype=torch.bool, device=cfg.sim.device)
+        """Sticky per-episode success flag, cleared at reset.
+
+        True once an environment has reached the success threshold at any point in the
+        current episode. Read by the domain-randomization curriculum, which advances on
+        whether the task was achieved rather than on whether it happened to be achieved
+        in the final frame.
+        """
+
         super().__init__(cfg, render_mode=render_mode, **kwargs)
 
         self._log_success_metrics: bool = bool(getattr(cfg, "log_success_metrics", True))
@@ -66,15 +77,6 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
             self.num_envs, 1
         )
         self._success_kp_offsets = _keypoint_offsets_6d(device) * self._success_keypoint_scale
-
-        self.episode_succeeded = torch.zeros(self.num_envs, dtype=torch.bool, device=device)
-        """Sticky per-episode success flag, cleared at reset.
-
-        True once an environment has reached the success threshold at any point in the
-        current episode. Read by the domain-randomization curriculum, which advances on
-        whether the task was achieved rather than on whether it happened to be achieved
-        in the final frame.
-        """
 
     def load_training_state(self, checkpoint_path: str) -> None:
         """Restore environment-side training state that the RL checkpoint does not carry.
