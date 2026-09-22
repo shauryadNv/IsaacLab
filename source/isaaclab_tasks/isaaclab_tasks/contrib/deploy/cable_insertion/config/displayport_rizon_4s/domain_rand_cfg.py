@@ -297,18 +297,27 @@ class DomainRandCfg:
     # Disturbances
     # ------------------------------------------------------------------
 
-    plug_wrench_force: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.0, 1.0))
-    """Magnitude range [N] of a random force applied to the plug, resampled on an interval.
+    plug_wrench_force: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(-0.6, 0.6))
+    """Per-axis range [N] of a random force on the plug, in the plug frame, resampled on an interval.
+
+    Each of x, y, z is drawn independently from this range, so it must be symmetric for the
+    force to point in a random direction; a range like ``(0, 1)`` would always push along the
+    plug's +x+y+z diagonal. At ``(-0.6, 0.6)`` the magnitude is ~0.6 N typically and at most
+    ~1.04 N.
 
     Off by default. Stands in chiefly for the DisplayPort cable, which hangs off the real
-    plug and exerts a time-varying tug that the sim does not model at all. 1 N is
+    plug and exerts a time-varying tug that the sim does not model at all. ~1 N is
     comparable to a real cable pull and well inside the OSC's ~7.5 N per-step authority.
     Both reference papers credit object wrenches with preventing brittle contact
-    strategies.
+    strategies. Cleared at every episode reset, so each episode's first wrench arrives
+    after one resampling interval.
     """
 
-    plug_wrench_torque: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.0, 0.02))
-    """Magnitude range [N*m] of a random torque applied to the plug."""
+    plug_wrench_torque: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(-0.012, 0.012))
+    """Per-axis range [N*m] of a random torque on the plug, in the plug frame.
+
+    Symmetric for the same reason as :attr:`plug_wrench_force`; at most ~0.02 N*m.
+    """
 
     wrench_interval_s: tuple[float, float] = (0.5, 2.0)
     """Resampling interval range [s] for the plug wrench."""
