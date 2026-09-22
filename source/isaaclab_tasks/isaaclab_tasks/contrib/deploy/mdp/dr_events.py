@@ -5,21 +5,21 @@
 
 """Domain-randomization event terms for deployment tasks.
 
-Covers the two randomizations that Isaac Lab's stock event terms do not reach:
-operational-space controller gains, and rigid-body materials whose sampling range
-changes at runtime under a curriculum.
+Covers what Isaac Lab's stock event terms do not reach: operational-space controller
+gains, and stock terms that cache their sampling range at construction and so ignore a
+range a curriculum widens at runtime.
 """
 
 from __future__ import annotations
 
-__all__ = ["AdrRigidBodyMaterial", "randomize_osc_task_gains"]
+__all__ = ["AdrResetRootStateUniform", "AdrRigidBodyMaterial", "randomize_osc_task_gains"]
 
 from typing import TYPE_CHECKING
 
 import torch
 
 from isaaclab.envs.mdp import events as core_events
-from isaaclab.managers import ManagerTermBase
+from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.utils import math as math_utils
 
 if TYPE_CHECKING:
@@ -168,3 +168,44 @@ class AdrRigidBodyMaterial(ManagerTermBase):
             self._signature = signature
 
         self._delegate(env, env_ids, **params)
+
+
+def _freeze_ranges(ranges: dict) -> tuple:
+    return tuple((key, tuple(value)) for key, value in sorted(ranges.items()))
+
+
+class AdrResetRootStateUniform(core_events.reset_root_state_uniform):
+    """Root-state reset whose pose and velocity ranges may change at runtime.
+
+    :class:`~isaaclab.envs.mdp.events.reset_root_state_uniform` converts its ranges to
+    tensors in its constructor and ignores the ``pose_range`` it is later called with, so
+    a curriculum that widens the range never takes effect. This refreshes the cached
+    tensors whenever the ranges it is called with change.
+
+    Accepts and forwards the same parameters as the wrapped term.
+    """
+
+    _KEYS = ("x", "y", "z", "roll", "pitch", "yaw")
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+        self._range_signature: tuple | None = None
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        env_ids: torch.Tensor,
+        pose_range: dict[str, tuple[float, float]],
+        velocity_range: dict[str, tuple[float, float]],
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ):
+        signature = (_freeze_ranges(pose_range), _freeze_ranges(velocity_range))
+        if signature != self._range_signature:
+            self._pose_ranges = torch.tensor(
+                [tuple(pose_range.get(key, (0.0, 0.0))) for key in self._KEYS], device=env.device
+            )
+            self._velocity_ranges = torch.tensor(
+                [tuple(velocity_range.get(key, (0.0, 0.0))) for key in self._KEYS], device=env.device
+            )
+            self._range_signature = signature
+        super().__call__(env, env_ids, pose_range, velocity_range, asset_cfg)

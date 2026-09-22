@@ -844,6 +844,13 @@ class reset_plug_at_goal_curriculum(ManagerTermBase):
 
         self.identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=env.device, dtype=torch.float32)
 
+        self.spawned_at_goal = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        """Whether each environment's current episode started with the plug already at the goal.
+
+        Such episodes begin partially inserted, so a success-driven curriculum should not score
+        them as evidence that the policy can insert.
+        """
+
     def _current_at_goal_prob(self, env: ManagerBasedEnv) -> float:
         """Return the at-goal probability for the current training progress.
 
@@ -881,6 +888,11 @@ class reset_plug_at_goal_curriculum(ManagerTermBase):
         approach_depth_range: list | None = None,
     ):
         num_envs = len(env_ids)
+
+        # Take the probabilities from the live params rather than the values cached at
+        # construction, so a curriculum that rewrites them at runtime takes effect.
+        self.at_goal_prob = at_goal_prob
+        self.at_goal_prob_final = at_goal_prob_final
 
         socket_pos = wp.to_torch(self.socket.data.root_pos_w)[env_ids]
         socket_quat = wp.to_torch(self.socket.data.root_quat_w)[env_ids]
@@ -924,8 +936,10 @@ class reset_plug_at_goal_curriculum(ManagerTermBase):
             plug_pos = normal_plug_pos.clone()
             plug_quat = normal_plug_quat.clone()
 
+            self.spawned_at_goal[env_ids] = False
             if current_at_goal_prob > 0.0 and num_envs > 0:
                 at_goal_mask = torch.rand(num_envs, device=env.device) < current_at_goal_prob
+                self.spawned_at_goal[env_ids] = at_goal_mask
                 at_goal_local = at_goal_mask.nonzero(as_tuple=False).squeeze(-1)
                 num_at_goal = int(at_goal_local.numel())
                 if num_at_goal > 0:
@@ -939,6 +953,7 @@ class reset_plug_at_goal_curriculum(ManagerTermBase):
                     plug_quat[at_goal_local] = goal_quat_w[at_goal_local]
         else:
             at_goal_mask = torch.rand(num_envs, device=env.device) < current_at_goal_prob
+            self.spawned_at_goal[env_ids] = at_goal_mask
 
             at_goal_range = (
                 self.at_goal_depth_range if self.at_goal_depth_range is not None else [0.0, self.insertion_length]

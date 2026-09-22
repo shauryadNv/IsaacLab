@@ -62,6 +62,9 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         self.min_steps_between: int = int(params.get("min_steps_between", 3000))
         self.demote: bool = bool(params.get("demote", False))
         self.smoothing: float = float(params.get("smoothing", 0.1))
+        self.at_goal_event: str | None = params.get("at_goal_event", "reset_plug_curriculum")
+        self._spawned_at_goal: torch.Tensor | None = None
+        self._spawned_at_goal_resolved = False
 
         self.level: int = int(params.get("init_level", 0))
         self._success_rate: float = 0.0
@@ -74,6 +77,24 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         is_main_rank = int(os.getenv("RANK", "0")) == 0
         self._state_path = os.path.join(log_dir, STATE_FILENAME) if log_dir and is_main_rank else None
         self._write_state()
+
+    def _at_goal_spawns(self, env: ManagerBasedRLEnv) -> torch.Tensor | None:
+        """Mask of envs whose episode began with the plug already at the goal, if tracked.
+
+        Those episodes start partially inserted and on-axis, so scoring them would inflate
+        the success rate the curriculum advances on. Resolved on first use because the
+        event manager must exist before its terms can be looked up.
+        """
+        if not self._spawned_at_goal_resolved:
+            self._spawned_at_goal_resolved = True
+            event_manager = getattr(env, "event_manager", None)
+            if self.at_goal_event and event_manager is not None:
+                try:
+                    term = event_manager.get_term_cfg(self.at_goal_event).func
+                    self._spawned_at_goal = getattr(term, "spawned_at_goal", None)
+                except ValueError:
+                    self._spawned_at_goal = None
+        return self._spawned_at_goal
 
     @property
     def difficulty_frac(self) -> float:
@@ -158,6 +179,7 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         init_level: int = 0,
         demote: bool = False,
         smoothing: float = 0.1,
+        at_goal_event: str | None = "reset_plug_curriculum",
     ) -> dict[str, float]:
         # Checked here rather than in the constructor: the environment builds its
         # managers before its own buffers exist.
@@ -168,6 +190,10 @@ class SuccessDifficultyScheduler(ManagerTermBase):
                 " flag. Use DisplayportInsertionEnv or add an equivalent buffer."
             )
         succeeded = episode_succeeded[env_ids]
+        spawned_at_goal = self._at_goal_spawns(env)
+        if spawned_at_goal is not None:
+            # Score only episodes that began at the approach pose.
+            succeeded = succeeded[~spawned_at_goal[env_ids]]
         if succeeded.numel() > 0:
             batch_rate = succeeded.float().mean().item()
             self._success_rate += self.smoothing * (batch_rate - self._success_rate)

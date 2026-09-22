@@ -186,6 +186,8 @@ def _apply_reset_state(dr: DomainRandCfg, events, track: TrackFn) -> None:
     if not (dr.socket_pos.enable or dr.socket_rot.enable):
         return
     initial = _pose_range(dr.socket_pos, dr.socket_rot)
+    # The stock term caches its range at construction and would ignore the curriculum.
+    events.randomize_socket_pose.func = mdp.AdrResetRootStateUniform
     events.randomize_socket_pose.params["pose_range"] = initial
     track(
         "events.randomize_socket_pose.params.pose_range",

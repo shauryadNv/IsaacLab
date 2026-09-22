@@ -20,9 +20,22 @@ Added
   would otherwise never reach the simulator.
 * Added :class:`~isaaclab_tasks.contrib.deploy.mdp.NoisyDelayedOperationalSpaceControllerActionCfg`, an operational-space
   action term with per-episode action bias, per-step action noise, and per-environment command latency.
+* Added :class:`~isaaclab_tasks.contrib.deploy.mdp.AdrResetRootStateUniform`, a
+  :class:`~isaaclab.envs.mdp.events.reset_root_state_uniform` whose pose and velocity ranges may change at runtime. The
+  stock term converts its ranges to tensors in its constructor and ignores the range it is later called with.
 * Added a ``rot_randomization_range`` parameter to
   :class:`~isaaclab_tasks.contrib.deploy.mdp.set_robot_to_object_grasp_pose` for per-reset randomization of the grasp
   orientation.
+* Added a ``spawned_at_goal`` mask to :class:`~isaaclab_tasks.contrib.deploy.mdp.reset_plug_at_goal_curriculum`. The
+  success-driven curriculum uses it to score only episodes that began at the approach pose, since episodes that begin
+  partially inserted would otherwise inflate the success rate it advances on.
+
+Fixed
+^^^^^
+
+* Fixed :class:`~isaaclab_tasks.contrib.deploy.mdp.reset_plug_at_goal_curriculum` ignoring ``at_goal_prob`` and
+  ``at_goal_prob_final`` changes made after construction, which left a curriculum-driven at-goal schedule stuck at its
+  initial value.
 
 Changed
 ^^^^^^^
