@@ -244,7 +244,10 @@ def _apply_observation_noise(dr: DomainRandCfg, env_cfg, track: TrackFn) -> None
         obs_term = getattr(env_cfg.observations.policy, term_name)
         obs_term.noise = NoiseModelWithAdditiveBiasCfg(
             noise_cfg=UniformNoiseCfg(n_min=-knob.noise_initial, n_max=knob.noise_initial, operation="add"),
-            bias_noise_cfg=UniformNoiseCfg(n_min=-knob.bias_initial, n_max=knob.bias_initial, operation="add"),
+            # "abs", not "add": the model computes the new bias as func(old_bias), so "add" would
+            # accumulate a fresh sample onto the previous bias at every reset (a random walk that
+            # drifts far outside the configured range over a training run).
+            bias_noise_cfg=UniformNoiseCfg(n_min=-knob.bias_initial, n_max=knob.bias_initial, operation="abs"),
             sample_bias_per_component=True,
         )
         address = f"observations.policy.{term_name}.noise"
