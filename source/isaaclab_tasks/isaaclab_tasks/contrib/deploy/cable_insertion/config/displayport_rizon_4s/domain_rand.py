@@ -69,6 +69,8 @@ def _apply_controller_gains(dr: DomainRandCfg, events, track: TrackFn) -> None:
         params={
             "stiffness_scale_range": tuple(dr.osc_stiffness.initial),
             "damping_ratio_scale_range": tuple(dr.osc_damping_ratio.initial),
+            "stiffness_distribution": dr.osc_stiffness.distribution,
+            "damping_ratio_distribution": dr.osc_damping_ratio.distribution,
             "action_term_name": "arm_action",
         },
     )
@@ -312,7 +314,7 @@ def _build_curriculum(dr: DomainRandCfg, schedule: list) -> dict[str, CurrTerm]:
             params={
                 "num_levels": dr.adr.num_levels,
                 "success_threshold": dr.adr.success_threshold,
-                "min_steps_between": dr.adr.min_steps_between,
+                "min_episodes_between": dr.adr.min_episodes_between,
                 "init_level": dr.adr.init_level,
                 "demote": dr.adr.demote,
             },

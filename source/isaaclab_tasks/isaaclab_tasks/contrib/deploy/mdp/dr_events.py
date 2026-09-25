@@ -27,6 +27,18 @@ if TYPE_CHECKING:
     from isaaclab.managers import EventTermCfg
 
 
+def _sample_scale(value_range: tuple[float, float], distribution: str, size: tuple[int, ...], device) -> torch.Tensor:
+    """Sample a multiplicative scale uniformly or log-uniformly within ``value_range``."""
+    low, high = float(value_range[0]), float(value_range[1])
+    if distribution == "uniform":
+        return math_utils.sample_uniform(low, high, size, device=device)
+    if distribution == "log_uniform":
+        if low <= 0.0:
+            raise ValueError(f"log_uniform sampling needs a positive range, got {value_range}.")
+        return math_utils.sample_log_uniform(low, high, size, device=device)
+    raise ValueError(f"Unknown distribution '{distribution}'. Expected 'uniform' or 'log_uniform'.")
+
+
 class randomize_osc_task_gains(ManagerTermBase):
     """Scale the operational-space controller's task-space gains per environment.
 
@@ -47,6 +59,10 @@ class randomize_osc_task_gains(ManagerTermBase):
             sampled independently per axis.
         damping_ratio_scale_range: ``(low, high)`` multiplier on the nominal damping
             ratio, sampled independently per axis.
+        stiffness_distribution: ``"uniform"`` or ``"log_uniform"``. Log-uniform is the
+            natural choice for a multiplicative scale: halving and doubling become equally
+            likely.
+        damping_ratio_distribution: As :attr:`stiffness_distribution`, for the damping ratio.
         action_term_name: Name of the OSC action term to target.
     """
 
@@ -85,6 +101,8 @@ class randomize_osc_task_gains(ManagerTermBase):
         env_ids: torch.Tensor | None,
         stiffness_scale_range: tuple[float, float] = (1.0, 1.0),
         damping_ratio_scale_range: tuple[float, float] = (1.0, 1.0),
+        stiffness_distribution: str = "uniform",
+        damping_ratio_distribution: str = "uniform",
         action_term_name: str = "arm_action",
     ) -> None:
         if self._osc is None:
@@ -94,12 +112,8 @@ class randomize_osc_task_gains(ManagerTermBase):
             env_ids = torch.arange(env.num_envs, device=env.device)
         num_envs = len(env_ids)
 
-        stiffness_scale = math_utils.sample_uniform(
-            stiffness_scale_range[0], stiffness_scale_range[1], (num_envs, 6), device=env.device
-        )
-        damping_scale = math_utils.sample_uniform(
-            damping_ratio_scale_range[0], damping_ratio_scale_range[1], (num_envs, 6), device=env.device
-        )
+        stiffness_scale = _sample_scale(stiffness_scale_range, stiffness_distribution, (num_envs, 6), env.device)
+        damping_scale = _sample_scale(damping_ratio_scale_range, damping_ratio_distribution, (num_envs, 6), env.device)
 
         stiffness = self._nominal_stiffness * stiffness_scale
         damping_ratio = self._nominal_damping_ratio * damping_scale

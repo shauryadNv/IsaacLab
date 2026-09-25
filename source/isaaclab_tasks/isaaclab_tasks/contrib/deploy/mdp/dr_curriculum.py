@@ -37,7 +37,7 @@ class SuccessDifficultyScheduler(ManagerTermBase):
     """Global difficulty level driven by the policy's episode success rate.
 
     The level advances by one when a smoothed success rate exceeds
-    ``success_threshold`` and at least ``min_steps_between`` policy steps have elapsed
+    ``success_threshold`` and at least ``min_episodes_between`` episodes' worth of policy steps have elapsed
     since the last change. Success is read from the environment's sticky
     :attr:`~isaaclab_tasks.contrib.deploy.cable_insertion.insertion_env.DisplayportInsertionEnv.episode_succeeded`
     flag, so an episode counts if the plug was ever seated, not only if it happened to be
@@ -59,7 +59,10 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         params = cfg.params
         self.num_levels: int = int(params.get("num_levels", 50))
         self.success_threshold: float = float(params.get("success_threshold", 0.4))
-        self.min_steps_between: int = int(params.get("min_steps_between", 3000))
+        self.min_episodes_between: float = float(params.get("min_episodes_between", 5.0))
+        # Resolved from the episode length on first use; not reliably available while the
+        # environment is still constructing its managers.
+        self._min_steps_between: int | None = None
         self.demote: bool = bool(params.get("demote", False))
         self.smoothing: float = float(params.get("smoothing", 0.1))
         self.at_goal_event: str | None = params.get("at_goal_event", "reset_plug_curriculum")
@@ -175,7 +178,7 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         env_ids: Sequence[int],
         num_levels: int = 50,
         success_threshold: float = 0.4,
-        min_steps_between: int = 3000,
+        min_episodes_between: float = 5.0,
         init_level: int = 0,
         demote: bool = False,
         smoothing: float = 0.1,
@@ -199,7 +202,9 @@ class SuccessDifficultyScheduler(ManagerTermBase):
             self._success_rate += self.smoothing * (batch_rate - self._success_rate)
 
         steps_since_change = env.common_step_counter - self._last_change_step
-        if steps_since_change >= self.min_steps_between:
+        if self._min_steps_between is None:
+            self._min_steps_between = int(round(self.min_episodes_between * env.max_episode_length))
+        if steps_since_change >= self._min_steps_between:
             changed = False
             if self._success_rate > self.success_threshold and self.level < self.num_levels:
                 self.level += 1

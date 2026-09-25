@@ -9,11 +9,12 @@ Added
   unrandomized environment is unchanged.
 * Added :class:`~isaaclab_tasks.contrib.deploy.mdp.SuccessDifficultyScheduler`, a success-driven automatic
   domain-randomization curriculum. A global difficulty level advances when the smoothed episode success rate clears a
-  threshold and a minimum number of steps have elapsed, and each enabled randomization range is interpolated from its
-  easy endpoint to its hard endpoint by that level.
+  threshold and a minimum number of episodes' worth of steps have elapsed (5 by default), and each enabled
+  randomization range is interpolated from its easy endpoint to its hard endpoint by that level.
 * Added :class:`~isaaclab_tasks.contrib.deploy.mdp.randomize_osc_task_gains`, which scales operational-space controller
-  task gains per environment. The task-space environment zeroes the arm joint PD so the controller can drive the joints
-  with pure torque, which makes :class:`~isaaclab.envs.mdp.events.randomize_actuator_gains` a no-op there.
+  task gains per environment, uniformly or log-uniformly. The task-space environment zeroes the arm joint PD so the
+  controller can drive the joints with pure torque, which makes
+  :class:`~isaaclab.envs.mdp.events.randomize_actuator_gains` a no-op there.
 * Added :class:`~isaaclab_tasks.contrib.deploy.mdp.AdrRigidBodyMaterial`, a wrapper around
   :class:`~isaaclab.envs.mdp.events.randomize_rigid_body_material` that rebuilds its delegate when the sampling range
   changes. The stock term caches its PhysX material buckets in its constructor, so a curriculum that widens the range
