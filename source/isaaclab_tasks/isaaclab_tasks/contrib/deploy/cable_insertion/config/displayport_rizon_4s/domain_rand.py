@@ -202,12 +202,12 @@ def _apply_reset_state(dr: DomainRandCfg, events, track: TrackFn) -> None:
 
 
 def _apply_disturbances(dr: DomainRandCfg, events, track: TrackFn) -> None:
-    """Apply a random wrench to the plug.
+    """Apply a random force to the plug.
 
     Stands in chiefly for the DisplayPort cable, which hangs off the real plug and exerts a
     time-varying tug that the simulation does not model at all.
     """
-    if not (dr.plug_wrench_force.enable or dr.plug_wrench_torque.enable):
+    if not dr.plug_wrench_force.enable:
         return
     events.plug_wrench = EventTerm(
         func=mdp.apply_external_force_torque,
@@ -216,21 +216,14 @@ def _apply_disturbances(dr: DomainRandCfg, events, track: TrackFn) -> None:
         params={
             "asset_cfg": SceneEntityCfg("dp_plug", body_names=".*"),
             "force_range": tuple(dr.plug_wrench_force.initial),
-            "torque_range": tuple(dr.plug_wrench_torque.initial),
+            "torque_range": (0.0, 0.0),
         },
     )
-    if dr.plug_wrench_force.enable:
-        track(
-            "events.plug_wrench.params.force_range",
-            tuple(dr.plug_wrench_force.initial),
-            tuple(dr.plug_wrench_force.final),
-        )
-    if dr.plug_wrench_torque.enable:
-        track(
-            "events.plug_wrench.params.torque_range",
-            tuple(dr.plug_wrench_torque.initial),
-            tuple(dr.plug_wrench_torque.final),
-        )
+    track(
+        "events.plug_wrench.params.force_range",
+        tuple(dr.plug_wrench_force.initial),
+        tuple(dr.plug_wrench_force.final),
+    )
 
 
 def _apply_observation_noise(dr: DomainRandCfg, env_cfg, track: TrackFn) -> None:

@@ -5,7 +5,7 @@ Added
   ``env.dr`` on :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.config.displayport_rizon_4s.Rizon4sTaskSpaceDisplayportInsertionEnvCfg`
   and inherited by the ``-TaskSpace-ROS-Inference`` task. Knobs cover operational-space controller gains, joint armature
   and friction, gripper-finger and mating friction, plug mass, grasp position and orientation, socket pose, observation
-  noise, action noise and latency, and an external wrench on the plug. Every knob is off by default, so the
+  noise, action noise and latency, and an external force on the plug. Every knob is off by default, so the
   unrandomized environment is unchanged.
 * Added :class:`~isaaclab_tasks.contrib.deploy.mdp.SuccessDifficultyScheduler`, a success-driven automatic
   domain-randomization curriculum. A global difficulty level advances when the smoothed episode success rate clears a

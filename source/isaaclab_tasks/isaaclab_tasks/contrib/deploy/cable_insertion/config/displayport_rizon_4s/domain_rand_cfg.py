@@ -197,16 +197,17 @@ class DomainRandCfg:
     gear ratio squared, so proximal joints can carry O(0.1) kg*m^2.
     """
 
-    joint_friction: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(4.0, 5.0))
+    joint_friction: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.8, 1.0))
     """Absolute arm joint static friction effort [N*m], sampled per env and joint at reset.
 
     The sim baseline is 0.0 while real harmonic drives have meaningful friction. Applied
     with ``operation="abs"`` for the same reason as :attr:`joint_armature`.
 
-    At the final endpoint every joint carries at least 4 N*m. The OSC only produces that
-    much joint torque for sizeable pose errors (roughly several cm, or several degrees
-    at the wrist, at nominal gains), so this is a strong stiction regime; the ADR level
-    will stall if the policy cannot hold precision under it.
+    Measured with a scripted push at nominal OSC gains: at 1.0 N*m a moderate action (0.3)
+    no longer moves the arm at all, while a full action (1.0) still achieves ~48% of its
+    frictionless displacement. So at the final endpoint the policy must use large commands
+    to break stiction, and small corrective moves stall. ``(0.4, 0.5)`` keeps moderate
+    actions ~25-35% effective; 2-5 N*m freezes the arm outright.
     """
 
     # ------------------------------------------------------------------
@@ -335,16 +336,14 @@ class DomainRandCfg:
     Both reference papers credit object wrenches with preventing brittle contact
     strategies. Cleared at every episode reset, so each episode's first wrench arrives
     after one resampling interval.
-    """
 
-    plug_wrench_torque: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(-0.012, 0.012))
-    """Per-axis range [N*m] of a random torque on the plug, in the plug frame.
-
-    Symmetric for the same reason as :attr:`plug_wrench_force`; at most ~0.02 N*m.
+    Also the dominant *rotational* disturbance: the plug hangs ~19 cm below the flange, so
+    0.6 N is ~0.1 N*m at the wrist. A separate torque knob was dropped because realistic
+    torques (~0.01 N*m) were indistinguishable from none.
     """
 
     wrench_interval_s: tuple[float, float] = (0.5, 2.0)
-    """Resampling interval range [s] for the plug wrench."""
+    """Resampling interval range [s] for the plug wrench force."""
 
     # ------------------------------------------------------------------
     # Existing at-goal reset curriculum
