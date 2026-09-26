@@ -197,17 +197,26 @@ class DomainRandCfg:
     gear ratio squared, so proximal joints can carry O(0.1) kg*m^2.
     """
 
-    joint_friction: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.8, 1.0))
+    joint_friction: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.7, 0.8))
     """Absolute arm joint static friction effort [N*m], sampled per env and joint at reset.
 
     The sim baseline is 0.0 while real harmonic drives have meaningful friction. Applied
     with ``operation="abs"`` for the same reason as :attr:`joint_armature`.
 
-    Measured with a scripted push at nominal OSC gains: at 1.0 N*m a moderate action (0.3)
-    no longer moves the arm at all, while a full action (1.0) still achieves ~48% of its
-    frictionless displacement. So at the final endpoint the policy must use large commands
-    to break stiction, and small corrective moves stall. ``(0.4, 0.5)`` keeps moderate
-    actions ~25-35% effective; 2-5 N*m freezes the arm outright.
+    Measured with a scripted push at nominal OSC gains, as % of frictionless displacement:
+
+    ============  ======================  ==================
+    friction      moderate action (0.3)   full action (1.0)
+    ============  ======================  ==================
+    0.35-0.40     36%                     76%
+    0.48          24%                     70%
+    0.70-0.80     0.5% (frozen)           58%
+    1.0           0.4% (frozen)           48%
+    ============  ======================  ==================
+
+    So at this final endpoint small corrective moves stall and the policy must use large
+    commands to break stiction. Around 0.5 N*m keeps moderate actions partly effective;
+    2-5 N*m freezes the arm outright.
     """
 
     # ------------------------------------------------------------------
