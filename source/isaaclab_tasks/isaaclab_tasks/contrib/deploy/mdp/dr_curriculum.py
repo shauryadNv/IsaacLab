@@ -166,8 +166,10 @@ class SuccessDifficultyScheduler(ManagerTermBase):
             saved_level = round(saved_level * self.num_levels / saved_num_levels)
         self.level = max(0, min(saved_level, self.num_levels))
         self._success_rate = float(state.get("success_rate", 0.0))
-        # common_step_counter restarts on resume, so the guard restarts with it.
-        self._last_change_step = 0
+        # Restart the spacing guard at the resume point (the env restores common_step_counter
+        # to the resumed iteration before this runs), so the level cannot move until the
+        # resumed run has collected fresh episodes.
+        self._last_change_step = int(self._env.common_step_counter)
         print(f"[INFO] Restored ADR curriculum level {self.level}/{self.num_levels} from '{state_file}'.")
         self._write_state()
         return True

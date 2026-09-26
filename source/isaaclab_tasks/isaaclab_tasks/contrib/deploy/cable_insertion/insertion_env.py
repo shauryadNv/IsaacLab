@@ -86,9 +86,14 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         while keeping hard-trained weights. Called by the training entry point after the
         checkpoint is loaded; a no-op when no curriculum is configured.
 
+        Also restores the environment step counter, which a new process starts at 0, so
+        schedules driven by it (such as the at-goal spawn anneal) continue from the
+        resumed iteration instead of starting over.
+
         Args:
             checkpoint_path: Path to the checkpoint being resumed from.
         """
+        self._restore_step_counter(checkpoint_path)
         manager = getattr(self, "curriculum_manager", None)
         if manager is None or manager.cfg is None:
             return
@@ -97,6 +102,23 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         restore = getattr(getattr(term_cfg, "func", None), "restore_from_checkpoint", None)
         if callable(restore):
             restore(checkpoint_path)
+
+    def _restore_step_counter(self, checkpoint_path: str) -> None:
+        """Set ``common_step_counter`` to the resumed iteration times the steps per iteration.
+
+        Uses the at-goal reset term's ``num_steps_per_env`` so the restored counter matches
+        the iteration count that term's anneal is computed from. No-op without that term.
+        """
+        term = getattr(self.cfg.events, "reset_plug_curriculum", None)
+        steps_per_iter = int((term.params if term is not None else {}).get("num_steps_per_env", 0) or 0)
+        if steps_per_iter <= 0:
+            return
+        iteration = int(torch.load(checkpoint_path, map_location="cpu", weights_only=False).get("iter", 0))
+        self.common_step_counter = iteration * steps_per_iter
+        print(
+            f"[INFO] Restored common_step_counter={self.common_step_counter} "
+            f"(iteration {iteration} x {steps_per_iter} steps) from '{checkpoint_path}'."
+        )
 
     def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute per-env success mask, mate-point distance, and keypoint distance."""

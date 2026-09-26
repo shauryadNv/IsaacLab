@@ -37,6 +37,11 @@ Fixed
 * Fixed :class:`~isaaclab_tasks.contrib.deploy.mdp.reset_plug_at_goal_curriculum` ignoring ``at_goal_prob`` and
   ``at_goal_prob_final`` changes made after construction, which left a curriculum-driven at-goal schedule stuck at its
   initial value.
+* Fixed resumed :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.DisplayportInsertionEnv` runs restarting the
+  at-goal spawn anneal from its initial probability. ``load_training_state`` now restores ``common_step_counter`` to the
+  resumed iteration times the anneal's ``num_steps_per_env``, and
+  :class:`~isaaclab_tasks.contrib.deploy.mdp.SuccessDifficultyScheduler` restarts its level-change spacing at that
+  step instead of at 0.
 
 Changed
 ^^^^^^^
