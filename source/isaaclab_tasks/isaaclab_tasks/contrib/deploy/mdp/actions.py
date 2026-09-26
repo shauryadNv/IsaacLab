@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import torch
 import warp as wp
 
+import isaaclab.utils.math as math_utils
 from isaaclab.envs.mdp.actions.joint_actions import RelativeJointPositionAction
 from isaaclab.envs.mdp.actions.task_space_actions import (
     DifferentialInverseKinematicsAction,
@@ -175,18 +176,49 @@ class DeployOperationalSpaceControllerAction(OperationalSpaceControllerAction):
             target_types=cfg.controller_cfg.target_types,
         )
 
+        self._payload = None
+        if cfg.payload_gravity_compensation:
+            if cfg.payload_asset_name is None:
+                raise ValueError("payload_gravity_compensation requires payload_asset_name.")
+            if cfg.body_offset is not None:
+                raise NotImplementedError("payload_gravity_compensation assumes no body_offset on the OSC frame.")
+            self._payload = env.scene[cfg.payload_asset_name]
+            # Acceleration that cancels gravity (points up for the usual (0, 0, -9.81)).
+            self._payload_support_acc_w = -torch.tensor(env.sim.cfg.gravity, device=self.device, dtype=torch.float32)
+
     def apply_actions(self):
         asset = self._asset
         if type(asset).__name__ != "_ArticulationWriteProxy":
             super().apply_actions()
+            self._add_payload_gravity_compensation()
             return
 
         real_asset = object.__getattribute__(asset, "_real_asset")
         self._asset = real_asset
         try:
             super().apply_actions()
+            self._add_payload_gravity_compensation()
         finally:
             self._asset = asset
+
+    def _add_payload_gravity_compensation(self) -> None:
+        """Add the joint torques that hold up the payload's weight to the efforts just written.
+
+        The weight ``m * g`` acts at the payload's center of mass, so at the OSC frame it is a force plus
+        the moment of that force about the frame origin; the joint torques are ``J^T`` times that wrench,
+        using the root-frame Jacobian the controller computed this substep.
+        """
+        if self._payload is None:
+            return
+        root_pos_w = self._asset.data.root_pos_w.torch
+        root_quat_w = self._asset.data.root_quat_w.torch
+        com_b = math_utils.quat_apply_inverse(root_quat_w, self._payload.data.root_com_pos_w.torch - root_pos_w)
+        lever_b = com_b - self._ee_pose_b[:, 0:3]
+        mass = self._payload.data.body_mass.torch.sum(dim=-1, keepdim=True) * self.cfg.payload_mass_scale
+        force_b = math_utils.quat_apply_inverse(root_quat_w, mass * self._payload_support_acc_w)
+        wrench_b = torch.cat([force_b, torch.cross(lever_b, force_b, dim=-1)], dim=-1)
+        self._joint_efforts += torch.bmm(self._jacobian_b.transpose(1, 2), wrench_b.unsqueeze(-1)).squeeze(-1)
+        self._asset.set_joint_effort_target_index(target=self._joint_efforts, joint_ids=self._joint_ids)
 
 
 class DeployDifferentialInverseKinematicsAction(DifferentialInverseKinematicsAction):

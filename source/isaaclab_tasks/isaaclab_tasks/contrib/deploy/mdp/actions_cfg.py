@@ -28,6 +28,22 @@ class DeployOperationalSpaceControllerActionCfg(OperationalSpaceControllerAction
 
     class_type: type | str = "isaaclab_tasks.contrib.deploy.mdp.actions:DeployOperationalSpaceControllerAction"
 
+    payload_gravity_compensation: bool = False
+    """Whether to add a feed-forward joint torque that cancels the weight of a held payload.
+
+    The arm links are gravity-free in the task-space environments, but a grasped rigid object is not,
+    and with ``pose_rel`` targets re-based on the measured pose every step nothing restores the pose
+    the payload's weight pulls the end effector away from, so the arm slowly sinks. The real robot's
+    stiff position servo holds its target instead. Defaults to False.
+    """
+
+    payload_asset_name: str | None = None
+    """Name of the rigid object whose weight is compensated. Required when
+    :attr:`payload_gravity_compensation` is True."""
+
+    payload_mass_scale: float = 1.0
+    """Scale on the payload's current mass used for compensation (1.0 cancels its weight exactly)."""
+
 
 @configclass
 class DeployDifferentialInverseKinematicsActionCfg(DifferentialInverseKinematicsActionCfg):

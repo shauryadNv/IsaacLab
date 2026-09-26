@@ -328,6 +328,10 @@ class Rizon4sTaskSpaceDisplayportInsertionEnvCfg(DisplayportInsertionEnvCfg):
             ),
             position_scale=_ACTION_SCALE,
             orientation_scale=_ACTION_SCALE,
+            # Off by default. Enable with env.actions.arm_action.payload_gravity_compensation=true
+            # to cancel the grasped plug's weight, which otherwise makes the gripper sink under
+            # zero actions (the real robot's stiff position servo holds its target instead).
+            payload_asset_name="dp_plug",
         )
 
         # ----- Events -----

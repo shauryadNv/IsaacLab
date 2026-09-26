@@ -27,6 +27,13 @@ Added
 * Added a ``rot_randomization_range`` parameter to
   :class:`~isaaclab_tasks.contrib.deploy.mdp.set_robot_to_object_grasp_pose` for per-reset randomization of the grasp
   orientation.
+* Added optional payload gravity compensation to
+  :class:`~isaaclab_tasks.contrib.deploy.mdp.DeployOperationalSpaceControllerActionCfg`
+  (``payload_gravity_compensation``, ``payload_asset_name``, ``payload_mass_scale``). It adds the joint torques that
+  hold up a grasped rigid object's weight at its center of mass. The task-space arm is gravity-free but the plug is
+  not, and with ``pose_rel`` targets re-based on the measured pose each step the gripper otherwise sinks under zero
+  actions (about 29 mm in 5 s), unlike the real robot's position servo. The task-space environment sets
+  ``payload_asset_name="dp_plug"``; compensation is off by default.
 * Added a ``spawned_at_goal`` mask to :class:`~isaaclab_tasks.contrib.deploy.mdp.reset_plug_at_goal_curriculum`. The
   success-driven curriculum uses it to score only episodes that began at the approach pose, since episodes that begin
   partially inserted would otherwise inflate the success rate it advances on.
