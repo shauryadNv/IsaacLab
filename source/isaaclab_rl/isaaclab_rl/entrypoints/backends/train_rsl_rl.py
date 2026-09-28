@@ -228,6 +228,20 @@ def _run(args_cli: argparse.Namespace) -> None:
             if args_cli.checkpoint:
                 print(f"[INFO]: Loading model checkpoint from: {resume_path}")
                 runner.load(resume_path)
+                # The optimizer state (including its learning rate) is restored, but PPO keeps
+                # its own ``learning_rate`` that the adaptive schedule writes back into the
+                # optimizer after the first KL check, and that attribute restarts at the config
+                # value. A run whose schedule had decayed the rate would then take its first
+                # updates at the (much larger) initial rate and collapse. Resume from the
+                # optimizer's restored rate instead.
+                optimizer = getattr(runner.alg, "optimizer", None)
+                if optimizer is not None and hasattr(runner.alg, "learning_rate"):
+                    restored_lr = optimizer.param_groups[0]["lr"]
+                    print(
+                        f"[INFO]: Resuming with learning rate {restored_lr:.3g} from the checkpoint "
+                        f"(config value {runner.alg.learning_rate:.3g})."
+                    )
+                    runner.alg.learning_rate = restored_lr
                 # RSL-RL checkpoints carry only the networks, optimizer and iteration
                 # count. Let the environment restore any training state of its own (for
                 # example a domain-randomization curriculum level) from beside the
