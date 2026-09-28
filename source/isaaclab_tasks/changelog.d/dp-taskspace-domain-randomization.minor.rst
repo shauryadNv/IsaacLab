@@ -53,6 +53,11 @@ Fixed
 Changed
 ^^^^^^^
 
+* Changed the ``osc_stiffness`` and ``osc_damping_ratio`` domain-randomization ranges to softer-only (stiffness scale
+  0.5-1.0) and more-damped-only (damping-ratio scale 1.0-1.5). With the nominal task-space gains at the edge of stable
+  plug-socket contact, raising translational stiffness by 10% or lowering damping by 10% made the articulation blow up
+  during insertion in some environments; softer or more damped gains do not.
+
 * Changed :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.DisplayportInsertionEnv` to track a sticky
   per-episode ``episode_succeeded`` flag and to expand ``env.dr`` during construction. Randomization is expanded there
   rather than in ``__post_init__`` because Isaac Lab applies ``env.*`` command-line overrides after the configuration

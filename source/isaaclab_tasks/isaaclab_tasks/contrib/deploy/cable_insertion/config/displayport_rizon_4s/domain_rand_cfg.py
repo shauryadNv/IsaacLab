@@ -167,20 +167,26 @@ class DomainRandCfg:
     # Controller
     # ------------------------------------------------------------------
 
-    osc_stiffness: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 2.0), distribution="log_uniform")
+    # osc_stiffness: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 2.0), distribution="log_uniform")
+    # osc_stiffness: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 1.5), distribution="log_uniform")
+    osc_stiffness: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 1.0), distribution="log_uniform")
     """Multiplicative scale on the OSC task-space stiffness, sampled per env and axis at reset.
 
-    With ``inertial_dynamics_decoupling=False`` these gains are in N/m and N*m/rad, so a
-    scale of 0.5-2.0 spans genuinely softer and stiffer Cartesian behavior. Both
-    reference papers randomize controller stiffness over x[0.5, 2]; DextrAH-G samples it
-    log-uniformly, as here, so softer and stiffer are equally likely.
+    With ``inertial_dynamics_decoupling=False`` these gains are in N/m and N*m/rad. The
+    reference papers randomize over x[0.5, 2], but the nominal translational gains sit at the
+    edge of stable plug-socket contact: any translational stiffening (1.1x) makes some envs'
+    articulation blow up during insertion, while softer gains are stable. So the range is
+    softer-only. Sampled log-uniformly, as in DextrAH-G.
     """
 
-    osc_damping_ratio: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 1.5), distribution="log_uniform")
+    # osc_damping_ratio: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 1.5), distribution="log_uniform")
+    # osc_damping_ratio: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.7, 1.5), distribution="log_uniform")
+    osc_damping_ratio: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(1.0, 1.5), distribution="log_uniform")
     """Multiplicative scale on the OSC damping ratio, sampled per env and axis at reset.
 
-    Log-uniform over ``(0.5, 1.5)`` has a median of ~0.87, so it leans underdamped; the
-    nominal rotational ratio is already ~0.10. Use ``(0.67, 1.5)`` for a median of 1.
+    More-damped-only: reducing the translational damping by even 10% makes plug-socket
+    contact unstable under full-scale actions, while extra damping is stable. The nominal
+    rotational ratio is already ~0.10.
     """
 
     # ------------------------------------------------------------------
