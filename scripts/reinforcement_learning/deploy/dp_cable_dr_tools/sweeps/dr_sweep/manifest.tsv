@@ -1,0 +1,23 @@
+name	extra_overrides
+all_off	agent.run_name=dr_all_off
+osc_stiffness	agent.run_name=dr_osc_stiffness env.dr.enabled=true env.dr.adr.enable=true env.dr.osc_stiffness.enable=true
+osc_damping_ratio	agent.run_name=dr_osc_damping_ratio env.dr.enabled=true env.dr.adr.enable=true env.dr.osc_damping_ratio.enable=true
+joint_armature	agent.run_name=dr_joint_armature env.dr.enabled=true env.dr.adr.enable=true env.dr.joint_armature.enable=true
+joint_friction	agent.run_name=dr_joint_friction env.dr.enabled=true env.dr.adr.enable=true env.dr.joint_friction.enable=true
+finger_friction	agent.run_name=dr_finger_friction env.dr.enabled=true env.dr.adr.enable=true env.dr.finger_friction.enable=true
+mating_friction	agent.run_name=dr_mating_friction env.dr.enabled=true env.dr.adr.enable=true env.dr.mating_friction.enable=true env.dr.mating_friction.final=[0.001,0.5]
+plug_mass	agent.run_name=dr_plug_mass env.dr.enabled=true env.dr.adr.enable=true env.dr.plug_mass.enable=true
+grasp_pos	agent.run_name=dr_grasp_pos env.dr.enabled=true env.dr.adr.enable=true env.dr.grasp_pos.enable=true
+grasp_rot	agent.run_name=dr_grasp_rot env.dr.enabled=true env.dr.adr.enable=true env.dr.grasp_rot.enable=true
+socket_pos	agent.run_name=dr_socket_pos env.dr.enabled=true env.dr.adr.enable=true env.dr.socket_pos.enable=true
+socket_rot	agent.run_name=dr_socket_rot env.dr.enabled=true env.dr.adr.enable=true env.dr.socket_rot.enable=true
+obs_socket_pos	agent.run_name=dr_obs_socket_pos env.dr.enabled=true env.dr.adr.enable=true env.dr.obs_socket_pos.enable=true
+obs_eef_pos	agent.run_name=dr_obs_eef_pos env.dr.enabled=true env.dr.adr.enable=true env.dr.obs_eef_pos.enable=true
+obs_eef_rot	agent.run_name=dr_obs_eef_rot env.dr.enabled=true env.dr.adr.enable=true env.dr.obs_eef_rot.enable=true
+obs_socket_rot	agent.run_name=dr_obs_socket_rot env.dr.enabled=true env.dr.adr.enable=true env.dr.obs_socket_rot.enable=true
+action_noise	agent.run_name=dr_action_noise env.dr.enabled=true env.dr.adr.enable=true env.dr.action_noise.enable=true
+action_latency	agent.run_name=dr_action_latency env.dr.enabled=true env.dr.adr.enable=true env.dr.action_latency.enable=true
+plug_wrench_force	agent.run_name=dr_plug_wrench_force env.dr.enabled=true env.dr.adr.enable=true env.dr.plug_wrench_force.enable=true
+all_on	agent.run_name=dr_all_on env.dr.enabled=true env.dr.adr.enable=true env.dr.osc_stiffness.enable=true env.dr.osc_damping_ratio.enable=true env.dr.joint_armature.enable=true env.dr.joint_friction.enable=true env.dr.finger_friction.enable=true env.dr.plug_mass.enable=true env.dr.grasp_pos.enable=true env.dr.grasp_rot.enable=true env.dr.socket_pos.enable=true env.dr.socket_rot.enable=true env.dr.obs_socket_pos.enable=true env.dr.obs_eef_pos.enable=true env.dr.obs_eef_rot.enable=true env.dr.obs_socket_rot.enable=true env.dr.action_noise.enable=true env.dr.action_latency.enable=true env.dr.plug_wrench_force.enable=true
+grp_controller	agent.run_name=dr_grp_controller env.dr.enabled=true env.dr.adr.enable=true env.dr.osc_stiffness.enable=true env.dr.osc_damping_ratio.enable=true env.dr.joint_armature.enable=true env.dr.joint_friction.enable=true
+grp_sense_act	agent.run_name=dr_grp_sense_act env.dr.enabled=true env.dr.adr.enable=true env.dr.socket_pos.enable=true env.dr.socket_rot.enable=true env.dr.obs_socket_pos.enable=true env.dr.obs_eef_pos.enable=true env.dr.obs_eef_rot.enable=true env.dr.obs_socket_rot.enable=true env.dr.action_noise.enable=true env.dr.action_latency.enable=true

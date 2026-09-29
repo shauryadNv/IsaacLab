@@ -1,0 +1,31 @@
+# Curriculum-off twin of osmo/dr_sweep: same 22 variants, but no at-goal (near-socket) spawns at any
+# iteration (reset_plug_curriculum at_goal_prob=0), so every episode starts from the approach pose.
+DR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$DR_DIR/../../env.sh"
+WORKFLOW=$OSMO_WORKFLOW
+OSMO_DIR=$(dirname "$WORKFLOW")
+# COMMIT=3e1fc55f34b1421ecd0c43a9d3e8b72fb265956f   # initial launch 1169-1190 (runs.tsv records per-attempt commit)
+# COMMIT=63cd85f0295d8e9bfb645b02d123497cbd0a82c7   # shauryad/dp_cable_dr: + resume restores step counter (at-goal anneal)   (pre resume-LR fix)
+COMMIT=794f5d5909b5d4914b8b21823eaf40bcf567c98b   # shauryad/dp_cable_dr: + resume keeps the checkpoint learning rate (relaunches)
+POOL=isaac-dev-l40-04
+# PRIORITY=LOW
+PRIORITY=${PRIORITY:-LOW}   # env / resources/<name>.sh can raise it (monitor: last relaunch at HIGH)
+IMAGE=nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1
+ROBOT_TYPE_TASK=Rizon4s-Grav-TaskSpace
+ROBOT_TYPE=rizon4s
+# NUM_GPUS=1
+NUM_GPUS=2
+# NUM_ENVS=1024   # first launch (runs 1121-1142, cancelled)
+# NUM_ENVS=4096   # 1 GPU: CUDA OOM on L40 during PPO update (runs 1143-1164)
+NUM_ENVS=2048    # per GPU
+# NUM_CPUS=15
+NUM_CPUS=30
+# MEMORY=48Gi
+MEMORY=96Gi
+# MAX_ITERATIONS=1500
+MAX_ITERATIONS=6000
+# TAG_SUFFIX=-e4096
+TAG_SUFFIX=-noatgoal-g2e2048                  # keeps these runs' swift folders apart from the 1024-env launch
+MANIFEST=$DR_DIR/manifest.tsv      # name <TAB> extra_overrides
+RUNS=$DR_DIR/runs.tsv              # append-only: name <TAB> run_id <TAB> submitted_utc <TAB> reason
+SWIFT_ROOT=$SWIFT_ROOT_BASE/displayport_insertion_$ROBOT_TYPE

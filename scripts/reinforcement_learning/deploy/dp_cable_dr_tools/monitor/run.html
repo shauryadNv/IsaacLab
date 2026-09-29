@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Run</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <a href="index.html" class="secondary" style="text-decoration:none">← All runs</a>
+  <h1 id="title">Run</h1>
+  <span id="sweep-tag"></span>
+  <span id="badge"></span>
+  <span class="meta" id="gen"></span>
+  <span class="spacer"></span>
+  <label class="secondary" style="font-size:13px"><input type="checkbox" id="f-auto" checked> Auto-refresh (60 s)</label>
+  <button id="theme" title="Toggle light / dark">◐ Theme</button>
+</header>
+<main>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>Policy rollout</h2>
+    <p class="sub" id="rollout-sub">Newest checkpoint rolled out locally on the nominal task (DR off). Close-up of env 0; success rate over 16 envs.</p>
+    <div class="videos">
+      <div><video id="video" controls loop muted playsinline></video><div class="secondary" id="video-cap" style="font-size:13px;margin-top:4px"></div></div>
+      <div>
+        <div class="chart-box" style="margin-bottom:10px"><div class="title">Eval success vs iteration</div><div id="eval-chart"></div></div>
+        <div class="rollout-list" id="rollout-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Training metrics</h2>
+    <p class="sub">From the run's TensorBoard events (all attempts merged; vertical hairlines mark relaunches).</p>
+    <div class="grid-charts" id="key-charts"></div>
+  </div>
+
+  <div class="card">
+    <h2>Metric explorer</h2>
+    <div class="filters" style="margin:0 0 10px"><label>Metric <select id="f-metric"></select></label></div>
+    <div class="chart-box"><div class="title"><span id="explore-name"></span><span class="val" id="explore-val"></span></div><div id="explore-chart"></div></div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <h2>Run details</h2>
+      <div class="kv" id="details"></div>
+      <h2 style="margin-top:14px">Hydra overrides</h2>
+      <code class="ov" id="overrides"></code>
+      <h2 style="margin-top:14px">Latest console metrics</h2>
+      <div class="kv" id="console"></div>
+    </div>
+    <div class="card">
+      <h2>Events</h2>
+      <p class="sub">Status changes, relaunches and give-ups recorded by the monitor.</p>
+      <div class="events" id="events"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Log tail</h2>
+    <div class="filters" style="margin:0 0 8px">
+      <label><input type="checkbox" id="f-noise" checked> Hide pip / Kit noise</label>
+      <label><input type="search" id="f-grep" placeholder="Filter lines"></label>
+      <a id="rawlog" class="secondary" target="_blank">raw log</a>
+    </div>
+    <pre class="log" id="log"></pre>
+  </div>
+</main>
+<script type="module">
+import { lineChart, statusBadge, fmt, pct, ago } from "./assets/charts.js";
+
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+const SWEEP = qs.get("sweep"), NAME = qs.get("name");
+const KEY_CHARTS = [
+  ["Metrics/terminal_success_rate", "Train success (terminal, at episode end)", [0, 1], pct],
+  ["Metrics/success_rate", "Train success (per step)", [0, 1], pct],
+  ["Curriculum/adr/level", "ADR level (0–50)", [0, 50]],
+  ["Curriculum/adr/success_rate", "ADR success EMA", [0, 1], pct],
+  ["Train/mean_reward", "Mean reward"],
+  ["Train/mean_episode_length", "Mean episode length (steps)"],
+  ["Metrics/plug_socket_pos_error_m", "Plug–socket position error (mm)", null, (v) => fmt(v * 1000), (v) => v],
+  ["Episode_Termination/plug_dropped", "Plug-dropped terminations"],
+  ["Policy/mean_std", "Policy action std"],
+];
+let run = null, metrics = {}, logText = "", sweeps = {};
+
+const theme = localStorage.getItem("theme");
+if (theme) document.documentElement.dataset.theme = theme;
+$("theme").onclick = () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme === "dark";
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  localStorage.setItem("theme", document.documentElement.dataset.theme);
+  render();
+};
+
+function tile(label, value, note) {
+  const d = document.createElement("div"); d.className = "tile";
+  const l = document.createElement("div"); l.className = "label"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "value"; v.textContent = value;
+  d.append(l, v);
+  if (note) { const n = document.createElement("div"); n.className = "note"; n.textContent = note; d.appendChild(n); }
+  return d;
+}
+
+function kv(el, pairs) {
+  el.replaceChildren();
+  for (const [k, v] of pairs) {
+    const a = document.createElement("div"); a.className = "k"; a.textContent = k;
+    const b = document.createElement("div"); b.className = "v"; b.textContent = v ?? "–";
+    el.append(a, b);
+  }
+}
+
+function relaunchIters() {
+  // Iteration at which each later attempt resumed = first step logged after a gap in wall time is not
+  // available here, so use the monitor's relaunch notes ("resume from model_N").
+  return (run.events || []).filter((e) => e.kind === "relaunch")
+    .map((e) => +((e.note || "").match(/model_(\d+)/) || [])[1]).filter((x) => isFinite(x)).map((x) => ({ x }));
+}
+
+let selectedRollout = null;
+function renderRollouts() {
+  const ros = (run.rollouts || []).filter((r) => r.video || r.success_rate != null || r.error);
+  const good = ros.filter((r) => r.success_rate != null);
+  lineChart($("eval-chart"), [{ name: "eval", points: good.map((r) => [r.iteration, r.success_rate]), color: "--series-1", dots: true }],
+    { height: 140, yDomain: [0, 1], yFormat: pct, xMin: 0, xMax: run.max_iterations });
+  const list = $("rollout-list");
+  list.replaceChildren();
+  if (!ros.length) { list.textContent = "No rollouts yet - the first one runs after the first checkpoint (every 50 iterations) is synced."; }
+  const sorted = [...ros].sort((a, b) => b.iteration - a.iteration);
+  if (selectedRollout === null || !sorted.some((r) => r.iteration === selectedRollout)) selectedRollout = sorted[0]?.iteration ?? null;
+  for (const r of sorted) {
+    const b = document.createElement("button");
+    if (r.iteration === selectedRollout) b.className = "sel";
+    const l = document.createElement("span"); l.textContent = `iteration ${r.iteration}`;
+    const v = document.createElement("span");
+    v.textContent = r.error ? "failed" : `${pct(r.success_rate)}${r.env0_success ? " · env0 ✓" : ""}`;
+    b.append(l, v);
+    b.onclick = () => { selectedRollout = r.iteration; renderRollouts(); };
+    list.appendChild(b);
+  }
+  const cur = sorted.find((r) => r.iteration === selectedRollout);
+  const vid = $("video");
+  const src = cur?.video ? `${run.path}/rollouts/${cur.video}` : "";
+  if (vid.dataset.src !== src) { vid.dataset.src = src; vid.src = src; if (src) vid.play().catch(() => {}); }
+  $("video-cap").textContent = !cur ? "" : cur.error
+    ? `Rollout at iteration ${cur.iteration} failed - see ${run.path}/rollouts/iter_${String(cur.iteration).padStart(5, "0")}.log`
+    : `Iteration ${cur.iteration} · eval success ${pct(cur.success_rate)} over ${cur.episodes} episodes · median final error ${cur.final_pos_err_mm_median ?? "–"} mm · env 0 ${cur.env0_success ? "succeeded" : "did not succeed"} · rolled out ${ago(cur.time)}`;
+}
+
+function renderCharts() {
+  const markers = relaunchIters();
+  const grid = $("key-charts");
+  grid.replaceChildren();
+  for (const [tag, label, dom, yFormat, _] of KEY_CHARTS) {
+    const pts = metrics[tag] || [];
+    const box = document.createElement("div"); box.className = "chart-box";
+    const t = document.createElement("div"); t.className = "title";
+    const n = document.createElement("span"); n.textContent = label; n.title = tag;
+    const v = document.createElement("span"); v.className = "val";
+    v.textContent = pts.length ? (yFormat || fmt)(pts[pts.length - 1][1]) : "–";
+    t.append(n, v);
+    const c = document.createElement("div");
+    box.append(t, c);
+    grid.appendChild(box);
+    lineChart(c, [{ name: label, points: pts, color: "--series-1" }], { height: 170, yDomain: dom, yFormat, xMin: 0, xMax: run.max_iterations, markers });
+  }
+  renderExplorer();
+}
+
+function renderExplorer() {
+  const sel = $("f-metric");
+  const tags = Object.keys(metrics).sort();
+  const cur = sel.value || localStorage.getItem("run-metric") || tags[0];
+  sel.replaceChildren(...tags.map((t) => { const o = document.createElement("option"); o.value = o.textContent = t; return o; }));
+  if (tags.includes(cur)) sel.value = cur;
+  const pts = metrics[sel.value] || [];
+  $("explore-name").textContent = sel.value || "no metrics yet";
+  $("explore-val").textContent = pts.length ? fmt(pts[pts.length - 1][1]) : "–";
+  lineChart($("explore-chart"), [{ name: sel.value, points: pts, color: "--series-1" }], { height: 240, xMin: 0, xMax: run.max_iterations, markers: relaunchIters() });
+}
+
+const NOISE = /pip-uninstall|PermissionError|site-packages\/pip|^\s*(File|\^|status =|return self|uninstall_pathset|os\.rename)|\[Warning\]|\[omni\.|Requirement already|Collecting |Downloading |Installing collected|GRASP-DBG|^\s+(init_|IK_|achieved|snapped|max_pos)/;
+function renderLog() {
+  const noise = $("f-noise").checked, q = $("f-grep").value.trim().toLowerCase();
+  const lines = logText.split("\n").map((l) => l.replace(/^\d{4}\/\d\d\/\d\d (\d\d:\d\d:\d\d) \[[^\]]+\] ?/, "$1 "))
+    .filter((l) => (!noise || !NOISE.test(l)) && (!q || l.toLowerCase().includes(q)));
+  const pre = $("log");
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+  pre.textContent = lines.slice(-600).join("\n") || (run.has_log ? "(no lines match)" : "No log fetched yet.");
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+}
+
+function render() {
+  if (!run) return;
+  const lab = run.sweep_label || run.sweep;
+  document.title = `${run.name} · ${lab} · run monitor`;
+  $("title").textContent = run.name;
+  const vals = Object.keys(run.sweep_tags || {}).length ? Object.values(run.sweep_tags) : [lab];
+  $("sweep-tag").replaceChildren(...vals.flatMap((v, i) => {
+    const t = document.createElement("span");
+    t.className = "tag" + (/\boff\b/i.test(v) ? " alt" : "");
+    t.textContent = v;
+    t.title = run.sweep_description || run.sweep;
+    return i ? [document.createTextNode(" "), t] : [t];
+  }));
+  $("badge").replaceChildren(statusBadge(run));
+  $("tiles").replaceChildren(
+    tile("Iteration", run.iteration == null ? "–" : `${run.iteration}`, `of ${run.max_iterations}`),
+    tile("Train success (terminal)", pct(run.terminal_success_rate), `per-step ${pct(run.success_rate)}`),
+    tile("Eval success", run.eval ? pct(run.eval.success_rate) : "–", run.eval ? `@ iteration ${run.eval.iteration}` : "no rollout yet"),
+    tile("ADR level", run.adr_level == null ? "–" : fmt(run.adr_level), run.adr_success == null ? "" : `success EMA ${pct(run.adr_success)}`),
+    tile("Mean reward", fmt(run.mean_reward)),
+    tile("Pos error", run.pos_err_mm == null ? "–" : `${run.pos_err_mm.toFixed(2)} mm`),
+    tile("Attempt", `${run.attempts || 1}`, (run.attempts || 1) > 1 ? `${run.attempts - 1} relaunch(es)` : "no relaunches"),
+  );
+  kv($("details"), [
+    ["osmo run", run.run_id], ["curriculum", `${run.sweep_label || run.sweep} (${run.sweep})`], ["", run.sweep_description], ["submitted", run.submit_time], ["started", run.start_time],
+    ["ended", run.end_time], ["latest checkpoint", run.checkpoint_iter == null ? null : `model_${run.checkpoint_iter}.pt`],
+    ["monitor updated", `${ago(run.updated)} (${run.updated})`],
+  ]);
+  $("overrides").textContent = run.overrides || "";
+  kv($("console"), Object.entries(run.console_metrics || {}).map(([k, v]) => [k, fmt(v, 4)]));
+  const ev = $("events");
+  ev.replaceChildren();
+  for (const e of [...(run.events || [])].reverse()) {
+    const d = document.createElement("div");
+    const t = document.createElement("span"); t.className = "muted"; t.textContent = `${e.time}  `;
+    const body = e.kind === "status" ? `${e.run_id}: ${e.status}` : `${e.kind}${e.attempt ? ` → attempt ${e.attempt}` : ""}: ${e.note || ""}`;
+    d.append(t, document.createTextNode(body));
+    ev.appendChild(d);
+  }
+  if (!ev.childNodes.length) ev.textContent = "No events yet.";
+  $("rawlog").href = `${run.path}/logs/latest.log`;
+  renderRollouts();
+  renderCharts();
+  renderLog();
+}
+
+async function load() {
+  try {
+    const summary = await (await fetch(`summary.json?t=${Date.now()}`)).json();
+    sweeps = summary.sweeps || {};
+    run = summary.runs.find((r) => r.sweep === SWEEP && r.name === NAME);
+    $("gen").textContent = `data updated ${ago(summary.generated)}`;
+    if (!run) { $("title").textContent = `Unknown run ${SWEEP}/${NAME}`; return; }
+    metrics = await (await fetch(`${run.path}/metrics_small.json?t=${Date.now()}`)).json().catch(() => ({}));
+    logText = run.has_log ? await (await fetch(`${run.path}/logs/latest.log?t=${Date.now()}`)).text() : "";
+  } catch (e) { $("gen").textContent = `load failed: ${e}`; }
+  render();
+}
+
+$("f-metric").addEventListener("change", () => { localStorage.setItem("run-metric", $("f-metric").value); renderExplorer(); });
+$("f-noise").addEventListener("change", renderLog);
+$("f-grep").addEventListener("input", renderLog);
+let resizeT;
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(render, 150); });
+setInterval(() => { if ($("f-auto").checked) load(); }, 60000);
+load();
+</script>
+</body>
+</html>

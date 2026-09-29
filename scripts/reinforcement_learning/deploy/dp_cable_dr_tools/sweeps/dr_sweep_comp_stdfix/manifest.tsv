@@ -1,0 +1,6 @@
+name	extra_overrides
+all_off	agent.run_name=dr_comp_stdfix_all_off env.actions.arm_action.payload_gravity_compensation=true agent.policy.state_dependent_std=false
+finger_friction	agent.run_name=dr_comp_stdfix_finger_friction env.dr.enabled=true env.dr.adr.enable=true env.dr.finger_friction.enable=true env.actions.arm_action.payload_gravity_compensation=true agent.policy.state_dependent_std=false
+obs_eef_rot	agent.run_name=dr_comp_stdfix_obs_eef_rot env.dr.enabled=true env.dr.adr.enable=true env.dr.obs_eef_rot.enable=true env.actions.arm_action.payload_gravity_compensation=true agent.policy.state_dependent_std=false
+obs_socket_rot	agent.run_name=dr_comp_stdfix_obs_socket_rot env.dr.enabled=true env.dr.adr.enable=true env.dr.obs_socket_rot.enable=true env.actions.arm_action.payload_gravity_compensation=true agent.policy.state_dependent_std=false
+osc_stiffness	agent.run_name=dr_comp_stdfix_osc_stiffness env.dr.enabled=true env.dr.adr.enable=true env.dr.osc_stiffness.enable=true env.actions.arm_action.payload_gravity_compensation=true agent.policy.state_dependent_std=false

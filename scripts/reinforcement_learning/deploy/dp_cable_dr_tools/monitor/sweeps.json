@@ -1,0 +1,110 @@
+{
+ "dr_sweep": {
+  "path": "sweeps/dr_sweep",
+  "label": "near-goal ON \u00b7 comp off",
+  "tags": {
+   "Curriculum": "near-goal ON",
+   "Payload comp": "off",
+   "Policy std": "per-state",
+   "Gain DR": "full"
+  },
+  "description": "near-goal (at-goal) start curriculum ON: 80% of episodes start near the goal at iteration 0, annealed to 0% by iteration 500; payload gravity compensation OFF: plug weight makes the gripper sink under zero action",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_noatgoal": {
+  "path": "sweeps/dr_sweep_noatgoal",
+  "label": "near-goal OFF \u00b7 comp off",
+  "tags": {
+   "Curriculum": "near-goal OFF",
+   "Payload comp": "off",
+   "Policy std": "per-state",
+   "Gain DR": "full"
+  },
+  "description": "near-goal start curriculum OFF: every episode starts from the approach pose from iteration 0; payload gravity compensation OFF: plug weight makes the gripper sink under zero action",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_comp": {
+  "path": "sweeps/dr_sweep_comp",
+  "label": "near-goal ON \u00b7 comp on",
+  "tags": {
+   "Curriculum": "near-goal ON",
+   "Payload comp": "on",
+   "Policy std": "per-state",
+   "Gain DR": "full"
+  },
+  "description": "near-goal (at-goal) start curriculum ON: 80% of episodes start near the goal at iteration 0, annealed to 0% by iteration 500; payload gravity compensation ON: controller cancels the grasped plug's weight (no zero-action sag)",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_noatgoal_comp": {
+  "path": "sweeps/dr_sweep_noatgoal_comp",
+  "label": "near-goal OFF \u00b7 comp on",
+  "tags": {
+   "Curriculum": "near-goal OFF",
+   "Payload comp": "on",
+   "Policy std": "per-state",
+   "Gain DR": "full"
+  },
+  "description": "near-goal start curriculum OFF: every episode starts from the approach pose from iteration 0; payload gravity compensation ON: controller cancels the grasped plug's weight (no zero-action sag)",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_comp_stdfix": {
+  "path": "sweeps/dr_sweep_comp_stdfix",
+  "label": "near-goal ON \u00b7 comp on \u00b7 std global",
+  "tags": {
+   "Curriculum": "near-goal ON",
+   "Payload comp": "on",
+   "Policy std": "global",
+   "Gain DR": "full"
+  },
+  "description": "Std-instability A/B: dr_sweep_comp variants that blew up, with one learned action std shared across states (agent.policy.state_dependent_std=false)",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_osccap": {
+  "path": "sweeps/dr_sweep_osccap",
+  "label": "near-goal ON \u00b7 comp off \u00b7 gain DR capped",
+  "tags": {
+   "Curriculum": "near-goal ON",
+   "Payload comp": "off",
+   "Policy std": "per-state",
+   "Gain DR": "capped"
+  },
+  "description": "near-goal (at-goal) start curriculum ON: 80% of episodes start near the goal at iteration 0, annealed to 0% by iteration 500; payload gravity compensation OFF: plug weight makes the gripper sink under zero action; OSC gain DR capped to softer-only stiffness (0.5-1.0x) and more-damped-only damping ratio (1.0-1.5x)",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_noatgoal_osccap": {
+  "path": "sweeps/dr_sweep_noatgoal_osccap",
+  "label": "near-goal OFF \u00b7 comp off \u00b7 gain DR capped",
+  "tags": {
+   "Curriculum": "near-goal OFF",
+   "Payload comp": "off",
+   "Policy std": "per-state",
+   "Gain DR": "capped"
+  },
+  "description": "near-goal start curriculum OFF: every episode starts from the approach pose from iteration 0; payload gravity compensation OFF: plug weight makes the gripper sink under zero action; OSC gain DR capped to softer-only stiffness (0.5-1.0x) and more-damped-only damping ratio (1.0-1.5x)",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_comp_osccap": {
+  "path": "sweeps/dr_sweep_comp_osccap",
+  "label": "near-goal ON \u00b7 comp on \u00b7 gain DR capped",
+  "tags": {
+   "Curriculum": "near-goal ON",
+   "Payload comp": "on",
+   "Policy std": "per-state",
+   "Gain DR": "capped"
+  },
+  "description": "near-goal (at-goal) start curriculum ON: 80% of episodes start near the goal at iteration 0, annealed to 0% by iteration 500; payload gravity compensation ON: controller cancels the grasped plug's weight (no zero-action sag); OSC gain DR capped to softer-only stiffness (0.5-1.0x) and more-damped-only damping ratio (1.0-1.5x)",
+  "relaunch_high": "last"
+ },
+ "dr_sweep_noatgoal_comp_osccap": {
+  "path": "sweeps/dr_sweep_noatgoal_comp_osccap",
+  "label": "near-goal OFF \u00b7 comp on \u00b7 gain DR capped",
+  "tags": {
+   "Curriculum": "near-goal OFF",
+   "Payload comp": "on",
+   "Policy std": "per-state",
+   "Gain DR": "capped"
+  },
+  "description": "near-goal start curriculum OFF: every episode starts from the approach pose from iteration 0; payload gravity compensation ON: controller cancels the grasped plug's weight (no zero-action sag); OSC gain DR capped to softer-only stiffness (0.5-1.0x) and more-damped-only damping ratio (1.0-1.5x)",
+  "relaunch_high": "last"
+ }
+}

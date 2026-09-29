@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Training run monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>Training run monitor</h1>
+  <span class="meta" id="gen"></span>
+  <span class="spacer"></span>
+  <button id="theme" title="Toggle light / dark">◐ Theme</button>
+</header>
+<main>
+  <div class="filters">
+    <label>Sweep <select id="f-sweep"></select></label>
+    <label>Status <select id="f-status">
+      <option value="">All</option><option value="active">Active (running / pending)</option>
+      <option value="RUNNING">Running</option><option value="done">Completed</option>
+      <option value="bad">Failed / cancelled</option>
+    </select></label>
+    <label><input type="search" id="f-q" placeholder="Filter runs (name, curriculum, comp)"></label>
+    <label><input type="checkbox" id="f-auto" checked> Auto-refresh (60 s)</label>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>Runs</h2>
+    <p class="sub">Train success = latest <code>Metrics/terminal_success_rate</code> (plug seated when the episode ends); per-step = <code>Metrics/success_rate</code> (fraction of env-steps in the seated state). Both count at-goal spawns, so early on they overstate what the policy can do. Eval success = local rollout of the newest checkpoint on the nominal task (DR off), 16 episodes. Tick the boxes to overlay up to 3 runs below.</p>
+    <div style="overflow-x:auto"><table class="runs" id="runs"></table></div>
+  </div>
+
+  <div class="card" id="overlay-card" style="display:none">
+    <h2 id="overlay-title">Compare</h2>
+    <div class="legend" id="overlay-legend"></div>
+    <div id="overlay-chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>All runs, one metric</h2>
+    <p class="sub">Small multiples on a shared y-axis. Click a title to open the run.</p>
+    <div class="filters" style="margin:0 0 10px">
+      <label>Metric <select id="f-metric"></select></label>
+    </div>
+    <div class="grid-small" id="multiples"></div>
+  </div>
+</main>
+<script type="module">
+import { lineChart, sparkline, statusBadge, fmt, pct, ago } from "./assets/charts.js";
+
+const $ = (id) => document.getElementById(id);
+const SLOTS = ["--series-1", "--series-2", "--series-3"];
+const DEFAULT_METRIC = "Metrics/terminal_success_rate";
+let summary = { runs: [] };
+let sortKey = "name", sortDir = 1;
+const picked = JSON.parse(localStorage.getItem("picked") || "[]");
+const metricsCache = new Map();
+
+const theme = localStorage.getItem("theme");
+if (theme) document.documentElement.dataset.theme = theme;
+$("theme").onclick = () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme === "dark";
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  localStorage.setItem("theme", document.documentElement.dataset.theme);
+  render();
+};
+
+function runKey(r) { return `${r.sweep}/${r.name}`; }
+function sweepLabel(r) { return r.sweep_label || r.sweep; }
+function fullName(r) { return `${r.name} · ${sweepLabel(r)}`; }
+function tagEl(text, title) {
+  // Filled = on, outlined = off: shape + text carry the value, not colour alone.
+  const t = document.createElement("span");
+  t.className = "tag" + (/\boff\b/i.test(text) ? " alt" : "");
+  t.textContent = text;
+  if (title) t.title = title;
+  return t;
+}
+function sweepTag(r) {
+  const wrap = document.createElement("span");
+  const tags = r.sweep_tags || {};
+  const vals = Object.keys(tags).length ? Object.values(tags) : [sweepLabel(r)];
+  vals.forEach((v, i) => { if (i) wrap.append(" "); wrap.append(tagEl(v, r.sweep_description)); });
+  return wrap;
+}
+function tagKeys() {
+  return [...new Set(Object.values(summary.sweeps || {}).flatMap((m) => Object.keys(m.tags || {})))];
+}
+
+function filtered() {
+  const sw = $("f-sweep").value, st = $("f-status").value, q = $("f-q").value.trim().toLowerCase();
+  return summary.runs.filter((r) => {
+    if (sw && r.sweep !== sw) return false;
+    if (q && !fullName(r).toLowerCase().includes(q)) return false;
+    const s = r.status || "";
+    if (st === "active" && !/RUNNING|PENDING|WAITING|SCHEDULING|INITIALIZING/.test(s)) return false;
+    if (st === "RUNNING" && s !== "RUNNING") return false;
+    if (st === "done" && s !== "COMPLETED") return false;
+    if (st === "bad" && !/FAILED|CANCEL|ERROR|TIMEOUT/.test(s)) return false;
+    return true;
+  });
+}
+
+async function metricsFor(r) {
+  const k = runKey(r) + "|" + summary.generated;
+  if (!metricsCache.has(k)) {
+    metricsCache.set(k, fetch(`${r.path}/metrics_small.json?t=${Date.now()}`).then((x) => x.ok ? x.json() : {}).catch(() => ({})));
+  }
+  return metricsCache.get(k);
+}
+
+function tile(label, value, note) {
+  const d = document.createElement("div");
+  d.className = "tile";
+  const l = document.createElement("div"); l.className = "label"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "value"; v.textContent = value;
+  d.append(l, v);
+  if (note) { const n = document.createElement("div"); n.className = "note"; n.textContent = note; d.appendChild(n); }
+  return d;
+}
+
+function renderTiles(runs) {
+  const c = (f) => runs.filter(f).length;
+  const best = runs.filter((r) => r.eval).sort((a, b) => b.eval.success_rate - a.eval.success_rate)[0];
+  const bestTrain = runs.filter((r) => r.terminal_success_rate != null).sort((a, b) => b.terminal_success_rate - a.terminal_success_rate)[0];
+  $("tiles").replaceChildren(
+    tile("Runs tracked", runs.length),
+    tile("Running", c((r) => r.status === "RUNNING")),
+    tile("Queued", c((r) => /PENDING|WAITING|SCHEDULING|INITIALIZING/.test(r.status || ""))),
+    tile("Completed", c((r) => r.status === "COMPLETED")),
+    tile("Failed / gave up", c((r) => /FAILED|ERROR|TIMEOUT/.test(r.status || "") || r.gave_up),
+         `${runs.reduce((a, r) => a + Math.max(0, (r.attempts || 1) - 1), 0)} relaunches total`),
+    tile("Best eval success", best ? pct(best.eval.success_rate) : "–", best ? `${fullName(best)} @ ${best.eval.iteration}` : "no rollouts yet"),
+    tile("Best train success (terminal)", bestTrain ? pct(bestTrain.terminal_success_rate) : "–", bestTrain ? fullName(bestTrain) : ""),
+  );
+}
+
+const COLS = [
+  { key: "pick", label: "", sort: null },
+  { key: "name", label: "Run", sort: (r) => `${r.name}\u0000${sweepLabel(r)}` },
+  { key: "status", label: "Status", sort: (r) => r.status || "" },
+  { key: "iteration", label: "Progress", sort: (r) => r.iteration ?? -1 },
+  { key: "terminal_success_rate", label: "Train success (terminal)", num: true, sort: (r) => r.terminal_success_rate ?? -1 },
+  { key: "success_rate", label: "Per-step success", num: true, sort: (r) => r.success_rate ?? -1 },
+  { key: "eval", label: "Eval success", num: true, sort: (r) => r.eval?.success_rate ?? -1 },
+  { key: "adr_level", label: "ADR level", num: true, sort: (r) => r.adr_level ?? -1 },
+  { key: "mean_reward", label: "Mean reward", num: true, sort: (r) => r.mean_reward ?? -1e9 },
+  { key: "pos_err_mm", label: "Pos err (mm)", num: true, sort: (r) => r.pos_err_mm ?? 1e9 },
+  { key: "updated", label: "Updated", sort: (r) => r.updated || "" },
+];
+
+function td(content, cls) {
+  const d = document.createElement("td");
+  if (cls) d.className = cls;
+  if (content instanceof Node) d.appendChild(content); else d.textContent = content;
+  return d;
+}
+
+function columns() {
+  const tagCols = tagKeys().map((k) => ({ key: `tag:${k}`, label: k, tag: k, sort: (r) => `${(r.sweep_tags || {})[k] || ""}\u0000${r.name}` }));
+  return [...COLS.slice(0, 2), ...tagCols, ...COLS.slice(2)];
+}
+
+function renderTable(runs) {
+  const COLS = columns();
+  const col = COLS.find((c) => c.key === sortKey) || COLS[1];
+  runs = [...runs].sort((a, b) => { const x = col.sort(a), y = col.sort(b); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+  const t = $("runs");
+  t.replaceChildren();
+  const hr = document.createElement("tr");
+  for (const c of COLS) {
+    const th = document.createElement("th");
+    th.textContent = c.label + (c.key === sortKey ? (sortDir > 0 ? " ↑" : " ↓") : "");
+    if (c.num) th.className = "num";
+    if (c.sort) th.onclick = () => { sortDir = sortKey === c.key ? -sortDir : (c.num ? -1 : 1); sortKey = c.key; render(); };
+    hr.appendChild(th);
+  }
+  t.appendChild(hr);
+  for (const r of runs) {
+    const tr = document.createElement("tr");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.className = "pick"; cb.checked = picked.includes(runKey(r));
+    cb.title = "Overlay in the compare chart (max 3)";
+    cb.onchange = () => {
+      const k = runKey(r), i = picked.indexOf(k);
+      if (cb.checked && i < 0) { picked.push(k); if (picked.length > 3) picked.shift(); }
+      if (!cb.checked && i >= 0) picked.splice(i, 1);
+      localStorage.setItem("picked", JSON.stringify(picked));
+      render();
+    };
+    tr.appendChild(td(cb));
+    const a = document.createElement("a");
+    a.href = `run.html?sweep=${encodeURIComponent(r.sweep)}&name=${encodeURIComponent(r.name)}`;
+    a.textContent = r.name;
+    const nameCell = td(a, "name");
+    nameCell.title = r.overrides || "";
+    tr.appendChild(nameCell);
+    for (const k of tagKeys()) {
+      const v = (r.sweep_tags || {})[k];
+      tr.appendChild(td(v ? tagEl(v, r.sweep_description) : "–"));
+    }
+    tr.appendChild(td(statusBadge(r)));
+    const meter = document.createElement("div");
+    meter.className = "meter";
+    const max = r.max_iterations || 1500, it = r.iteration ?? 0;
+    const track = document.createElement("div"); track.className = "track";
+    const fill = document.createElement("div"); fill.className = "fill"; fill.style.width = `${Math.min(100, (it / max) * 100)}%`;
+    track.appendChild(fill);
+    const txt = document.createElement("span"); txt.className = "txt"; txt.textContent = r.iteration == null ? "–" : `${it} / ${max}`;
+    meter.append(track, txt);
+    tr.appendChild(td(meter));
+    const sparkCell = (val, pts, dom) => {
+      const d = document.createElement("div"); d.className = "cell-spark";
+      d.appendChild(sparkline(pts, { yDomain: dom }));
+      const s = document.createElement("span"); s.textContent = val; s.style.minWidth = "48px";
+      d.appendChild(s);
+      return d;
+    };
+    tr.appendChild(td(sparkCell(pct(r.terminal_success_rate), r.spark["Metrics/terminal_success_rate"], [0, 1]), "num"));
+    tr.appendChild(td(sparkCell(pct(r.success_rate), r.spark["Metrics/success_rate"], [0, 1]), "num"));
+    const ev = document.createElement("span");
+    ev.textContent = r.eval ? pct(r.eval.success_rate) : "–";
+    const evWrap = document.createElement("div"); evWrap.className = "cell-spark";
+    evWrap.appendChild(sparkline(r.eval_history, { yDomain: [0, 1] }));
+    evWrap.appendChild(ev);
+    if (r.eval) { const n = document.createElement("span"); n.className = "muted"; n.textContent = `@${r.eval.iteration}`; evWrap.appendChild(n); }
+    tr.appendChild(td(evWrap, "num"));
+    tr.appendChild(td(sparkCell(r.adr_level == null ? "–" : fmt(r.adr_level), r.spark["Curriculum/adr/level"], [0, 50]), "num"));
+    tr.appendChild(td(fmt(r.mean_reward), "num"));
+    tr.appendChild(td(r.pos_err_mm == null ? "–" : r.pos_err_mm.toFixed(2), "num"));
+    const up = td(ago(r.updated), "muted"); up.title = r.updated || "";
+    tr.appendChild(up);
+    t.appendChild(tr);
+  }
+}
+
+async function renderOverlay() {
+  const runs = picked.map((k) => summary.runs.find((r) => runKey(r) === k)).filter(Boolean);
+  $("overlay-card").style.display = runs.length ? "" : "none";
+  if (!runs.length) return;
+  const metric = $("f-metric").value || DEFAULT_METRIC;
+  $("overlay-title").textContent = `Compare: ${metric}`;
+  const ms = await Promise.all(runs.map(metricsFor));
+  const series = runs.map((r, i) => ({ name: fullName(r), points: ms[i][metric] || [], color: SLOTS[i] }));
+  const leg = $("overlay-legend");
+  leg.replaceChildren();
+  for (const s of series) {
+    const sp = document.createElement("span");
+    const k = document.createElement("span"); k.className = "key"; k.style.background = `var(${s.color})`;
+    sp.append(k, document.createTextNode(s.name));
+    leg.appendChild(sp);
+  }
+  lineChart($("overlay-chart"), series, { height: 260 });
+}
+
+async function renderMultiples(runs) {
+  const metric = $("f-metric").value || DEFAULT_METRIC;
+  const ms = await Promise.all(runs.map(metricsFor));
+  const all = ms.flatMap((m) => (m[metric] || []).map((p) => p[1]));
+  const dom = all.length ? [Math.min(...all), Math.max(...all)] : null;
+  const xMax = Math.max(...runs.map((r) => r.max_iterations || 0), 0) || undefined;
+  const grid = $("multiples");
+  grid.replaceChildren();
+  runs.forEach((r, i) => {
+    const box = document.createElement("div"); box.className = "chart-box";
+    const title = document.createElement("div"); title.className = "title";
+    const a = document.createElement("a");
+    a.href = `run.html?sweep=${encodeURIComponent(r.sweep)}&name=${encodeURIComponent(r.name)}`;
+    a.textContent = r.name;
+    a.title = fullName(r);
+    const nameWrap = document.createElement("span");
+    nameWrap.append(a, document.createTextNode(" "), sweepTag(r));
+    const pts = ms[i][metric] || [];
+    const v = document.createElement("span"); v.className = "val"; v.textContent = pts.length ? fmt(pts[pts.length - 1][1]) : "–";
+    title.append(nameWrap, v);
+    const c = document.createElement("div");
+    box.append(title, c);
+    grid.appendChild(box);
+    lineChart(c, [{ name: fullName(r), points: pts, color: "--series-1" }], { height: 130, yDomain: dom, xMin: 0, xMax });
+  });
+}
+
+function fillMetricPicker() {
+  const sel = $("f-metric");
+  const cur = sel.value || localStorage.getItem("metric") || DEFAULT_METRIC;
+  const tags = [...new Set(summary.runs.flatMap((r) => r.tags || []))].sort();
+  if (!tags.includes(cur)) tags.unshift(cur);
+  sel.replaceChildren(...tags.map((t) => { const o = document.createElement("option"); o.value = o.textContent = t; return o; }));
+  sel.value = cur;
+}
+
+function fillSweepPicker() {
+  const sel = $("f-sweep");
+  const cur = sel.value;
+  const sweeps = [...new Set(summary.runs.map((r) => r.sweep))];
+  const lab = (s) => (summary.sweeps && summary.sweeps[s] && summary.sweeps[s].label) || s;
+  sel.replaceChildren(...["", ...sweeps].map((s) => { const o = document.createElement("option"); o.value = s; o.textContent = s ? lab(s) : "All"; return o; }));
+  sel.value = cur;
+}
+
+async function render() {
+  const runs = filtered();
+  renderTiles(runs);
+  renderTable(runs);
+  await Promise.all([renderOverlay(), renderMultiples(runs)]);
+}
+
+async function load() {
+  document.body.style.opacity = "";
+  try {
+    const res = await fetch(`summary.json?t=${Date.now()}`);
+    summary = await res.json();
+  } catch (e) { $("gen").textContent = "summary.json not found - has the monitor run yet?"; return; }
+  $("gen").textContent = `data updated ${ago(summary.generated)} (${summary.generated})`;
+  $("gen").title = summary.generated;
+  fillSweepPicker();
+  fillMetricPicker();
+  await render();
+}
+
+for (const id of ["f-sweep", "f-status", "f-q"]) $(id).addEventListener("input", render);
+$("f-metric").addEventListener("change", () => { localStorage.setItem("metric", $("f-metric").value); render(); });
+let resizeT;
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(render, 150); });
+setInterval(() => { if ($("f-auto").checked) load(); }, 60000);
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Runtime state written by the monitor and local tests; keep it out of the repo.
+monitor/data/
+monitor/logs/
+monitor/summary.json
+monitor/summary.json.tmp
+monitor/rollout_queue.jsonl
+monitor/.*.lock
+results/
+__pycache__/

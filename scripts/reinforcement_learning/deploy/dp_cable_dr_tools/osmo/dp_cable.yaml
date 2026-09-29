@@ -1,0 +1,291 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+workflow:
+  name: isaaclab_train_rsl_rl
+  tasks:
+  - name: isaaclab_train_rsl_rl
+    image: {{image}}
+    command: ["bash"]
+    args: ["/tmp/entry.sh"]
+    environment:
+      ACCEPT_EULA: Y
+      NO_NUCLEUS: Y
+      OMNI_SERVER: isaac-dev.ov.nvidia.com
+    credentials:
+      gitlab_cred: /tmp/gitlab
+      github_cred: /tmp/github
+      omni-auth:
+        OMNI_PASS: omni_pass
+        OMNI_USER: omni_user
+
+    files:
+    - path: /tmp/setup_gitlab_auth.sh
+      contents: |-
+        GITLAB_PAT=$(cat /tmp/gitlab/gitlab_cred)
+
+        # Configure git to use the PAT for authentication
+        git config --global credential.helper store
+        echo "https://token:${GITLAB_PAT}@gitlab-master.nvidia.com" > ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - path: /tmp/setup_github_auth.sh
+      contents: |-
+        GITHUB_PAT=$(cat /tmp/github/github_cred)
+
+        # Configure git to use the PAT for authentication
+        # Append GitHub credentials to existing file (don't overwrite)
+        echo "https://token:${GITHUB_PAT}@github.com" >> ~/.git-credentials
+        git config --global credential.helper 'store --file ~/.git-credentials'
+
+    - path: /tmp/entry.sh
+      contents: |
+        set -e
+        REPO_DIR=/tmp/IsaacLab
+
+        # Root-only setup (apt packages, sshd, Vulkan de-conflict). Non-root OSMO containers skip it.
+        echo "Running as uid=$(id -u), user=$(whoami), pwd=$(pwd)"
+        if [ "$(id -u)" -eq 0 ]; then
+          if [ -e "/usr/share/vulkan" ] && [ -e "/etc/vulkan" ]; then
+            mv /usr/share/vulkan /usr/share/vulkan_hidden
+          fi
+          apt update
+          apt install -y git git-lfs curl ca-certificates openssh-server tmux vim htop
+          mkdir -p /run/sshd
+          echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+          /sbin/sshd
+        else
+          echo "Non-root container user; skipping Vulkan move, apt install, and sshd setup."
+        fi
+
+        # Setup authentication for gitlab and github
+        bash /tmp/setup_gitlab_auth.sh
+        bash /tmp/setup_github_auth.sh
+
+        # --- Git LFS helpers (bootstrap + DisplayPort asset verification) ---
+        ensure_git_lfs() {
+          if git lfs version >/tmp/git_lfs_version.log 2>&1; then
+            cat /tmp/git_lfs_version.log
+            return
+          fi
+
+          echo "git-lfs is not available from PATH; bootstrapping local git-lfs into /tmp."
+          export PATH="/tmp/git-lfs-bin:${PATH}"
+          mkdir -p /tmp/git-lfs-bin
+          rm -rf /tmp/git-lfs-linux-amd64-v3.6.1 /tmp/git-lfs.tar.gz
+
+          if command -v curl >/dev/null 2>&1; then
+            curl -fsSL \
+              https://github.com/git-lfs/git-lfs/releases/download/v3.6.1/git-lfs-linux-amd64-v3.6.1.tar.gz \
+              -o /tmp/git-lfs.tar.gz
+          elif command -v wget >/dev/null 2>&1; then
+            wget -qO /tmp/git-lfs.tar.gz \
+              https://github.com/git-lfs/git-lfs/releases/download/v3.6.1/git-lfs-linux-amd64-v3.6.1.tar.gz
+          else
+            echo "[ERROR] git-lfs is missing and neither curl nor wget is available to bootstrap it."
+            cat /tmp/git_lfs_version.log || true
+            exit 20
+          fi
+
+          tar -xzf /tmp/git-lfs.tar.gz -C /tmp
+          cp /tmp/git-lfs-*/git-lfs /tmp/git-lfs-bin/git-lfs
+          chmod +x /tmp/git-lfs-bin/git-lfs
+
+          git lfs version
+        }
+
+        verify_displayport_lfs_assets() {
+          echo "Verifying DisplayPort USD assets are real LFS content, not pointer files."
+          local asset_root=""
+          for candidate in \
+            source/isaaclab_tasks/isaaclab_tasks/contrib/deploy/cable_insertion/display_cable_insertion_assets \
+            source/isaaclab_tasks/isaaclab_tasks/manager_based/manipulation/deploy/cable_insertion/display_cable_insertion_assets
+          do
+            if [ -d "${candidate}" ]; then
+              asset_root="${candidate}"
+              break
+            fi
+          done
+
+          # OLD (every commit had in-repo LFS assets):
+          # if [ -z "${asset_root}" ]; then
+          #   echo "[ERROR] Could not find DisplayPort asset directory after checkout."
+          #   exit 21
+          # fi
+          # Commits from dp_cable_ship @ 0e6d1c7348f onward fetch the DP USDs from the S3 asset
+          # server at runtime and no longer ship them in-repo, so there is nothing to verify.
+          if [ -z "${asset_root}" ]; then
+            echo "No in-repo DisplayPort asset directory: this commit fetches assets from the asset server. Skipping LFS verification."
+            return 0
+          fi
+
+          for asset_name in \
+            display_port_plug_fixed_sdf.usd \
+            display_port_socket_fixed_sdf_noprotrusions.usd
+          do
+            local asset_path="${asset_root}/${asset_name}"
+            if [ ! -f "${asset_path}" ]; then
+              echo "[ERROR] Missing expected DisplayPort asset: ${asset_path}"
+              exit 22
+            fi
+            local bytes
+            bytes=$(wc -c < "${asset_path}")
+            echo "Asset ${asset_path}: ${bytes} bytes"
+            if LC_ALL=C head -c 128 "${asset_path}" | grep -a -q "version https://git-lfs.github.com/spec/v1"; then
+              echo "[ERROR] ${asset_path} is still a Git LFS pointer file."
+              exit 23
+            fi
+            if [ "${bytes}" -lt 100000 ]; then
+              echo "[ERROR] ${asset_path} is unexpectedly small; LFS content likely missing."
+              exit 24
+            fi
+          done
+        }
+
+        # Clone IsaacLab into a user-writable location (/tmp works for non-root containers)
+        cd /workspace
+        rm -rf ${REPO_DIR}
+        git clone https://github.com/shauryadNv/IsaacLab.git ${REPO_DIR}
+        cd ${REPO_DIR}
+
+        # Create the checkpoint directory structure early to avoid OSMO upload errors
+        echo "Creating checkpoint directory structure..."
+        mkdir -p ${REPO_DIR}/logs/rsl_rl/displayport_insertion_{{robot_type}}
+        touch ${REPO_DIR}/logs/rsl_rl/displayport_insertion_{{robot_type}}/.placeholder
+
+        # Print the commit hash
+        echo "Current commit hash: $(git rev-parse HEAD)"
+        git checkout {{commit_hash}}
+
+        # Pull DisplayPort USD assets via Git LFS and verify they are real content (not pointer files)
+        ensure_git_lfs
+        git lfs install --local
+        git lfs pull
+        git lfs checkout
+        verify_displayport_lfs_assets
+        echo "Checked out IsaacLab commit: $(git rev-parse HEAD)"
+
+        # Create symlink to _isaac_sim (resolve existing symlink first)
+        ln -s $(readlink /workspace/isaaclab/_isaac_sim) _isaac_sim
+
+        # Move the base checkout aside if permitted; otherwise force this checkout to win import
+        # resolution via PYTHONPATH below (non-root containers cannot move /workspace/isaaclab).
+        if [ -d /workspace/isaaclab ]; then
+          mv /workspace/isaaclab /workspace/temp_isaaclab_base || echo "Could not move base /workspace/isaaclab; continuing from ${REPO_DIR}"
+        fi
+
+        # Install IsaacLab RL extras only. Do NOT run a full `-i`: on non-root images it tries to
+        # reinstall the isaaclab packages / upgrade torch into the root-owned /isaac-sim, hits
+        # PermissionError, and leaves a duplicate isaaclab_tasks that breaks gym registration.
+        ./isaaclab.sh -i rl
+
+        # Force ALL of this checkout's source packages to win import resolution over the base image
+        # (/workspace/isaaclab), which cannot be moved on read-only / non-root containers. EVERY
+        # source/<pkg> dir must be on PYTHONPATH: a package missing here (e.g. isaaclab_tasks_experimental,
+        # imported unconditionally by the rsl_rl training backend) would otherwise load from the base
+        # image and mix with this checkout's isaaclab_tasks, breaking gym task registration (Isaac-Ant).
+        EXTRA_PYTHONPATH=""
+        for pkg_dir in ${REPO_DIR}/source/*/; do
+          EXTRA_PYTHONPATH="${pkg_dir%/}:${EXTRA_PYTHONPATH}"
+        done
+        export PYTHONPATH="${EXTRA_PYTHONPATH}${PYTHONPATH:-}"
+        echo "PYTHONPATH=${PYTHONPATH}"
+
+        # Newer IsaacLab branches can leave older images without an importable torch after the
+        # installer repoints prebundled packages. Only (re)install torch when it actually fails.
+        if ! ./isaaclab.sh -p -c "import torch" >/tmp/torch_import_check.log 2>&1; then
+          echo "torch import failed before training; installing torch into Kit Python"
+          cat /tmp/torch_import_check.log
+          ${REPO_DIR}/_isaac_sim/python.sh -m pip install \
+            --ignore-installed \
+            --no-deps \
+            --index-url https://download.pytorch.org/whl/cu128 \
+            torch==2.10.0 torchvision==0.25.0
+        fi
+
+        # Sanity checks: torch, rsl_rl, and task registration before launching training
+        ./isaaclab.sh -p -c "import torch; print('torch imported successfully'); print('Version:', torch.__version__); print('File:', torch.__file__)"
+        ./isaaclab.sh -p -c "import rsl_rl; print('rsl_rl imported successfully'); print('File:', rsl_rl.__file__)"
+        # OLD (hardcoded pre-rename task id):
+        # ./isaaclab.sh -p -c "import gymnasium as gym; import isaaclab_tasks; print('isaaclab_tasks file:', isaaclab_tasks.__file__); gym.spec('Isaac-Deploy-DisplayportInsertion-{{robot_type_task}}-ROS-Inference-v0'); print('Registered task:', 'Isaac-Deploy-DisplayportInsertion-{{robot_type_task}}-ROS-Inference-v0')"
+        ./isaaclab.sh -p -c "import gymnasium as gym; import isaaclab_tasks; print('isaaclab_tasks file:', isaaclab_tasks.__file__); gym.spec('{{task_prefix}}{{robot_type_task}}-ROS-Inference{{task_version}}'); print('Registered task:', '{{task_prefix}}{{robot_type_task}}-ROS-Inference{{task_version}}')"
+
+        # Optional resume: pull a previous attempt's run folder from swift and continue from its
+        # newest checkpoint. adr_state.json sits beside the checkpoint, so the DR curriculum level
+        # is restored too (via the env's load_training_state hook).
+        RESUME_ARG=""
+        if [ -n "{{resume_from}}" ]; then
+          RESUME_URL="https://pdx.s8k.io/v1/AUTH_team-isaac/datasets/shauryad/displayport_insertion_{{robot_type}}/{{resume_from}}/"
+          mkdir -p /tmp/resume_ckpt
+          (cd /tmp/resume_ckpt && wget -q -r -np -nH -e robots=off -R "index.html*" "${RESUME_URL}")
+          RESUME_CKPT=$(find /tmp/resume_ckpt -name 'model_*.pt' | sort -V | tail -1)
+          if [ -z "${RESUME_CKPT}" ]; then
+            echo "[ERROR] No model_*.pt found under ${RESUME_URL}"
+            exit 30
+          fi
+          echo "Resuming from ${RESUME_CKPT}"
+          ls -la "$(dirname "${RESUME_CKPT}")"
+          RESUME_ARG="--checkpoint ${RESUME_CKPT}"
+        fi
+
+        # Train (multi-GPU via torch.distributed). Launch through ./isaaclab.sh -p (NOT raw python.sh)
+        # so isaaclab.sh's env/path setup applies and task registration comes from this checkout only.
+        # OLD (hardcoded pre-rename task id). Kept ABOVE the command: a comment line inside a
+        # backslash continuation terminates it and silently drops the training script.
+        # ./isaaclab.sh -p -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
+        # {{train_script}} {{rl_library_arg}} --task Isaac-Deploy-DisplayportInsertion-{{robot_type_task}}-ROS-Inference-v0 --num_envs {{num_envs}} --distributed agent.max_iterations={{max_iterations}} {{extra_overrides}}
+        ./isaaclab.sh -p -m torch.distributed.run --nnodes=1 --nproc_per_node={{num_gpus}} \
+        {{train_script}} {{rl_library_arg}} --task {{task_prefix}}{{robot_type_task}}-ROS-Inference{{task_version}} --num_envs {{num_envs}} --distributed ${RESUME_ARG} agent.max_iterations={{max_iterations}} {{extra_overrides}}
+
+        # Move checkpoints to the output folder used to upload
+        # OLD (one folder per commit; runs differing only in overrides collided):
+        # MODEL_STORE_DIR="{{output}}/{{commit_hash}}/"
+        MODEL_STORE_DIR="{{output}}/{{commit_hash}}{{run_tag}}/"
+        mkdir -p $MODEL_STORE_DIR
+        mv logs/rsl_rl/displayport_insertion_{{robot_type}} $MODEL_STORE_DIR
+
+    # Simple Task
+    checkpoint:
+    - path: /tmp/IsaacLab/logs/rsl_rl/displayport_insertion_{{robot_type}}/
+      # OLD: url: swift://pdx.s8k.io/AUTH_team-isaac/datasets/shauryad/displayport_insertion_{{robot_type}}/{{commit_hash}}/
+      url: swift://pdx.s8k.io/AUTH_team-isaac/datasets/shauryad/displayport_insertion_{{robot_type}}/{{commit_hash}}{{run_tag}}/
+      frequency: 30m
+
+  resources:
+    default:
+      gpu: {{num_gpus}}
+      cpu: {{num_cpus}}
+      memory: {{memory}}
+      storage: 200Gi
+
+default-values:
+  image: nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1
+  num_gpus: 2
+  num_cpus: 30
+  memory: 200Gi
+  robot_type_task: Rizon4s-Grav
+  robot_type: rizon4s
+  num_envs: 1024
+  max_iterations: 1000
+  extra_overrides: ""
+  # Task-id shape. Defaults reproduce the historical id so existing sweeps are unchanged.
+  # Commits at/after the contrib rename (dp_cable_ship @ 3065d9d969c and later) register
+  # "IsaacContrib-Deploy-DisplayportInsertion-<robot_type_task>-ROS-Inference" with no
+  # version suffix, so those runs must pass:
+  #   task_prefix=IsaacContrib-Deploy-DisplayportInsertion- task_version=""
+  task_prefix: Isaac-Deploy-DisplayportInsertion-
+  task_version: "-v0"
+  # Suffix appended to the commit hash in the checkpoint/output path, e.g. "-dr_all_on".
+  # Needed whenever several runs share one commit and differ only in extra_overrides;
+  # otherwise they upload into the same folder and overwrite each other.
+  run_tag: ""
+  # Swift path (relative to displayport_insertion_<robot_type>/) of a previous attempt's run
+  # folder, e.g. "<commit>-dr_all_on/displayport_insertion_rizon4s/<timestamp>_dr_all_on".
+  # Empty = fresh run. Pair with max_iterations = remaining iterations.
+  resume_from: ""
+  # ship (contrib) commits: flattened launcher + --rl_library. IsaacLab-repo (taskspace)
+  # commits keep the per-library launcher and take no --rl_library arg.
+  train_script: scripts/reinforcement_learning/train.py
+  rl_library_arg: --rl_library rsl_rl
