@@ -1,0 +1,5 @@
+name	run_id	submitted_utc	reason	attempt	run_tag	resume_from	max_iters	commit	priority
+all_off_s42	isaaclab_train_rsl_rl-1696	2026-09-30T01:45:19Z	initial	1	-dr_all_off_s42-noatgoal-comp-osccap-adrfix-g2e2048		6000	ddda77447e	HIGH
+all_on_s42	isaaclab_train_rsl_rl-1697	2026-09-30T01:45:28Z	initial	1	-dr_all_on_s42-noatgoal-comp-osccap-adrfix-g2e2048		6000	ddda77447e	HIGH
+all_on_sdstd_s42	isaaclab_train_rsl_rl-1698	2026-09-30T01:45:39Z	initial	1	-dr_all_on_sdstd_s42-noatgoal-comp-osccap-adrfix-g2e2048		6000	ddda77447e	HIGH
+joint_friction_s42	isaaclab_train_rsl_rl-1699	2026-09-30T01:45:49Z	initial	1	-dr_joint_friction_s42-noatgoal-comp-osccap-adrfix-g2e2048		6000	ddda77447e	HIGH
