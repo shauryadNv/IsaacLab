@@ -202,12 +202,17 @@ def checkpoint_progress(model_name: str, state: dict, steps_per_iteration: int) 
     raw_iteration = model_iter(model_name)
     if raw_iteration < 0:
         raise ValueError(f"invalid checkpoint filename {model_name!r}")
+    iteration_offset = completed - 1 - raw_iteration
+    if iteration_offset < 0:
+        raise ValueError(
+            f"checkpoint {model_name!r} is ahead of cumulative progress ({completed} completed iterations)"
+        )
     return {
         "iteration": completed - 1,
         "model_iteration": raw_iteration,
         "completed_iterations": completed,
         "common_step_counter": step,
-        "iteration_offset": completed - 1 - raw_iteration,
+        "iteration_offset": iteration_offset,
     }
 
 
@@ -218,6 +223,47 @@ def checkpoint_sort_key(checkpoint: dict) -> tuple[int, int, int]:
         int(checkpoint.get("attempt", -1)),
         int(checkpoint.get("model_iteration", -1)),
     )
+
+
+def checkpoint_cache_path(run_dir: Path, attempt_number: int) -> Path:
+    """Return the local metadata path for one attempt's validated checkpoint."""
+    return run_dir / "artifacts" / f"a{attempt_number}" / "checkpoint_progress.json"
+
+
+def load_checkpoint_cache(run_dir: Path, attempt_number: int) -> dict:
+    """Load one attempt's validated checkpoint metadata, or an empty dict if invalid."""
+    path = checkpoint_cache_path(run_dir, attempt_number)
+    try:
+        checkpoint = json.loads(path.read_text())
+        required = {
+            "attempt",
+            "iteration",
+            "model_iteration",
+            "completed_iterations",
+            "common_step_counter",
+            "iteration_offset",
+            "file",
+            "folder",
+            "url",
+            "resume_from",
+        }
+        if not isinstance(checkpoint, dict) or not required.issubset(checkpoint):
+            return {}
+        if int(checkpoint["attempt"]) != attempt_number or int(checkpoint["iteration_offset"]) < 0:
+            return {}
+        checkpoint_sort_key(checkpoint)
+        return checkpoint
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def save_checkpoint_cache(run_dir: Path, checkpoint: dict) -> None:
+    """Atomically cache one attempt's validated checkpoint metadata."""
+    path = checkpoint_cache_path(run_dir, int(checkpoint["attempt"]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path.write_text(json.dumps(checkpoint, indent=1))
+    temporary_path.replace(path)
 
 
 def remaining_iterations(max_iterations: int, checkpoint: dict) -> int:
@@ -232,7 +278,8 @@ def sync_attempt(cfg: dict, attempt: dict, run_dir: Path, manifest: dict) -> dic
     attempt_number = int(attempt["attempt"])
     steps_per_iteration = int(cfg.get("STEPS_PER_ITERATION", DEFAULT_STEPS_PER_ITERATION))
     base = f"{cfg['SWIFT_HTTP']}/{commit}{attempt['run_tag']}/displayport_insertion_{cfg['ROBOT_TYPE']}/"
-    newest = {}
+    cached = load_checkpoint_cache(run_dir, attempt_number)
+    newest = cached
     for folder in (e for e in swift_list(base) if e["is_dir"]):
         entries = swift_list(base + urllib.parse.quote(folder["name"]) + "/")
         local = run_dir / "artifacts" / f"a{attempt['attempt']}" / folder["name"]
@@ -316,11 +363,13 @@ def sync_attempt(cfg: dict, attempt: dict, run_dir: Path, manifest: dict) -> dic
             }
             if checkpoint_sort_key(candidate) > checkpoint_sort_key(newest):
                 newest = candidate
+    if newest and newest != cached:
+        save_checkpoint_cache(run_dir, newest)
     return newest
 
 
 def fetch_latest_checkpoint(ckpt: dict, run_dir: Path) -> Path | None:
-    """Keep only the newest checkpoint locally (checkpoints are ~20 MB each)."""
+    """Keep only the newest checkpoint from each attempt locally (checkpoints are ~20 MB each)."""
     dest = run_dir / "checkpoint" / f"a{ckpt['attempt']}" / ckpt["file"]
     if not dest.exists():
         if not download(ckpt["url"], dest):

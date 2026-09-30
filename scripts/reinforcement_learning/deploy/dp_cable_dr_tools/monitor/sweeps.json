@@ -106,5 +106,17 @@
   },
   "description": "near-goal start curriculum OFF: every episode starts from the approach pose from iteration 0; payload gravity compensation ON: controller cancels the grasped plug's weight (no zero-action sag); OSC gain DR capped to softer-only stiffness (0.5-1.0x) and more-damped-only damping ratio (1.0-1.5x)",
   "relaunch_high": "last"
+ },
+ "dr_sweep_noatgoal_comp_gstd_osccap": {
+  "path": "sweeps/dr_sweep_noatgoal_comp_gstd_osccap",
+  "label": "near-goal OFF · comp on · corrected ADR",
+  "tags": {
+   "Curriculum": "near-goal OFF",
+   "Payload comp": "on",
+   "Policy std": "global + controlled twin",
+   "Gain DR": "capped"
+  },
+  "description": "Corrected ADR semantics with checkpoint-paired state, global-std mainline plus a same-commit state-dependent-std twin, capped OSC gains, and calibrated dry joint friction.",
+  "relaunch_high": "last"
  }
 }

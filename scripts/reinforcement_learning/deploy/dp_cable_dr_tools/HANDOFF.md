@@ -84,7 +84,7 @@ sampled once per env at every reset unless noted.
 | 11 | `socket_rot` | +/-1 deg | +/-5 deg | per axis | same | |
 | 12 | `obs_socket_pos` | 0 / 0 | bias 5 mm, noise 0.5 mm | per-episode bias + per-step noise, m | obs noise model (`socket_kp_pos`) | Bias-dominated: one-shot perception error. 5 mm > the 3 mm success radius |
 | 13 | `obs_eef_pos` | 0 / 0 | bias 5 mm, noise 0.5 mm | same | `eef_pos` | TCP calibration error |
-| 14 | `obs_eef_rot` | 0 / 0 | bias 2 deg, noise 0 | on each 6D-rotation component | `eef_rot_6d` | |
+| 14 | `obs_eef_rot` | 0 / 0 | bias 2 deg, noise 0 | angular perturbation composed on SO(3) | `eef_rot_6d` | |
 | 15 | `obs_socket_rot` | 0 / 0 | bias 2 deg, noise 0 | same | `socket_kp_rot_6d` | |
 | 16 | `action_noise` | 0 / 0 | bias 0.005, noise 0.01 | action units (x 0.025 m) = 0.125 mm/step bias, +/-0.25 mm noise | `NoisyDelayedOperationalSpaceControllerAction` | |
 | 17 | `action_latency` | 0 | [3, 4] steps | whole 33 ms steps, per env | same | 100-133 ms (ROS + RDK path) |

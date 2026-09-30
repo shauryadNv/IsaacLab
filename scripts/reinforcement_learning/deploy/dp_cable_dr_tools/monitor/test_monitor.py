@@ -6,8 +6,13 @@
 """Behavioral tests for cumulative ADR checkpoint progress."""
 
 import pytest
-
-from monitor import checkpoint_progress, checkpoint_sort_key, remaining_iterations
+from monitor import (
+    checkpoint_progress,
+    checkpoint_sort_key,
+    remaining_iterations,
+    save_checkpoint_cache,
+    sync_attempt,
+)
 
 
 def test_checkpoint_progress_uses_the_paired_cumulative_step():
@@ -46,6 +51,7 @@ def test_checkpoint_selection_prefers_cumulative_progress_then_attempt():
     "state",
     [
         {"checkpoint": "model_9.pt", "step": 10 * 512},
+        {"checkpoint": "model_10.pt", "step": 10 * 512},
         {"checkpoint": "model_10.pt", "step": -512},
         {"checkpoint": "model_10.pt", "step": 512 + 1},
     ],
@@ -54,3 +60,37 @@ def test_checkpoint_progress_rejects_mismatched_or_invalid_sidecars(state):
     """Only exact, positive rollout-boundary sidecars are authoritative."""
     with pytest.raises(ValueError):
         checkpoint_progress("model_10.pt", state, 512)
+
+
+def test_sync_attempt_recovers_cached_progress_when_swift_listing_fails(tmp_path, monkeypatch):
+    """A transient remote-listing failure must not erase a mirrored attempt's progress."""
+    checkpoint = {
+        **checkpoint_progress(
+            "model_50.pt",
+            {"checkpoint": "model_50.pt", "step": 252 * 512},
+            512,
+        ),
+        "file": "model_50.pt",
+        "folder": "run-folder",
+        "url": "https://example/model_50.pt",
+        "state_file": "model_50.adr_state.json",
+        "state_url": "https://example/model_50.adr_state.json",
+        "resume_from": "commit/tag/task/run-folder",
+        "attempt": 2,
+    }
+    save_checkpoint_cache(tmp_path, checkpoint)
+    monkeypatch.setattr("monitor.swift_list", lambda _url: [])
+
+    recovered = sync_attempt(
+        {
+            "COMMIT": "commit",
+            "STEPS_PER_ITERATION": "512",
+            "SWIFT_HTTP": "https://example",
+            "ROBOT_TYPE": "rizon4s",
+        },
+        {"attempt": "2", "run_tag": "/tag", "commit": "commit"},
+        tmp_path,
+        {},
+    )
+
+    assert recovered == checkpoint
