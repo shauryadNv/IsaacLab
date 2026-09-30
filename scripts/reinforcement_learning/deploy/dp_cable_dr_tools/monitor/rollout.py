@@ -32,6 +32,7 @@ def main():
     p.add_argument("out_dir")
     p.add_argument("--envs", type=int, default=16)
     p.add_argument("--episodes", type=int, default=1, help="episodes per env to score")
+    p.add_argument("--iteration", type=int, help="Cumulative iteration to report for a resumed checkpoint")
     p.add_argument("--no-video", action="store_true")
     p.add_argument("overrides", nargs="*", help="Hydra overrides the run trained with (e.g. agent.policy.*)")
     cli = p.parse_args()
@@ -52,7 +53,8 @@ def main():
     from isaaclab_tasks.utils import resolve_task_config
 
     video = not cli.no_video
-    it = int(re.search(r"model_(\d+)\.pt", cli.checkpoint).group(1))
+    model_it = int(re.search(r"model_(\d+)\.pt", cli.checkpoint).group(1))
+    it = model_it if cli.iteration is None else cli.iteration
     os.makedirs(cli.out_dir, exist_ok=True)
     work = os.path.join(cli.out_dir, f".work_{it}")
     shutil.rmtree(work, ignore_errors=True)
@@ -126,6 +128,7 @@ def main():
         errs = torch.cat(final_err) if final_err else torch.zeros(0)
         result = {
             "iteration": it,
+            "model_iteration": model_it,
             "checkpoint": cli.checkpoint,
             "episodes": total,
             "success_rate": round(successes.sum().item() / max(total, 1), 4),

@@ -1,11 +1,15 @@
-# DisplayPort task-space DR: handoff (status 2026-09-29 03:00 UTC)
+# DisplayPort task-space DR: handoff (audited 2026-09-30 00:51 UTC)
 
 Domain randomization (DR) with a success-driven curriculum (ADR) for the DisplayPort cable-insertion
 task-space env (Flexiv Rizon 4S, operational-space control), aimed at sim-to-real transfer.
 
 - **Code**: branch `shauryad/dp_cable_dr` (fork `github.com/shauryadNv/IsaacLab`), 13 commits on top of
   `3065d9d969c` (`shauryad/dp_cable_ship`). Tooling: this directory. Runbook: [README.md](README.md).
-- **Training**: 109 osmo runs in 9 sweeps, 75 running and 34 queued (all queued are HIGH priority).
+- **Training audit**: 109 canonical variants: 72 running, 2 pending and 35 inactive.
+  Every one of the 34 previously reported HIGH-priority queued variants had been
+  submitted; 33 were later canceled and one remained running. Two canceled lineages
+  already had active replacements. Do not bulk-resubmit the inactive set while the
+  existing 15-minute monitor owns relaunches.
   A cron job on the original machine monitors them every 15 min, relaunches dead runs, and evaluates
   every new checkpoint. Dashboard at `http://localhost:8765` (via `ssh -L 8765:localhost:8765`).
 - **Main results so far**:
@@ -28,8 +32,8 @@ Task: `IsaacContrib-Deploy-DisplayportInsertion-Rizon4s-Grav-TaskSpace` (train) 
 
 | OSC gains (nominal) | translation | rotation |
 |---|---|---|
-| stiffness K | 300 N/m | 30 N*m/rad |
-| damping D (ratio) | 35 N*s/m (zeta 1.01) | 1.1 N*m*s/rad (zeta 0.10) |
+| stiffness K | 300 N/m | 30 N·m/rad |
+| damping D (ratio) | 35 N·s/m (zeta 1.01) | 1.1 N·m·s/rad (zeta 0.10) |
 
 The arm is gravity-free; the plug (30 g) is not. Arm joint PD is zeroed, so the OSC drives pure torque.
 
@@ -52,8 +56,9 @@ knob-to-term wiring: `domain_rand.py` in the same folder; terms in `contrib/depl
   of steps have passed since the last change (`min_episodes_between`). It never goes down (`demote=False`).
 - Only episodes that spawned at the approach pose are scored. Near-goal spawns are excluded, so they cannot
   inflate the success rate.
-- The level is saved to `adr_state.json` beside the checkpoints. It is restored on resume, and so is the env step
-  counter.
+- Each checkpoint has an authoritative `model_N.adr_state.json` sidecar containing its
+  level and cumulative step. `adr_state.json` is mutable latest-state telemetry and a
+  validated legacy fallback. Resume selects the newest complete pair.
 - Knobs: `env.dr.adr.{num_levels,init_level,success_threshold,min_episodes_between,demote}`.
   `init_level=50` pins every knob at its final range.
 - `env.dr.at_goal_schedule`: `iteration` (default, pre-DR behavior), `adr` (anneal near-goal spawns on the ADR
@@ -69,7 +74,7 @@ sampled once per env at every reset unless noted.
 | 1 | `osc_stiffness` | x1.0 | x[0.5, 1.0] | scale on OSC K, per env and axis, **log-uniform** | `randomize_osc_task_gains` (reset) | Softer-only (was x[0.5, 2.0]); stiffer blows up contact, section 5 issue 11 |
 | 2 | `osc_damping_ratio` | x1.0 | x[1.0, 1.5] | scale on OSC zeta, per env and axis, log-uniform | same term | More-damped-only (was x[0.5, 1.5]) |
 | 3 | `joint_armature` | 0 | [0.1, 0.2] | kg*m^2, absolute, per env and arm joint | `randomize_joint_parameters` | Sim baseline is 0; OSC ignores the mass matrix, so this is true plant mismatch |
-| 4 | `joint_friction` | 0 | [0.7, 0.8] | N*m, absolute, per env and arm joint | same term | Full action still moves 58%, 0.3 action frozen. 2-5 N*m freezes the arm |
+| 4 | `joint_friction` | 0 | [0, 0.05] | PhysX dimensionless static = dynamic Coulomb coefficient, per env and arm joint | task-private dry-friction event | Leaves viscous damping unchanged; corrected 32-env scripted insertion reached 78.1% at level 50 with zero drops |
 | 5 | `finger_friction` | 0.75 | [0.4, 1.1] | static = dynamic mu, gripper fingers | `AdrRigidBodyMaterial` | Grip is mostly geometric; minor effect |
 | 6 | `mating_friction` | 0.001 | 0.001 | plug + socket mu | same | **Identity by default** (near-frictionless on purpose). Sweeps set `final=[0.001,0.5]` in the mating_friction variant only; not in `all_on` |
 | 7 | `plug_mass` | x1.0 | x[0.5, 2.0] | scale, per env | `randomize_rigid_body_mass` | 15-60 g. Payload comp follows it |
@@ -83,10 +88,10 @@ sampled once per env at every reset unless noted.
 | 15 | `obs_socket_rot` | 0 / 0 | bias 2 deg, noise 0 | same | `socket_kp_rot_6d` | |
 | 16 | `action_noise` | 0 / 0 | bias 0.005, noise 0.01 | action units (x 0.025 m) = 0.125 mm/step bias, +/-0.25 mm noise | `NoisyDelayedOperationalSpaceControllerAction` | |
 | 17 | `action_latency` | 0 | [3, 4] steps | whole 33 ms steps, per env | same | 100-133 ms (ROS + RDK path) |
-| 18 | `plug_wrench_force` | 0 | [-0.6, 0.6] N per axis | plug frame, resampled every U(0.5, 2.0) s | `apply_external_force_torque` (interval) | Cable tug stand-in; ~0.1 N*m at the wrist. Torque knob dropped |
+| 18 | `plug_wrench_force` | 0 | [-0.6, 0.6] N per axis | plug frame, resampled every U(0.5, 2.0) s | `apply_external_force_torque` (interval) | Cable tug stand-in; ~0.1 N·m at the wrist. Torque knob dropped |
 
 Removed or never added:
-- plug torque knob: realistic torques (~0.01 N*m) were indistinguishable from none.
+- plug torque knob: realistic torques (~0.01 N·m) were indistinguishable from none.
 - arm joint PD gain randomization: a no-op, since joint PD is zeroed; knobs 1-2 are the gains in the loop.
 - Sweep groups (manifest): `grp_controller` = knobs 1-4; `grp_sense_act` = knobs 10-17; `all_on` = every knob except 6.
 

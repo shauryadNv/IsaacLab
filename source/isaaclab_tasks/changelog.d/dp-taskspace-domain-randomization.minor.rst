@@ -46,9 +46,12 @@ Fixed
   initial value.
 * Fixed resumed :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.DisplayportInsertionEnv` runs restarting the
   at-goal spawn anneal from its initial probability. ``load_training_state`` now restores ``common_step_counter`` to the
-  resumed iteration times the anneal's ``num_steps_per_env``, and
+  exact cumulative rollout boundary stored with the checkpoint, and
   :class:`~isaaclab_tasks.contrib.deploy.mdp.SuccessDifficultyScheduler` restarts its level-change spacing at that
   step instead of at 0.
+* Fixed DisplayPort randomization preserving disabled socket pose components, sampling one grasp target per reset,
+  keeping rotation observations on SO(3), separating dry joint friction from viscous damping, and enforcing consistent
+  sampled contact friction.
 
 Changed
 ^^^^^^^
@@ -62,7 +65,9 @@ Changed
   per-episode ``episode_succeeded`` flag and to expand ``env.dr`` during construction. Randomization is expanded there
   rather than in ``__post_init__`` because Isaac Lab applies ``env.*`` command-line overrides after the configuration
   object is built.
-* Changed :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.DisplayportInsertionEnv` to implement
-  ``load_training_state``, which restores the domain-randomization curriculum level from an ``adr_state.json`` sidecar
-  written beside the run's checkpoints. RSL-RL checkpoints carry only the networks, optimizer and iteration count, so a
-  resumed run would otherwise restart the curriculum at level 0 while keeping hard-trained policy weights.
+* Changed :class:`~isaaclab_tasks.contrib.deploy.cable_insertion.DisplayportInsertionEnv` to persist the
+  domain-randomization curriculum in a checkpoint-specific sidecar and reapply its restored ranges before the first
+  resumed rollout. RSL-RL checkpoints carry only the networks, optimizer and iteration count, so a resumed run would
+  otherwise use an unrelated curriculum level or retain the initial randomization ranges.
+* Changed :class:`~isaaclab_tasks.contrib.deploy.mdp.SuccessDifficultyScheduler` to weight its smoothed success rate by
+  completed episode count and include successes reached on the terminal physics step.

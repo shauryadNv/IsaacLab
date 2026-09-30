@@ -48,6 +48,7 @@ DEAD = ("FAILED", "CANCELED", "TIMEOUT", "ERROR")  # prefixes; osmo also reports
 DONE = ("COMPLETED",)
 UA = {"User-Agent": "run-monitor"}
 LOCK = threading.Lock()  # guards the shared queue file and runs.tsv appends across worker threads
+DEFAULT_STEPS_PER_ITERATION = 512
 
 
 def now() -> str:
@@ -190,10 +191,46 @@ def model_iter(name: str) -> int:
     return int(m.group(1)) if m else -1
 
 
+def checkpoint_progress(model_name: str, state: dict, steps_per_iteration: int) -> dict:
+    """Return cumulative progress encoded by one checkpoint-paired ADR sidecar."""
+    if state.get("checkpoint") != model_name:
+        raise ValueError(f"sidecar belongs to {state.get('checkpoint')!r}, not {model_name!r}")
+    step = int(state["step"])
+    if step < steps_per_iteration or step % steps_per_iteration:
+        raise ValueError(f"invalid cumulative step {step} for rollout size {steps_per_iteration}")
+    completed = step // steps_per_iteration
+    raw_iteration = model_iter(model_name)
+    if raw_iteration < 0:
+        raise ValueError(f"invalid checkpoint filename {model_name!r}")
+    return {
+        "iteration": completed - 1,
+        "model_iteration": raw_iteration,
+        "completed_iterations": completed,
+        "common_step_counter": step,
+        "iteration_offset": completed - 1 - raw_iteration,
+    }
+
+
+def checkpoint_sort_key(checkpoint: dict) -> tuple[int, int, int]:
+    """Order checkpoints by cumulative progress, then attempt and raw model index."""
+    return (
+        int(checkpoint.get("common_step_counter", -1)),
+        int(checkpoint.get("attempt", -1)),
+        int(checkpoint.get("model_iteration", -1)),
+    )
+
+
+def remaining_iterations(max_iterations: int, checkpoint: dict) -> int:
+    """Return unfinished rollout iterations after ``checkpoint``."""
+    return max_iterations - int(checkpoint["completed_iterations"])
+
+
 def sync_attempt(cfg: dict, attempt: dict, run_dir: Path, manifest: dict) -> dict:
     """Mirror one attempt's swift folder. Returns its newest checkpoint info (or {})."""
     # Each attempt records the commit it ran (runs.tsv "commit"); relaunches may use a newer one.
     commit = attempt.get("commit") or cfg["COMMIT"]
+    attempt_number = int(attempt["attempt"])
+    steps_per_iteration = int(cfg.get("STEPS_PER_ITERATION", DEFAULT_STEPS_PER_ITERATION))
     base = f"{cfg['SWIFT_HTTP']}/{commit}{attempt['run_tag']}/displayport_insertion_{cfg['ROBOT_TYPE']}/"
     newest = {}
     for folder in (e for e in swift_list(base) if e["is_dir"]):
@@ -209,42 +246,110 @@ def sync_attempt(cfg: dict, attempt: dict, run_dir: Path, manifest: dict) -> dic
                 if not dest.exists() or not stamp.exists() or stamp.read_text() != sig:
                     if download(base + urllib.parse.quote(folder["name"]) + "/" + e["name"], dest):
                         stamp.write_text(sig)
-        models = sorted((e for e in entries if model_iter(e["name"]) >= 0), key=lambda e: model_iter(e["name"]))
-        if models and model_iter(models[-1]["name"]) > newest.get("iteration", -1):
-            newest = {
-                "iteration": model_iter(models[-1]["name"]),
-                "file": models[-1]["name"],
+        entries_by_name = {e["name"]: e for e in entries if not e["is_dir"]}
+        models = sorted(
+            (e for e in entries if model_iter(e["name"]) >= 0),
+            key=lambda e: model_iter(e["name"]),
+            reverse=True,
+        )
+        sidecars = {e["name"] for e in entries if e["name"].endswith(".adr_state.json")}
+        selected = None
+        if sidecars:
+            # A preemption may expose a .pt before its paired ADR state is uploaded.
+            # Walk backward until a complete, internally consistent pair is found.
+            for model in models:
+                state_file = model["name"].replace(".pt", ".adr_state.json")
+                state_entry = entries_by_name.get(state_file)
+                if state_entry is None:
+                    continue
+                state_dest = local / state_file
+                stamp = state_dest.with_suffix(state_dest.suffix + ".remote")
+                sig = f"{state_entry['size']}|{state_entry['date']}"
+                if (not state_dest.exists() or not stamp.exists() or stamp.read_text() != sig) and not download(
+                    base + urllib.parse.quote(folder["name"]) + "/" + state_file, state_dest
+                ):
+                    continue
+                stamp.write_text(sig)
+                try:
+                    progress = checkpoint_progress(
+                        model["name"],
+                        json.loads(state_dest.read_text()),
+                        steps_per_iteration,
+                    )
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                    log(f"  ignoring invalid checkpoint pair {model['name']}: {exc}")
+                    continue
+                selected = (model, state_file, progress)
+                break
+        elif models:
+            # Legacy attempts predate paired sidecars. Their filename is the only
+            # available progress signal and is therefore used only as a fallback.
+            model = models[0]
+            raw_iteration = model_iter(model["name"])
+            completed = raw_iteration + 1
+            selected = (
+                model,
+                None,
+                {
+                    "iteration": raw_iteration,
+                    "model_iteration": raw_iteration,
+                    "completed_iterations": completed,
+                    "common_step_counter": completed * steps_per_iteration,
+                    "iteration_offset": 0,
+                },
+            )
+        if selected is not None:
+            model, state_file, progress = selected
+            candidate = {
+                **progress,
+                "file": model["name"],
                 "folder": folder["name"],
-                "url": base + urllib.parse.quote(folder["name"]) + "/" + models[-1]["name"],
+                "url": base + urllib.parse.quote(folder["name"]) + "/" + model["name"],
+                "state_file": state_file,
+                "state_url": (
+                    base + urllib.parse.quote(folder["name"]) + "/" + state_file if state_file is not None else None
+                ),
                 "resume_from": (
                     f"{commit}{attempt['run_tag']}/displayport_insertion_{cfg['ROBOT_TYPE']}/{folder['name']}"
                 ),
-                "attempt": int(attempt["attempt"]),
+                "attempt": attempt_number,
             }
+            if checkpoint_sort_key(candidate) > checkpoint_sort_key(newest):
+                newest = candidate
     return newest
 
 
 def fetch_latest_checkpoint(ckpt: dict, run_dir: Path) -> Path | None:
     """Keep only the newest checkpoint locally (checkpoints are ~20 MB each)."""
-    dest = run_dir / "checkpoint" / ckpt["file"]
+    dest = run_dir / "checkpoint" / f"a{ckpt['attempt']}" / ckpt["file"]
     if not dest.exists():
         if not download(ckpt["url"], dest):
             return None
         for old in dest.parent.glob("model_*.pt"):
             if old != dest:
                 old.unlink()
-        # the rollout needs the ADR sidecar next to the checkpoint only for training; copy for reference
+    if ckpt.get("state_url"):
+        state_dest = dest.parent / ckpt["state_file"]
+        if not state_dest.exists() and not download(ckpt["state_url"], state_dest):
+            return None
+        for old in dest.parent.glob("model_*.adr_state.json"):
+            if old != state_dest:
+                old.unlink()
     return dest
 
 
-def build_metrics(run_dir: Path) -> None:
+def build_metrics(run_dir: Path, attempts: list[dict], offsets: dict[int, int]) -> None:
     """Merge every attempt's tfevents into metrics.json: {tag: [[step, value], ...]}."""
     try:
         from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
     except ImportError:
         return
-    merged: dict[str, dict[int, float]] = {}
-    for events in sorted((run_dir / "artifacts").glob("a*/*/events.out.tfevents*")):
+    merged: dict[str, dict[int, tuple[int, float, float]]] = {}
+    allowed = {int(attempt["attempt"]) for attempt in attempts}
+    for events in (run_dir / "artifacts").glob("a*/*/events.out.tfevents*"):
+        attempt_number = int(events.parents[1].name.removeprefix("a"))
+        if attempt_number not in allowed or attempt_number not in offsets:
+            continue
         acc = EventAccumulator(str(events), size_guidance={"scalars": 0})
         try:
             acc.Reload()
@@ -255,8 +360,11 @@ def build_metrics(run_dir: Path) -> None:
                 continue
             series = merged.setdefault(tag, {})
             for ev in acc.Scalars(tag):
-                series[ev.step] = ev.value  # later attempts overwrite overlapping steps
-    out = {tag: sorted([s, v] for s, v in series.items()) for tag, series in merged.items()}
+                cumulative_step = ev.step + offsets[attempt_number]
+                candidate = (attempt_number, ev.wall_time, ev.value)
+                if candidate[:2] >= series.get(cumulative_step, (-1, -1.0, 0.0))[:2]:
+                    series[cumulative_step] = candidate
+    out = {tag: sorted([step, sample[2]] for step, sample in series.items()) for tag, series in merged.items()}
     (run_dir / "metrics.json").write_text(json.dumps(out))
 
 
@@ -286,12 +394,18 @@ def relaunch(
         env["PRIORITY"] = "HIGH"
     max_total = int(cfg.get("MAX_ITERATIONS", "1500"))
     if newest:
-        remaining = max_total - newest["iteration"]
+        remaining = remaining_iterations(max_total, newest)
         if remaining <= 0:
-            append_event(run_dir, kind="done", note=f"checkpoint {newest['iteration']} already reached {max_total}")
+            append_event(
+                run_dir,
+                kind="done",
+                note=f"checkpoint {newest['file']} reached {newest['completed_iterations']}/{max_total} iterations",
+            )
             return
         env.update(RESUME_FROM=newest["resume_from"], MAX_ITERS=str(remaining))
-        note = f"resume from model_{newest['iteration']} ({remaining} iterations left)"
+        note = (
+            f"resume from {newest['file']} at cumulative iteration {newest['iteration']} ({remaining} iterations left)"
+        )
     else:
         note = "no checkpoint yet; restarting fresh"
     if high:
@@ -412,11 +526,14 @@ def tick_sweep(sweep: str, sweep_dir: Path, high_policy: str = RELAUNCH_HIGH_DEF
                     status["console"] = console
 
         newest = {}
+        attempt_offsets = {}
         for a in data_attempts:
             info = sync_attempt(cfg, a, run_dir, manifest)
-            if info.get("iteration", -1) > newest.get("iteration", -1):
+            if info:
+                attempt_offsets[int(a["attempt"])] = int(info["iteration_offset"])
+            if checkpoint_sort_key(info) > checkpoint_sort_key(newest):
                 newest = info
-        build_metrics(run_dir)
+        build_metrics(run_dir, data_attempts, attempt_offsets)
         if newest:
             status["checkpoint"] = newest
             local = fetch_latest_checkpoint(newest, run_dir)
@@ -434,6 +551,8 @@ def tick_sweep(sweep: str, sweep_dir: Path, high_policy: str = RELAUNCH_HIGH_DEF
                                     "sweep": sweep,
                                     "name": name,
                                     "iteration": newest["iteration"],
+                                    "model_iteration": newest["model_iteration"],
+                                    "common_step_counter": newest["common_step_counter"],
                                     "checkpoint": str(local),
                                     "queued": now(),
                                 }

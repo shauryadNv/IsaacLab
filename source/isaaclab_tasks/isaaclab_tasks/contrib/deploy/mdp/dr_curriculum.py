@@ -15,6 +15,7 @@ from __future__ import annotations
 
 __all__ = ["SuccessDifficultyScheduler", "interpolate_range_fn"]
 
+import contextlib
 import json
 import os
 from collections.abc import Sequence
@@ -26,7 +27,10 @@ from isaaclab.envs.mdp.curriculums import modify_env_param
 from isaaclab.managers import ManagerTermBase
 
 STATE_FILENAME = "adr_state.json"
-"""Name of the sidecar that carries the curriculum level alongside a run's checkpoints."""
+"""Name of the latest-state sidecar used for live monitoring."""
+
+CHECKPOINT_STATE_SUFFIX = ".adr_state.json"
+"""Suffix for curriculum state paired with one RSL-RL checkpoint."""
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -72,6 +76,7 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         self.level: int = int(params.get("init_level", 0))
         self._success_rate: float = 0.0
         self._last_change_step: int = 0
+        self._skip_next_update: bool = False
 
         # RSL-RL checkpoints carry only network and optimizer state, so the level is
         # persisted next to them instead. Only rank 0 writes: each rank derives its own
@@ -116,23 +121,59 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         self._success_rate = float(values[1])
         self._last_change_step = int(values[2])
 
-    def _write_state(self) -> None:
-        """Persist the level next to the run's checkpoints. Never fatal to training."""
-        if self._state_path is None:
-            return
+    def _state_dict(self, checkpoint_path: str | None = None) -> dict[str, int | float | str]:
+        """Return serializable scheduler state for a latest or checkpoint sidecar."""
+        state: dict[str, int | float | str] = {
+            "version": 2,
+            "level": self.level,
+            "num_levels": self.num_levels,
+            "success_rate": self._success_rate,
+            "step": int(getattr(self._env, "common_step_counter", 0)),
+        }
+        if checkpoint_path is not None:
+            state["checkpoint"] = os.path.basename(checkpoint_path)
+        return state
+
+    def _write_json_state(self, state_path: str, checkpoint_path: str | None = None) -> bool:
+        """Write scheduler state atomically. Errors warn instead of stopping training."""
+        temporary_path = f"{state_path}.tmp"
         try:
-            os.makedirs(os.path.dirname(self._state_path), exist_ok=True)
-            with open(self._state_path, "w") as handle:
-                json.dump(
-                    {
-                        "level": self.level,
-                        "num_levels": self.num_levels,
-                        "success_rate": self._success_rate,
-                    },
-                    handle,
-                )
+            os.makedirs(os.path.dirname(state_path), exist_ok=True)
+            with open(temporary_path, "w") as handle:
+                json.dump(self._state_dict(checkpoint_path), handle)
+            os.replace(temporary_path, state_path)
+            return True
         except OSError as exc:
-            print(f"[WARN] Could not write the ADR state file '{self._state_path}': {exc}")
+            print(f"[WARN] Could not write the ADR state file '{state_path}': {exc}")
+            with contextlib.suppress(OSError):
+                os.remove(temporary_path)
+            return False
+
+    def _write_state(self) -> None:
+        """Persist the latest level for monitoring. Never fatal to training."""
+        if self._state_path is not None:
+            self._write_json_state(self._state_path)
+
+    def save_for_checkpoint(self, checkpoint_path: str) -> bool:
+        """Persist state in a sidecar uniquely paired with ``checkpoint_path``."""
+        if self._state_path is None:
+            return False
+        state_path = os.path.splitext(checkpoint_path)[0] + CHECKPOINT_STATE_SUFFIX
+        written = self._write_json_state(state_path, checkpoint_path)
+        if written:
+            self._write_state()
+        return written
+
+    def prepare_resume_reset(self) -> None:
+        """Prepare for the environment reset performed immediately after a resume.
+
+        The reset exists only to apply restored step-driven schedules and ADR ranges; it
+        is not a completed episode. Suppress that scheduler update and restart the
+        promotion-spacing guard at the restored rollout boundary. This is required even
+        when no ADR sidecar could be restored.
+        """
+        self._skip_next_update = True
+        self._last_change_step = int(getattr(self._env, "common_step_counter", 0))
 
     def restore_from_checkpoint(self, checkpoint_path: str) -> bool:
         """Restore the level from the sidecar beside ``checkpoint_path``.
@@ -144,19 +185,55 @@ class SuccessDifficultyScheduler(ManagerTermBase):
         Returns:
             Whether a state file was found and applied.
         """
-        state_file = os.path.join(os.path.dirname(checkpoint_path), STATE_FILENAME)
+        state_file = os.path.splitext(checkpoint_path)[0] + CHECKPOINT_STATE_SUFFIX
         if not os.path.isfile(state_file):
-            print(
-                f"[WARN] No ADR state file beside '{checkpoint_path}'. The curriculum will restart at"
-                f" level {self.level}. Pass env.dr.adr.init_level to set it explicitly."
-            )
-            return False
+            # New latest-state files carry their write step, which lets us prove that
+            # they do not come from after the requested checkpoint. Legacy files have
+            # no such identity and are unsafe for an older checkpoint.
+            latest_state_file = os.path.join(os.path.dirname(checkpoint_path), STATE_FILENAME)
+            if not os.path.isfile(latest_state_file):
+                print(
+                    f"[WARN] No ADR state file beside '{checkpoint_path}'. The curriculum will restart at"
+                    f" level {self.level}. Pass env.dr.adr.init_level to set it explicitly."
+                )
+                return False
+            state_file = latest_state_file
         try:
             with open(state_file) as handle:
                 state = json.load(handle)
         except (OSError, ValueError) as exc:
             print(f"[WARN] Could not read the ADR state file '{state_file}': {exc}")
             return False
+
+        expected_checkpoint = os.path.basename(checkpoint_path)
+        saved_checkpoint = state.get("checkpoint")
+        if saved_checkpoint is not None and saved_checkpoint != expected_checkpoint:
+            print(
+                f"[WARN] ADR state '{state_file}' belongs to '{saved_checkpoint}', not"
+                f" '{expected_checkpoint}'. The curriculum will restart at level {self.level}."
+            )
+            return False
+        saved_step = state.get("step")
+        if saved_checkpoint is None:
+            checkpoint_step = int(self._env.common_step_counter)
+            # A mutable latest-state file is safe only when it identifies the exact
+            # rollout boundary represented by the checkpoint. Reject both future and
+            # stale state; either can silently apply the wrong curriculum level or EMA.
+            if saved_step is None or int(saved_step) != checkpoint_step:
+                print(
+                    f"[WARN] Latest ADR state '{state_file}' cannot be safely matched to"
+                    f" '{expected_checkpoint}'. The curriculum will restart at level {self.level}."
+                )
+                return False
+        elif saved_step is not None:
+            # RSL-RL's zero-based iteration can repeat after a resume, so the checkpoint
+            # field alone cannot reconstruct cumulative environment steps across multiple
+            # preemptions. The exact-paired sidecar is authoritative.
+            checkpoint_step = int(saved_step)
+            if checkpoint_step < 0:
+                print(f"[WARN] ADR state '{state_file}' has an invalid negative step; ignoring it.")
+                return False
+            self._env.common_step_counter = checkpoint_step
 
         saved_level = int(state.get("level", 0))
         saved_num_levels = int(state.get("num_levels", self.num_levels))
@@ -166,10 +243,7 @@ class SuccessDifficultyScheduler(ManagerTermBase):
             saved_level = round(saved_level * self.num_levels / saved_num_levels)
         self.level = max(0, min(saved_level, self.num_levels))
         self._success_rate = float(state.get("success_rate", 0.0))
-        # Restart the spacing guard at the resume point (the env restores common_step_counter
-        # to the resumed iteration before this runs), so the level cannot move until the
-        # resumed run has collected fresh episodes.
-        self._last_change_step = int(self._env.common_step_counter)
+        self.prepare_resume_reset()
         print(f"[INFO] Restored ADR curriculum level {self.level}/{self.num_levels} from '{state_file}'.")
         self._write_state()
         return True
@@ -194,30 +268,37 @@ class SuccessDifficultyScheduler(ManagerTermBase):
                 "SuccessDifficultyScheduler requires the environment to expose an 'episode_succeeded'"
                 " flag. Use DisplayportInsertionEnv or add an equivalent buffer."
             )
-        succeeded = episode_succeeded[env_ids]
-        spawned_at_goal = self._at_goal_spawns(env)
-        if spawned_at_goal is not None:
-            # Score only episodes that began at the approach pose.
-            succeeded = succeeded[~spawned_at_goal[env_ids]]
-        if succeeded.numel() > 0:
-            batch_rate = succeeded.float().mean().item()
-            self._success_rate += self.smoothing * (batch_rate - self._success_rate)
+        if self._skip_next_update:
+            self._skip_next_update = False
+        else:
+            succeeded = episode_succeeded[env_ids]
+            spawned_at_goal = self._at_goal_spawns(env)
+            if spawned_at_goal is not None:
+                # Score only episodes that began at the approach pose.
+                succeeded = succeeded[~spawned_at_goal[env_ids]]
+            if succeeded.numel() > 0:
+                batch_rate = succeeded.float().mean().item()
+                # ``smoothing`` is the contribution of one completed episode. Using
+                # the equivalent batch coefficient prevents one reset call containing
+                # hundreds of episodes from weighing the same as a one-env reset.
+                batch_smoothing = 1.0 - (1.0 - self.smoothing) ** succeeded.numel()
+                self._success_rate += batch_smoothing * (batch_rate - self._success_rate)
 
-        steps_since_change = env.common_step_counter - self._last_change_step
-        if self._min_steps_between is None:
-            self._min_steps_between = int(round(self.min_episodes_between * env.max_episode_length))
-        if steps_since_change >= self._min_steps_between:
-            changed = False
-            if self._success_rate > self.success_threshold and self.level < self.num_levels:
-                self.level += 1
-                changed = True
-            elif self.demote and self._success_rate < self.success_threshold and self.level > 0:
-                self.level -= 1
-                changed = True
-            if changed:
-                self._last_change_step = env.common_step_counter
-                # At most num_levels writes per run, so the cost is negligible.
-                self._write_state()
+            steps_since_change = env.common_step_counter - self._last_change_step
+            if self._min_steps_between is None:
+                self._min_steps_between = int(round(self.min_episodes_between * env.max_episode_length))
+            if steps_since_change >= self._min_steps_between:
+                changed = False
+                if self._success_rate > self.success_threshold and self.level < self.num_levels:
+                    self.level += 1
+                    changed = True
+                elif self.demote and self._success_rate < self.success_threshold and self.level > 0:
+                    self.level -= 1
+                    changed = True
+                if changed:
+                    self._last_change_step = env.common_step_counter
+                    # At most num_levels writes per run, so the cost is negligible.
+                    self._write_state()
 
         return {"level": float(self.level), "frac": self.difficulty_frac, "success_rate": self._success_rate}
 

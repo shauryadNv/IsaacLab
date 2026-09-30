@@ -105,6 +105,8 @@ def main() -> int:
                         str(HOME / "rollout.py"),
                         str(ckpt),
                         str(out_dir),
+                        "--iteration",
+                        str(job["iteration"]),
                         *overrides,
                     ],
                     cwd=WT,
@@ -122,6 +124,8 @@ def main() -> int:
                 result = json.loads(line[len("ROLLOUT_RESULT ") :])
         if result is None:
             result = {"iteration": job["iteration"], "error": "rollout failed; see log", "log": log_path.name}
+        result["model_iteration"] = job.get("model_iteration", result.get("model_iteration"))
+        result["common_step_counter"] = job.get("common_step_counter")
         from datetime import datetime, timezone
 
         result["time"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

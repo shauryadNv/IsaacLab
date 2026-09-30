@@ -108,6 +108,7 @@ def build() -> None:
                 if (tb_iter is not None or console.get("iteration") is not None)
                 else None,
                 "checkpoint_iter": (st.get("checkpoint") or {}).get("iteration"),
+                "checkpoint_model_iter": (st.get("checkpoint") or {}).get("model_iteration"),
                 "success_rate": last(metrics.get("Metrics/success_rate", [])),
                 "terminal_success_rate": last(metrics.get("Metrics/terminal_success_rate", [])),
                 "adr_level": last(metrics.get("Curriculum/adr/level", [])),

@@ -14,16 +14,29 @@ from __future__ import annotations
 __all__ = ["apply_domain_randomization"]
 
 from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import MISSING
 from typing import TYPE_CHECKING
+
+import torch
 
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.noise import NoiseModelWithAdditiveBiasCfg, UniformNoiseCfg
+from isaaclab.utils.configclass import configclass
+from isaaclab.utils.math import matrix_from_quat, quat_from_angle_axis, quat_from_matrix, quat_mul
+from isaaclab.utils.noise import (
+    ConstantNoiseCfg,
+    NoiseModel,
+    NoiseModelCfg,
+    NoiseModelWithAdditiveBiasCfg,
+    UniformNoiseCfg,
+)
 
 import isaaclab_tasks.contrib.deploy.mdp as mdp
+from isaaclab_tasks.contrib.deploy.mdp.dr_events import _randomize_joint_coulomb_friction
 
-from .domain_rand_cfg import AxisKnobCfg, DomainRandCfg, ScalarKnobCfg, SignalNoiseKnobCfg
+from .domain_rand_cfg import DomainRandCfg, ScalarKnobCfg, SignalNoiseKnobCfg
 
 if TYPE_CHECKING:
     from .task_space_env_cfg import Rizon4sTaskSpaceDisplayportInsertionEnvCfg
@@ -43,15 +56,93 @@ _ROT_KEYS = ("roll", "pitch", "yaw")
 TrackFn = Callable[[str, object, object], None]
 
 
+class _Rotation6DNoiseModel(NoiseModel):
+    """Apply angular bias and jitter while keeping a 6D rotation on SO(3)."""
+
+    def __init__(self, noise_model_cfg: _Rotation6DNoiseModelCfg, num_envs: int, device: str):
+        super().__init__(noise_model_cfg, num_envs, device)
+        self._bias_quat = torch.zeros(num_envs, 4, device=device)
+        self._bias_quat[:, 3] = 1.0
+
+    @property
+    def cfg(self) -> _Rotation6DNoiseModelCfg:
+        """Return the live config so ADR updates take effect without rebuilding the model."""
+        return self._noise_model_cfg
+
+    def _sample_quat(self, count: int, halfwidth: float, dtype: torch.dtype) -> torch.Tensor:
+        if halfwidth <= 0.0:
+            quat = torch.zeros(count, 4, device=self._device, dtype=dtype)
+            quat[:, 3] = 1.0
+            return quat
+        axis = torch.randn(count, 3, device=self._device, dtype=dtype)
+        axis = torch.nn.functional.normalize(axis, dim=-1)
+        angle = torch.empty(count, device=self._device, dtype=dtype).uniform_(-halfwidth, halfwidth)
+        return quat_from_angle_axis(angle, axis)
+
+    def reset(self, env_ids=None) -> None:
+        """Resample the episode-constant angular bias for the selected environments."""
+        if env_ids is None:
+            env_ids = torch.arange(self._num_envs, device=self._device)
+        elif isinstance(env_ids, slice):
+            env_ids = torch.arange(self._num_envs, device=self._device)[env_ids]
+        else:
+            env_ids = torch.as_tensor(env_ids, device=self._device, dtype=torch.long)
+        self._bias_quat[env_ids] = self._sample_quat(
+            len(env_ids), float(self.cfg.bias_halfwidth), self._bias_quat.dtype
+        )
+
+    @staticmethod
+    def _matrix_from_rotation_6d(data: torch.Tensor) -> torch.Tensor:
+        """Project the two stored rows to an orthonormal right-handed rotation matrix."""
+        row_0 = torch.nn.functional.normalize(data[..., 0:3], dim=-1)
+        row_1 = data[..., 3:6] - (data[..., 3:6] * row_0).sum(dim=-1, keepdim=True) * row_0
+        row_1 = torch.nn.functional.normalize(row_1, dim=-1)
+        row_2 = torch.cross(row_0, row_1, dim=-1)
+        return torch.stack((row_0, row_1, row_2), dim=-2)
+
+    def __call__(self, data: torch.Tensor) -> torch.Tensor:
+        """Compose bias and per-step jitter with a batch of row-major 6D rotations."""
+        if data.shape != (self._num_envs, 6):
+            raise ValueError(f"Expected rotation observations of shape ({self._num_envs}, 6), got {data.shape}.")
+        observed_quat = quat_from_matrix(self._matrix_from_rotation_6d(data))
+        jitter_quat = self._sample_quat(self._num_envs, float(self.cfg.noise_halfwidth), data.dtype)
+        perturbed_quat = quat_mul(jitter_quat, quat_mul(self._bias_quat.to(data.dtype), observed_quat))
+        return matrix_from_quat(perturbed_quat)[..., :2, :].reshape(self._num_envs, 6)
+
+
+@configclass
+class _Rotation6DNoiseModelCfg(NoiseModelCfg):
+    """Configuration for geometrically valid angular noise on 6D rotations."""
+
+    class_type: type[NoiseModel] = _Rotation6DNoiseModel
+
+    # Satisfy the generic base schema. The custom model composes rotations directly.
+    noise_cfg: ConstantNoiseCfg = ConstantNoiseCfg(bias=0.0)
+
+    bias_halfwidth: float = MISSING
+    """Maximum magnitude of the episode-constant rotation bias [rad]."""
+
+    noise_halfwidth: float = MISSING
+    """Maximum magnitude of the per-step rotation jitter [rad]."""
+
+
 def _symmetric_range(halfwidths, keys) -> dict[str, list[float]]:
     """Turn per-axis half-widths into the ``{axis: [-h, h]}`` form event terms expect."""
     return {key: [-float(h), float(h)] for key, h in zip(keys, halfwidths)}
 
 
-def _pose_range(pos: AxisKnobCfg | tuple, rot: AxisKnobCfg | tuple) -> dict[str, list[float]]:
-    pos_values = pos.initial if isinstance(pos, AxisKnobCfg) else pos
-    rot_values = rot.initial if isinstance(rot, AxisKnobCfg) else rot
-    return {**_symmetric_range(pos_values, _AXIS_KEYS), **_symmetric_range(rot_values, _ROT_KEYS)}
+def _socket_pose_range(
+    baseline: dict[str, list[float]],
+    pos: tuple[float, float, float] | None,
+    rot: tuple[float, float, float] | None,
+) -> dict[str, list[float]]:
+    """Override enabled socket-pose components while retaining the task baseline for the rest."""
+    pose_range = deepcopy(baseline)
+    if pos is not None:
+        pose_range.update(_symmetric_range(pos, _AXIS_KEYS))
+    if rot is not None:
+        pose_range.update(_symmetric_range(rot, _ROT_KEYS))
+    return pose_range
 
 
 def _apply_controller_gains(dr: DomainRandCfg, events, track: TrackFn) -> None:
@@ -92,30 +183,39 @@ def _apply_joint_properties(dr: DomainRandCfg, env_cfg, events, track: TrackFn) 
     """Randomize arm joint armature and friction.
 
     Both act on the plant, which the decoupling-off OSC law never models, so they create a
-    genuine plant/controller mismatch. The Flexiv asset ships armature = friction = 0.0, so
-    these must be absolute values; a multiplicative scale would be a no-op.
+    genuine plant/controller mismatch. The Flexiv asset ships both properties at zero, so
+    the sampled values are assigned directly; a multiplicative scale would be a no-op.
     """
     if not (dr.joint_armature.enable or dr.joint_friction.enable):
         return
-    params = {
-        "asset_cfg": SceneEntityCfg("robot", joint_names=list(env_cfg.actions.arm_action.joint_names)),
-        "operation": "abs",
-        "distribution": "uniform",
-    }
+    asset_cfg = SceneEntityCfg("robot", joint_names=list(env_cfg.actions.arm_action.joint_names))
     if dr.joint_armature.enable:
-        params["armature_distribution_params"] = tuple(dr.joint_armature.initial)
-    if dr.joint_friction.enable:
-        params["friction_distribution_params"] = tuple(dr.joint_friction.initial)
-    events.randomize_joint_props = EventTerm(func=mdp.randomize_joint_parameters, mode="reset", params=params)
-    if dr.joint_armature.enable:
+        events.randomize_joint_armature = EventTerm(
+            func=mdp.randomize_joint_parameters,
+            mode="reset",
+            params={
+                "asset_cfg": asset_cfg,
+                "armature_distribution_params": tuple(dr.joint_armature.initial),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
         track(
-            "events.randomize_joint_props.params.armature_distribution_params",
+            "events.randomize_joint_armature.params.armature_distribution_params",
             tuple(dr.joint_armature.initial),
             tuple(dr.joint_armature.final),
         )
     if dr.joint_friction.enable:
+        events.randomize_joint_friction = EventTerm(
+            func=_randomize_joint_coulomb_friction,
+            mode="reset",
+            params={
+                "asset_cfg": asset_cfg,
+                "friction_distribution_params": tuple(dr.joint_friction.initial),
+            },
+        )
         track(
-            "events.randomize_joint_props.params.friction_distribution_params",
+            "events.randomize_joint_friction.params.friction_distribution_params",
             tuple(dr.joint_friction.initial),
             tuple(dr.joint_friction.final),
         )
@@ -143,6 +243,7 @@ def _apply_contact_properties(dr: DomainRandCfg, events, track: TrackFn) -> None
             term.mode = "reset"
             term.params["static_friction_range"] = tuple(knob.initial)
             term.params["dynamic_friction_range"] = tuple(knob.initial)
+            term.params["make_consistent"] = True
             for field in ("static_friction_range", "dynamic_friction_range"):
                 track(f"events.{term_name}.params.{field}", tuple(knob.initial), tuple(knob.final))
 
@@ -187,17 +288,24 @@ def _apply_reset_state(dr: DomainRandCfg, events, track: TrackFn) -> None:
 
     if not (dr.socket_pos.enable or dr.socket_rot.enable):
         return
-    initial = _pose_range(dr.socket_pos, dr.socket_rot)
+    baseline = events.randomize_socket_pose.params["pose_range"]
+    initial = _socket_pose_range(
+        baseline,
+        dr.socket_pos.initial if dr.socket_pos.enable else None,
+        dr.socket_rot.initial if dr.socket_rot.enable else None,
+    )
+    final = _socket_pose_range(
+        baseline,
+        dr.socket_pos.final if dr.socket_pos.enable else None,
+        dr.socket_rot.final if dr.socket_rot.enable else None,
+    )
     # The stock term caches its range at construction and would ignore the curriculum.
     events.randomize_socket_pose.func = mdp.AdrResetRootStateUniform
     events.randomize_socket_pose.params["pose_range"] = initial
     track(
         "events.randomize_socket_pose.params.pose_range",
         initial,
-        _pose_range(
-            dr.socket_pos.final if dr.socket_pos.enable else dr.socket_pos.initial,
-            dr.socket_rot.final if dr.socket_rot.enable else dr.socket_rot.initial,
-        ),
+        final,
     )
 
 
@@ -227,7 +335,12 @@ def _apply_disturbances(dr: DomainRandCfg, events, track: TrackFn) -> None:
 
 
 def _apply_observation_noise(dr: DomainRandCfg, env_cfg, track: TrackFn) -> None:
-    """Add correlated (per-episode bias) and uncorrelated (per-step) observation noise."""
+    """Add correlated (per-episode bias) and uncorrelated (per-step) observation noise.
+
+    Position signals use additive component noise. Rotation signals instead compose
+    bounded angular perturbations and re-encode the result, so their 6D representation
+    always describes a valid member of SO(3).
+    """
     noisy_terms = [(name, term) for name, term in _OBS_TERMS.items() if getattr(dr, name).enable]
     if not noisy_terms:
         return
@@ -235,6 +348,16 @@ def _apply_observation_noise(dr: DomainRandCfg, env_cfg, track: TrackFn) -> None
     for knob_name, term_name in noisy_terms:
         knob: SignalNoiseKnobCfg = getattr(dr, knob_name)
         obs_term = getattr(env_cfg.observations.policy, term_name)
+        address = f"observations.policy.{term_name}.noise"
+        if knob_name in ("obs_eef_rot", "obs_socket_rot"):
+            obs_term.noise = _Rotation6DNoiseModelCfg(
+                bias_halfwidth=knob.bias_initial,
+                noise_halfwidth=knob.noise_initial,
+            )
+            track(f"{address}.bias_halfwidth", knob.bias_initial, knob.bias_final)
+            track(f"{address}.noise_halfwidth", knob.noise_initial, knob.noise_final)
+            continue
+
         obs_term.noise = NoiseModelWithAdditiveBiasCfg(
             noise_cfg=UniformNoiseCfg(n_min=-knob.noise_initial, n_max=knob.noise_initial, operation="add"),
             # "abs", not "add": the model computes the new bias as func(old_bias), so "add" would
@@ -243,7 +366,6 @@ def _apply_observation_noise(dr: DomainRandCfg, env_cfg, track: TrackFn) -> None
             bias_noise_cfg=UniformNoiseCfg(n_min=-knob.bias_initial, n_max=knob.bias_initial, operation="abs"),
             sample_bias_per_component=True,
         )
-        address = f"observations.policy.{term_name}.noise"
         for field, initial, final in (
             ("noise_cfg.n_min", -knob.noise_initial, -knob.noise_final),
             ("noise_cfg.n_max", knob.noise_initial, knob.noise_final),

@@ -55,8 +55,10 @@ Runtime state (`monitor/data/`, `monitor/logs/`, `monitor/summary.json`, `result
   `NUM_GPUS=4 NUM_ENVS=1024 TAG_SUFFIX=${TAG_SUFFIX/g2e2048/g4e1024}` after a CUDA OOM).
 - Resume by hand (what the monitor does):
   `ATTEMPT=2 RESUME_FROM=<commit><run_tag>/displayport_insertion_rizon4s/<timestamp> MAX_ITERS=<left> ./submit.sh <variant> relaunch`.
-  `RESUME_FROM` is the swift folder holding `model_*.pt` + `adr_state.json` (for 2-GPU runs, the rank-0 folder,
-  the one with checkpoints). Use a commit >= 794f5d5909b or the resumed run collapses (HANDOFF.md, issue 9).
+  `RESUME_FROM` is the swift folder holding checkpoints and their
+  `model_N.adr_state.json` sidecars (for 2-GPU runs, the rank-0 folder). The paired
+  sidecar is authoritative; `adr_state.json` is only the mutable latest-state file used
+  for monitoring and legacy fallback.
 - Then register the sweep with the monitor: add to `monitor/sweeps.json`
 
       "my_sweep": {"path": "sweeps/my_sweep", "label": "short label", "description": "...",
@@ -73,7 +75,8 @@ Runtime state (`monitor/data/`, `monitor/logs/`, `monitor/summary.json`, `result
 
 A tick, per run in every sweep in `monitor/sweeps.json`:
 - queries osmo status; saves log tails and parses the latest learning iteration;
-- mirrors the run's swift folder (tfevents, `adr_state.json`, newest `model_*.pt`) into `monitor/data/`;
+- mirrors tfevents, the latest-state file, and the newest complete
+  `model_N.pt` + `model_N.adr_state.json` pair into `monitor/data/`;
 - queues a local rollout (`rollout.py`: nominal task, DR off, no at-goal spawns, 16 envs, one video) for each new
   checkpoint. The run's `agent.policy.*` / `env.actions.*` overrides are applied, so payload compensation and the
   std head match training;

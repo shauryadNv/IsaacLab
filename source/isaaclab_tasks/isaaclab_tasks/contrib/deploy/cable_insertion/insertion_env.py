@@ -57,6 +57,13 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         super().__init__(cfg, render_mode=render_mode, **kwargs)
 
         self._log_success_metrics: bool = bool(getattr(cfg, "log_success_metrics", True))
+        curriculum_cfg = getattr(getattr(self, "curriculum_manager", None), "cfg", None)
+        adr_cfg = (
+            curriculum_cfg.get("adr") if isinstance(curriculum_cfg, dict) else getattr(curriculum_cfg, "adr", None)
+        )
+        # Success is scheduler state, not logging state. Keep tracking it when ADR is
+        # active even if the user suppresses metric emission.
+        self._track_episode_success: bool = adr_cfg is not None
         self._success_socket_asset: str = getattr(cfg, "success_socket_asset", "dp_socket")
         self._success_plug_asset: str = getattr(cfg, "success_plug_asset", "dp_plug")
         self._success_pos_threshold: float = float(getattr(cfg, "success_pos_threshold", 0.003))
@@ -93,32 +100,68 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
         Args:
             checkpoint_path: Path to the checkpoint being resumed from.
         """
-        self._restore_step_counter(checkpoint_path)
+        step_restored = self._restore_step_counter(checkpoint_path)
+        adr_restored = False
+        scheduler = None
+        manager = getattr(self, "curriculum_manager", None)
+        if manager is not None and manager.cfg is not None:
+            cfg = manager.cfg
+            term_cfg = cfg.get("adr") if isinstance(cfg, dict) else getattr(cfg, "adr", None)
+            scheduler = getattr(term_cfg, "func", None)
+            restore = getattr(scheduler, "restore_from_checkpoint", None)
+            if callable(restore):
+                adr_restored = bool(restore(checkpoint_path))
+
+        if step_restored or adr_restored:
+            prepare_reset = getattr(scheduler, "prepare_resume_reset", None)
+            if callable(prepare_reset):
+                prepare_reset()
+            # The environment was initially reset using level-zero ranges before the
+            # checkpoint path was known. A full reset runs the curriculum interpolation
+            # terms at the restored level, then resamples every live randomized value
+            # before the resumed policy collects its first rollout.
+            self.reset()
+            # Reset-only diagnostics are not a training rollout and must not appear as
+            # its metrics in the first logger update.
+            self.extras.get("log", {}).clear()
+
+    def save_training_state(self, checkpoint_path: str) -> None:
+        """Persist environment-side state uniquely alongside an RSL-RL checkpoint.
+
+        Args:
+            checkpoint_path: Path of the checkpoint that was just written.
+        """
         manager = getattr(self, "curriculum_manager", None)
         if manager is None or manager.cfg is None:
             return
         cfg = manager.cfg
         term_cfg = cfg.get("adr") if isinstance(cfg, dict) else getattr(cfg, "adr", None)
-        restore = getattr(getattr(term_cfg, "func", None), "restore_from_checkpoint", None)
-        if callable(restore):
-            restore(checkpoint_path)
+        save = getattr(getattr(term_cfg, "func", None), "save_for_checkpoint", None)
+        if callable(save):
+            save(checkpoint_path)
 
-    def _restore_step_counter(self, checkpoint_path: str) -> None:
-        """Set ``common_step_counter`` to the resumed iteration times the steps per iteration.
+    def _restore_step_counter(self, checkpoint_path: str) -> bool:
+        """Restore ``common_step_counter`` to the checkpoint's rollout boundary.
 
-        Uses the at-goal reset term's ``num_steps_per_env`` so the restored counter matches
-        the iteration count that term's anneal is computed from. No-op without that term.
+        RSL-RL stores zero-based iteration ``N`` after completing rollout ``N``, so the
+        checkpoint represents ``(N + 1) * num_steps_per_env`` environment steps. No-op
+        when the at-goal reset term does not provide ``num_steps_per_env``.
+
+        Returns:
+            Whether the step counter was restored.
         """
         term = getattr(self.cfg.events, "reset_plug_curriculum", None)
         steps_per_iter = int((term.params if term is not None else {}).get("num_steps_per_env", 0) or 0)
         if steps_per_iter <= 0:
-            return
+            return False
         iteration = int(torch.load(checkpoint_path, map_location="cpu", weights_only=False).get("iter", 0))
-        self.common_step_counter = iteration * steps_per_iter
+        completed_rollouts = iteration + 1
+        self.common_step_counter = completed_rollouts * steps_per_iter
         print(
             f"[INFO] Restored common_step_counter={self.common_step_counter} "
-            f"(iteration {iteration} x {steps_per_iter} steps) from '{checkpoint_path}'."
+            f"({completed_rollouts} completed rollouts x {steps_per_iter} steps) from '{checkpoint_path}'."
         )
+        return True
 
     def _compute_success(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute per-env success mask, mate-point distance, and keypoint distance."""
@@ -164,9 +207,12 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
 
     def step(self, action: torch.Tensor):
         obs_buf, reward_buf, terminated, time_outs, extras = super().step(action)
-        if getattr(self, "_log_success_metrics", False):
+        track_success = getattr(self, "_track_episode_success", False)
+        log_success = getattr(self, "_log_success_metrics", False)
+        if track_success or log_success:
             is_success, pos_error, keypoint_dist = self._compute_success()
             self.episode_succeeded |= is_success
+        if log_success:
             log = self.extras.setdefault("log", {})
             log["Metrics/success_rate"] = is_success.float().mean()
             log["Metrics/plug_socket_pos_error_m"] = pos_error.mean()
@@ -175,9 +221,16 @@ class DisplayportInsertionEnv(ManagerBasedRLEnv):
 
     def _reset_idx(self, env_ids):
         terminal_success = None
-        if getattr(self, "_log_success_metrics", False):
+        track_success = getattr(self, "_track_episode_success", False)
+        log_success = getattr(self, "_log_success_metrics", False)
+        if track_success or log_success:
             is_success, _, _ = self._compute_success()
-            terminal_success = is_success[env_ids].float().mean()
+            # ``super()._reset_idx`` runs the curriculum before changing scene
+            # state, so include success reached on this terminal physics step in
+            # the sticky episode result that the curriculum consumes.
+            self.episode_succeeded[env_ids] |= is_success[env_ids]
+            if log_success:
+                terminal_success = is_success[env_ids].float().mean()
 
         # The curriculum manager runs inside the parent reset and reads
         # ``episode_succeeded``, so it must stay valid until after this call.

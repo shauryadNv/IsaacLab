@@ -84,6 +84,12 @@ class NoisyDelayedOperationalSpaceControllerAction(DeployOperationalSpaceControl
             self._command_history[0] = command
             command = self._command_history[self._latency_steps, self._env_index]
 
+        # Do not invent a post-noise clamp here. OperationalSpaceControllerActionCfg.clip
+        # is keyed like a joint-space limit, while this vector may mix pose, wrench, and
+        # impedance targets; the upstream OSC term does not expose a resolved per-command
+        # clip tensor. The DisplayPort config leaves that field unset. Delegating preserves
+        # the base action contract instead of silently applying one scalar bound to values
+        # with different meanings and units.
         super().process_actions(command)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:

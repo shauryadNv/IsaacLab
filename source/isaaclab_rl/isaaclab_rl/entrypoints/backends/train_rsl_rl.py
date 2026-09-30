@@ -52,6 +52,42 @@ with contextlib.suppress(ImportError):
     import isaaclab_tasks_experimental  # noqa: F401
 
 
+def _enable_training_state_checkpointing(runner, env) -> None:
+    """Save optional environment training state after every RSL-RL checkpoint.
+
+    Environments may expose ``save_training_state(checkpoint_path)`` for state that
+    RSL-RL does not own, such as a domain-randomization curriculum. Wrapping the
+    runner's save method keeps that state paired with each periodic and final
+    checkpoint instead of maintaining one mutable sidecar for the whole run.
+    """
+    save_training_state = getattr(env.unwrapped, "save_training_state", None)
+    if not callable(save_training_state):
+        return
+
+    runner_save = runner.save
+
+    def save_with_training_state(path: str, infos: dict | None = None) -> None:
+        runner_save(path, infos=infos)
+        save_training_state(path)
+
+    runner.save = save_with_training_state
+
+
+def _advance_runner_after_checkpoint_load(runner) -> None:
+    """Start a resumed RSL-RL run after the checkpoint's completed iteration.
+
+    RSL-RL stores the zero-based iteration that was just completed, but its load method
+    restores that value as the next loop index. Advancing once prevents the completed
+    rollout from being repeated and keeps checkpoint names monotonic across resumes.
+    """
+    completed_iteration = int(runner.current_learning_iteration)
+    runner.current_learning_iteration = completed_iteration + 1
+    print(
+        f"[INFO]: Checkpoint completed learning iteration {completed_iteration}; "
+        f"resuming at {runner.current_learning_iteration}."
+    )
+
+
 def _check_rsl_rl_version() -> str:
     """Check that the installed RSL-RL version is supported."""
     installed_version = metadata.version("rsl-rl-lib")
@@ -220,6 +256,8 @@ def _run(args_cli: argparse.Namespace) -> None:
                 raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
             report_activity(None)
 
+            _enable_training_state_checkpointing(runner, env)
+
             # configure_seed must run after runner construction so torch determinism does not disturb its initialization
             if args_cli.deterministic:
                 configure_seed(env_cfg.seed, torch_deterministic=True)
@@ -228,6 +266,7 @@ def _run(args_cli: argparse.Namespace) -> None:
             if args_cli.checkpoint:
                 print(f"[INFO]: Loading model checkpoint from: {resume_path}")
                 runner.load(resume_path)
+                _advance_runner_after_checkpoint_load(runner)
                 # The optimizer state (including its learning rate) is restored, but PPO keeps
                 # its own ``learning_rate`` that the adaptive schedule writes back into the
                 # optimizer after the first KL check, and that attribute restarts at the config

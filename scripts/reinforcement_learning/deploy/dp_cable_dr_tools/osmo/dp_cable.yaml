@@ -212,17 +212,30 @@ workflow:
         # ./isaaclab.sh -p -c "import gymnasium as gym; import isaaclab_tasks; print('isaaclab_tasks file:', isaaclab_tasks.__file__); gym.spec('Isaac-Deploy-DisplayportInsertion-{{robot_type_task}}-ROS-Inference-v0'); print('Registered task:', 'Isaac-Deploy-DisplayportInsertion-{{robot_type_task}}-ROS-Inference-v0')"
         ./isaaclab.sh -p -c "import gymnasium as gym; import isaaclab_tasks; print('isaaclab_tasks file:', isaaclab_tasks.__file__); gym.spec('{{task_prefix}}{{robot_type_task}}-ROS-Inference{{task_version}}'); print('Registered task:', '{{task_prefix}}{{robot_type_task}}-ROS-Inference{{task_version}}')"
 
-        # Optional resume: pull a previous attempt's run folder from swift and continue from its
-        # newest checkpoint. adr_state.json sits beside the checkpoint, so the DR curriculum level
-        # is restored too (via the env's load_training_state hook).
+        # Optional resume: pull a previous attempt's run folder from swift and continue
+        # from its newest complete checkpoint/ADR-sidecar pair. A preemption can occur
+        # between those two writes, so selecting the newest .pt alone is unsafe.
         RESUME_ARG=""
         if [ -n "{{resume_from}}" ]; then
           RESUME_URL="https://pdx.s8k.io/v1/AUTH_team-isaac/datasets/shauryad/displayport_insertion_{{robot_type}}/{{resume_from}}/"
           mkdir -p /tmp/resume_ckpt
           (cd /tmp/resume_ckpt && wget -q -r -np -nH -e robots=off -R "index.html*" "${RESUME_URL}")
-          RESUME_CKPT=$(find /tmp/resume_ckpt -name 'model_*.pt' | sort -V | tail -1)
+          RESUME_CKPT=$(
+            while IFS= read -r candidate; do
+              sidecar="${candidate%.pt}.adr_state.json"
+              if [ -f "${sidecar}" ]; then
+                echo "${candidate}"
+                break
+              fi
+            done < <(find /tmp/resume_ckpt -name 'model_*.pt' | sort -Vr)
+          )
+          if [ -z "${RESUME_CKPT}" ] && ! find /tmp/resume_ckpt -name 'model_*.adr_state.json' -print -quit | grep -q .; then
+            # Compatibility fallback for checkpoints written before paired ADR sidecars
+            # existed. The environment validates the mutable latest-state file.
+            RESUME_CKPT=$(find /tmp/resume_ckpt -name 'model_*.pt' | sort -V | tail -1)
+          fi
           if [ -z "${RESUME_CKPT}" ]; then
-            echo "[ERROR] No model_*.pt found under ${RESUME_URL}"
+            echo "[ERROR] No complete model_*.pt / model_*.adr_state.json pair found under ${RESUME_URL}"
             exit 30
           fi
           echo "Resuming from ${RESUME_CKPT}"

@@ -12,7 +12,11 @@ range a curriculum widens at runtime.
 
 from __future__ import annotations
 
-__all__ = ["AdrResetRootStateUniform", "AdrRigidBodyMaterial", "randomize_osc_task_gains"]
+__all__ = [
+    "AdrResetRootStateUniform",
+    "AdrRigidBodyMaterial",
+    "randomize_osc_task_gains",
+]
 
 from typing import TYPE_CHECKING
 
@@ -127,6 +131,63 @@ class randomize_osc_task_gains(ManagerTermBase):
         self._osc._motion_d_gains_task[env_ids] = d_gains
 
 
+class _randomize_joint_coulomb_friction(ManagerTermBase):
+    """Randomize dry joint friction without changing passive viscous damping.
+
+    PhysX exposes separate dimensionless static and dynamic Coulomb-friction
+    coefficients. This term gives both the same sampled value. Newton exposes one
+    absolute dry-friction value [N or N·m, depending on joint type], which receives the
+    same sample. Passive viscous friction is deliberately left untouched.
+
+    Args:
+        asset_cfg: Articulation and joints whose dry friction is randomized.
+        friction_distribution_params: Uniform ``(low, high)`` dry-friction range.
+            PhysX interprets values as dimensionless static and dynamic coefficients;
+            Newton interprets them as absolute force or torque [N or N·m, depending on
+            joint type].
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset = env.scene[self.asset_cfg.name]
+        self._is_physx = "newton" not in env.sim.physics_manager.__name__.lower()
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        env_ids: torch.Tensor | None,
+        asset_cfg: SceneEntityCfg,
+        friction_distribution_params: tuple[float, float],
+    ) -> None:
+        low, high = map(float, friction_distribution_params)
+        if low < 0.0 or high < low:
+            raise ValueError(
+                f"friction_distribution_params must be non-negative and ordered, got {friction_distribution_params}."
+            )
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.asset.device)
+        elif isinstance(env_ids, slice):
+            env_ids = torch.arange(self.num_envs, device=self.asset.device)[env_ids]
+
+        joint_ids = self.asset_cfg.joint_ids
+        num_joints = self.asset.num_joints if isinstance(joint_ids, slice) else len(joint_ids)
+        dry_friction = math_utils.sample_uniform(
+            low,
+            high,
+            (len(env_ids), num_joints),
+            device=self.asset.device,
+        )
+        write_kwargs = {
+            "joint_friction_coeff": dry_friction,
+            "joint_ids": joint_ids,
+            "env_ids": env_ids,
+        }
+        if self._is_physx:
+            write_kwargs["joint_dynamic_friction_coeff"] = dry_friction
+        self.asset.write_joint_friction_coefficient_to_sim_index(**write_kwargs)
+
+
 class AdrRigidBodyMaterial(ManagerTermBase):
     """Rigid-body material randomization whose sampling range may change at runtime.
 
@@ -160,7 +221,7 @@ class AdrRigidBodyMaterial(ManagerTermBase):
         restitution_range: tuple[float, float],
         num_buckets: int,
         asset_cfg,
-        make_consistent: bool = False,
+        make_consistent: bool = True,
     ) -> None:
         params = {
             "static_friction_range": static_friction_range,

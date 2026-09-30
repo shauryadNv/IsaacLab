@@ -85,14 +85,16 @@ class SignalNoiseKnobCfg:
     Follows the decomposition used by DextrAH-G and ADEPT: a *correlated* component
     sampled once per episode and held (a calibration-style bias), plus an
     *uncorrelated* component resampled every step (sensor jitter). Both are uniform
-    and symmetric, expressed as a half-width in the signal's own units.
+    and symmetric, expressed as a half-width in the signal's own units. Euclidean
+    signals are sampled per component. For rotation observations, the half-width is
+    the maximum angular magnitude [rad] about a uniformly sampled axis.
     """
 
     enable: bool = False
     """Whether this noise is applied at all."""
 
     bias_initial: float = 0.0
-    """Per-episode bias half-width at ADR level 0. Sampled independently per component."""
+    """Per-episode bias half-width at ADR level 0."""
 
     bias_final: float = 0.0
     """Per-episode bias half-width at the maximum ADR level."""
@@ -172,7 +174,7 @@ class DomainRandCfg:
     osc_stiffness: ScalarKnobCfg = ScalarKnobCfg(initial=(1.0, 1.0), final=(0.5, 1.0), distribution="log_uniform")
     """Multiplicative scale on the OSC task-space stiffness, sampled per env and axis at reset.
 
-    With ``inertial_dynamics_decoupling=False`` these gains are in N/m and N*m/rad. The
+    With ``inertial_dynamics_decoupling=False`` these gains are in N/m and N·m/rad. The
     reference papers randomize over x[0.5, 2], but the nominal translational gains sit at the
     edge of stable plug-socket contact: any translational stiffening (1.1x) makes some envs'
     articulation blow up during insertion, while softer gains are stable. So the range is
@@ -203,26 +205,17 @@ class DomainRandCfg:
     gear ratio squared, so proximal joints can carry O(0.1) kg*m^2.
     """
 
-    joint_friction: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.7, 0.8))
-    """Absolute arm joint static friction effort [N*m], sampled per env and joint at reset.
+    joint_friction: ScalarKnobCfg = ScalarKnobCfg(initial=(0.0, 0.0), final=(0.0, 0.05))
+    """Arm joint dry friction sampled per environment and joint at reset.
 
-    The sim baseline is 0.0 while real harmonic drives have meaningful friction. Applied
-    with ``operation="abs"`` for the same reason as :attr:`joint_armature`.
+    PhysX interprets this range as dimensionless static and dynamic Coulomb-friction
+    coefficients. Newton interprets it as absolute force or torque [N or N·m, depending
+    on joint type]. Passive viscous damping stays at its asset value, so this knob does
+    not conflate properties with different units or velocity dependence.
 
-    Measured with a scripted push at nominal OSC gains, as % of frictionless displacement:
-
-    ============  ======================  ==================
-    friction      moderate action (0.3)   full action (1.0)
-    ============  ======================  ==================
-    0.35-0.40     36%                     76%
-    0.48          24%                     70%
-    0.70-0.80     0.5% (frozen)           58%
-    1.0           0.4% (frozen)           48%
-    ============  ======================  ==================
-
-    So at this final endpoint small corrective moves stall and the policy must use large
-    commands to break stiction. Around 0.5 N*m keeps moderate actions partly effective;
-    2-5 N*m freezes the arm outright.
+    The conservative PhysX endpoint keeps the scripted insertion feasible. Larger
+    coefficient ranges can prevent the soft task-impedance controller from reaching the
+    socket and should be calibrated separately for a different controller or backend.
     """
 
     # ------------------------------------------------------------------
@@ -306,10 +299,16 @@ class DomainRandCfg:
     """
 
     obs_eef_rot: SignalNoiseKnobCfg = SignalNoiseKnobCfg(bias_final=math.radians(2.0), noise_final=0.0)
-    """Noise on the observed end-effector 6D rotation, as a half-width on each component."""
+    """Angular noise on the observed end-effector rotation [rad].
+
+    The perturbation is composed on SO(3) and then encoded as a valid 6D rotation.
+    """
 
     obs_socket_rot: SignalNoiseKnobCfg = SignalNoiseKnobCfg(bias_final=math.radians(2.0), noise_final=0.0)
-    """Noise on the observed socket 6D rotation, as a half-width on each component."""
+    """Angular noise on the observed socket rotation [rad].
+
+    The perturbation is composed on SO(3) and then encoded as a valid 6D rotation.
+    """
 
     # ------------------------------------------------------------------
     # Actions
@@ -353,8 +352,8 @@ class DomainRandCfg:
     after one resampling interval.
 
     Also the dominant *rotational* disturbance: the plug hangs ~19 cm below the flange, so
-    0.6 N is ~0.1 N*m at the wrist. A separate torque knob was dropped because realistic
-    torques (~0.01 N*m) were indistinguishable from none.
+    0.6 N is ~0.1 N·m at the wrist. A separate torque knob was dropped because realistic
+    torques (~0.01 N·m) were indistinguishable from none.
     """
 
     wrench_interval_s: tuple[float, float] = (0.5, 2.0)
