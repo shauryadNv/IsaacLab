@@ -1,17 +1,23 @@
-# DisplayPort task-space DR: handoff (audited 2026-09-30 00:51 UTC)
+# DisplayPort task-space DR: handoff (audited 2026-09-30 01:47 UTC)
 
 Domain randomization (DR) with a success-driven curriculum (ADR) for the DisplayPort cable-insertion
 task-space env (Flexiv Rizon 4S, operational-space control), aimed at sim-to-real transfer.
 
 - **Code**: branch `shauryad/dp_cable_dr` (fork `github.com/shauryadNv/IsaacLab`), 13 commits on top of
   `3065d9d969c` (`shauryad/dp_cable_ship`). Tooling: this directory. Runbook: [README.md](README.md).
-- **Training audit**: 109 canonical variants: 72 running, 2 pending and 35 inactive.
+- **Corrected follow-up code**: branch `curiep/dp-cable-adr-followup`; `ddda77447e` fixes ADR, randomization,
+  observation-noise, and resume semantics, and `333fc839da` adds the controlled follow-up sweep.
+- **Training audit**: the original 109 canonical variants have 74 running, 0 pending and 35 inactive.
   Every one of the 34 previously reported HIGH-priority queued variants had been
   submitted; 33 were later canceled and one remained running. Two canceled lineages
   already had active replacements. Do not bulk-resubmit the inactive set while the
   existing 15-minute monitor owns relaunches.
   A cron job on the original machine monitors them every 15 min, relaunches dead runs, and evaluates
   every new checkpoint. Dashboard at `http://localhost:8765` (via `ssh -L 8765:localhost:8765`).
+- **Corrected follow-up runs**: four HIGH-priority seed-42 controls were submitted as
+  `isaaclab_train_rsl_rl-{1696..1699}`. They compare DR off, corrected all-on ADR with global versus
+  state-dependent policy standard deviation, and corrected dry joint friction. Additional seeds are gated on
+  healthy startup and telemetry from these four runs.
 - **Main results so far**:
   1. With the near-goal curriculum OFF, 18/22 single-knob variants reach >= 0.9 terminal success with their
      knob at ADR level 50 (full range) by iteration ~300.
@@ -21,6 +27,10 @@ task-space env (Flexiv Rizon 4S, operational-space control), aimed at sim-to-rea
   4. Two blockers were found and fixed: resumed runs collapsed (learning-rate bug), and the plug sagged
      under zero action (payload gravity compensation added).
   5. One blocker is open: the per-state policy std blows up. A global std fixes it in the A/B so far.
+
+The original success counts remain useful for prioritizing experiments, but they are not a corrected reproduction:
+several old variants used incorrect grasp sampling, socket-baseline, rotation-noise, or joint-friction semantics.
+Use runs 1696-1699 to validate conclusions before expanding the sweep.
 
 ---------------------------------------------------------------------------------------------------------
 
@@ -172,6 +182,7 @@ Swift artifacts: `swift://pdx.s8k.io/AUTH_team-isaac/datasets/shauryad/displaypo
 | `dr_sweep_noatgoal_osccap` | 4 | OFF | off | per-state | capped | 1324-1327 | 1 / 3 |
 | `dr_sweep_comp_osccap` | 4 | ON | on | per-state | capped | 1328-1331 | 1 / 3 |
 | `dr_sweep_noatgoal_comp_osccap` | 4 | OFF | on | per-state | capped | 1332-1335 | 2 / 2 |
+| `dr_sweep_noatgoal_comp_gstd_osccap` | 7 (4 submitted) | OFF | on | global + A/B | capped | 1696-1699 | 0 / 4 |
 
 - **Variants (22).** `all_off`, `all_on`, 18 single knobs (1-18; `mating_friction` with `final=[0.001,0.5]`),
   `grp_controller`, `grp_sense_act`.
