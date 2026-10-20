@@ -115,6 +115,13 @@ class NewtonCollisionPipelineCfg:
     Defaults to ``True`` (same as Newton's default).
     """
 
+    contact_matching: Literal["disabled", "latest", "sticky"] = "disabled"
+    """Mode used to associate rigid contacts across collision passes.
+
+    Select ``"latest"`` or ``"sticky"`` when a solver retains rigid-contact
+    history. Non-disabled modes allocate matching state in the contact buffer.
+    """
+
     rigid_contact_max: int | None = None
     """Maximum number of rigid contacts to allocate.
 

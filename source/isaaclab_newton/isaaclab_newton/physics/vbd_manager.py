@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from newton import Model
+from newton import Contacts, Control, Model, State, eval_ik
 from newton.solvers import SolverVBD
 
 from .newton_manager import NewtonManager
@@ -64,17 +64,59 @@ class NewtonVBDManager(NewtonManager):
         ]
 
     @classmethod
+    def _validate_solver_compatibility(cls, solver_cfg: VBDSolverCfg) -> None:
+        """Validate settings whose availability depends on the Newton version."""
+        solver_kwargs = cls._filter_solver_kwargs(SolverVBD, solver_cfg)
+        required = {
+            "rigid_compliant_alm": solver_cfg.rigid_compliant_alm,
+            "rigid_contact_history": solver_cfg.rigid_contact_history,
+            "rigid_body_contact_buffer_size": solver_cfg.rigid_body_contact_buffer_size,
+        }
+        missing = [name for name in required if name not in solver_kwargs]
+        if missing:
+            raise RuntimeError(
+                "The installed Newton SolverVBD does not support required options: " + ", ".join(sorted(missing))
+            )
+
+    @classmethod
+    def _validate_contact_history_config(cls, solver_cfg: VBDSolverCfg) -> None:
+        """Require collision matching when rigid-contact history is enabled."""
+        collision_cfg = NewtonManager._collision_cfg
+        contact_matching = getattr(collision_cfg, "contact_matching", "disabled")
+        if solver_cfg.rigid_contact_history and contact_matching not in ("latest", "sticky"):
+            raise ValueError(
+                "VBDSolverCfg.rigid_contact_history requires "
+                "NewtonCollisionPipelineCfg.contact_matching='latest' or 'sticky'."
+            )
+
+    @classmethod
     def _create_solver(cls, model: Model, solver_cfg: VBDSolverCfg) -> SolverVBD:
         """Construct the configured VBD solver."""
+        cls._validate_solver_compatibility(solver_cfg)
         return SolverVBD(model, **cls._filter_solver_kwargs(SolverVBD, solver_cfg))
 
     @classmethod
     def _build_solver(cls, model: Model, solver_cfg: VBDSolverCfg) -> None:
         """Construct VBD and configure its base-manager state."""
-        NewtonManager._solver = cls._create_solver(model, solver_cfg)
+        cls._validate_solver_compatibility(solver_cfg)
+        cls._validate_contact_history_config(solver_cfg)
         NewtonManager._use_single_state = False
         NewtonManager._needs_collision_pipeline = True
         NewtonManager._supports_rigid_body_force_input = not solver_cfg.integrate_with_external_rigid_solver
+        # SolverVBD sizes its persistent history from the model contact capacity.
+        # Publish collision capacity and matching buffers before construction so
+        # CUDA graph capture never records a history-buffer resize.
+        cls._initialize_contacts()
+        NewtonManager._solver = cls._create_solver(model, solver_cfg)
+
+    @classmethod
+    def _step_solver(
+        cls, state_0: State, state_1: State, control: Control, contacts: Contacts | None, substep_dt: float
+    ) -> None:
+        """Run VBD and recover reduced articulation state from solved body state."""
+        super()._step_solver(state_0, state_1, control, contacts, substep_dt)
+        if cls._model.joint_count > 0:
+            eval_ik(cls._model, state_1, state_1.joint_q, state_1.joint_qd)
 
     @classmethod
     def _solver_specific_clear(cls) -> None:

@@ -207,6 +207,13 @@ def test_vbd_solver_force_input_capability(monkeypatch, external_rigid_solver):
     physics = importlib.import_module("isaaclab_newton.physics")
     solver = object()
     monkeypatch.setattr(physics.NewtonVBDManager, "_create_solver", lambda model, cfg: solver)
+    monkeypatch.setattr(physics.NewtonVBDManager, "_validate_solver_compatibility", lambda cfg: None)
+    monkeypatch.setattr(physics.NewtonVBDManager, "_initialize_contacts", lambda: None)
+    monkeypatch.setattr(
+        NewtonManager,
+        "_collision_cfg",
+        physics.NewtonCollisionPipelineCfg(contact_matching="disabled"),
+    )
     monkeypatch.setattr(NewtonManager, "_solver", None)
     monkeypatch.setattr(NewtonManager, "_use_single_state", True)
     monkeypatch.setattr(NewtonManager, "_needs_collision_pipeline", False)
@@ -217,6 +224,128 @@ def test_vbd_solver_force_input_capability(monkeypatch, external_rigid_solver):
 
     assert NewtonManager._solver is solver
     assert NewtonManager._supports_rigid_body_force_input is not external_rigid_solver
+
+
+def test_vbd_initializes_contacts_before_constructing_solver(monkeypatch):
+    """VBD should observe pipeline-published contact capacity at construction."""
+    physics = importlib.import_module("isaaclab_newton.physics")
+    events = []
+    solver = object()
+    model = SimpleNamespace(rigid_contact_max=0)
+
+    def initialize_contacts():
+        events.append("contacts")
+        assert NewtonManager._model is model
+        model.rigid_contact_max = 4096
+        NewtonManager._contacts = SimpleNamespace(rigid_contact_max=4096)
+
+    def create_solver(input_model, cfg):
+        events.append("solver")
+        assert input_model is model
+        assert input_model.rigid_contact_max == 4096
+        assert NewtonManager._contacts.rigid_contact_max == 4096
+        return solver
+
+    monkeypatch.setattr(physics.NewtonVBDManager, "_initialize_contacts", initialize_contacts)
+    monkeypatch.setattr(physics.NewtonVBDManager, "_create_solver", create_solver)
+    monkeypatch.setattr(physics.NewtonVBDManager, "_validate_solver_compatibility", lambda cfg: None)
+    monkeypatch.setattr(NewtonManager, "_model", model)
+    monkeypatch.setattr(NewtonManager, "_solver", None)
+    monkeypatch.setattr(NewtonManager, "_contacts", None)
+    monkeypatch.setattr(NewtonManager, "_needs_collision_pipeline", False)
+    monkeypatch.setattr(
+        NewtonManager,
+        "_collision_cfg",
+        physics.NewtonCollisionPipelineCfg(contact_matching="latest"),
+    )
+
+    physics.NewtonVBDManager._build_solver(model, physics.VBDSolverCfg(rigid_contact_history=True))
+
+    assert events == ["contacts", "solver"]
+    assert NewtonManager._solver is solver
+
+
+def test_vbd_rejects_contact_history_without_matching_before_allocation(monkeypatch):
+    """Contact history without matching should fail before buffer allocation."""
+    physics = importlib.import_module("isaaclab_newton.physics")
+    events = []
+
+    monkeypatch.setattr(physics.NewtonVBDManager, "_validate_solver_compatibility", lambda cfg: None)
+    monkeypatch.setattr(physics.NewtonVBDManager, "_initialize_contacts", lambda: events.append("contacts"))
+    monkeypatch.setattr(NewtonManager, "_collision_cfg", physics.NewtonCollisionPipelineCfg())
+
+    with pytest.raises(ValueError, match="contact_matching"):
+        physics.NewtonVBDManager._build_solver(
+            object(),
+            physics.VBDSolverCfg(rigid_contact_history=True),
+        )
+
+    assert events == []
+
+
+@pytest.mark.parametrize("joint_count", [0, 3])
+def test_vbd_recovers_joint_state_after_solver_step(monkeypatch, joint_count):
+    """VBD should recover generalized coordinates after solving body state."""
+    physics = importlib.import_module("isaaclab_newton.physics")
+    vbd_module = importlib.import_module("isaaclab_newton.physics.vbd_manager")
+    events = []
+    state_0 = object()
+    state_1 = SimpleNamespace(joint_q=object(), joint_qd=object())
+    control = object()
+    contacts = object()
+    model = SimpleNamespace(joint_count=joint_count)
+
+    class Solver:
+        def step(self, input_state, output_state, input_control, input_contacts, dt):
+            events.append(("step", input_state, output_state, input_control, input_contacts, dt))
+
+    def recover_joint_state(input_model, input_state, joint_q, joint_qd):
+        events.append(("eval_ik", input_model, input_state, joint_q, joint_qd))
+
+    monkeypatch.setattr(NewtonManager, "_solver", Solver())
+    monkeypatch.setattr(physics.NewtonVBDManager, "_model", model)
+    monkeypatch.setattr(vbd_module, "eval_ik", recover_joint_state)
+
+    physics.NewtonVBDManager._step_solver(state_0, state_1, control, contacts, 0.001)
+
+    assert events[0] == ("step", state_0, state_1, control, contacts, 0.001)
+    if joint_count:
+        assert events[1] == ("eval_ik", model, state_1, state_1.joint_q, state_1.joint_qd)
+    else:
+        assert len(events) == 1
+
+
+def test_vbd_forwards_history_controls_to_compatible_newton(monkeypatch):
+    """Compliant ALM, history, and capacity should reach SolverVBD."""
+    physics = importlib.import_module("isaaclab_newton.physics")
+    vbd_module = importlib.import_module("isaaclab_newton.physics.vbd_manager")
+
+    class CompatibleSolver:
+        def __init__(
+            self,
+            model,
+            *,
+            rigid_compliant_alm=True,
+            rigid_contact_history=False,
+            rigid_body_contact_buffer_size=64,
+        ):
+            self.model = model
+            self.values = (rigid_compliant_alm, rigid_contact_history, rigid_body_contact_buffer_size)
+
+    monkeypatch.setattr(vbd_module, "SolverVBD", CompatibleSolver)
+
+    model = object()
+    solver = physics.NewtonVBDManager._create_solver(
+        model,
+        physics.VBDSolverCfg(
+            rigid_compliant_alm=True,
+            rigid_contact_history=True,
+            rigid_body_contact_buffer_size=1024,
+        ),
+    )
+
+    assert solver.model is model
+    assert solver.values == (True, True, 1024)
 
 
 def test_vbd_rebuilds_particle_bvh_before_physics_step(monkeypatch):

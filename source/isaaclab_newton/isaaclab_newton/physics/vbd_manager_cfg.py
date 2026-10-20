@@ -27,6 +27,9 @@ class VBDSolverCfg(NewtonSolverCfg):
     iterations: int = 10
     """Number of VBD iterations per substep."""
 
+    friction_epsilon: float = 1.0e-2
+    """Relative tangential speed used to regularize contact friction [m/s]."""
+
     integrate_with_external_rigid_solver: bool = False
     """Whether an external solver integrates rigid bodies."""
 
@@ -58,8 +61,21 @@ class VBDSolverCfg(NewtonSolverCfg):
     particle_rest_shape_contact_exclusion_radius: float = 0.0
     """Rest-shape separation threshold for filtering contacts [m]."""
 
-    rigid_contact_k_start: float = 1.0e2
-    """Initial stiffness seed for rigid-body contacts [N/m]."""
+    rigid_compliant_alm: bool = True
+    """Whether rigid joints and contacts use Newton's compliant-ALM formulation."""
+
+    rigid_contact_history: bool = False
+    """Whether to warm-start matched rigid contacts across simulation steps.
+
+    This requires :attr:`~isaaclab_newton.physics.NewtonCollisionPipelineCfg.contact_matching`
+    to be ``"latest"`` or ``"sticky"``.
+    """
+
+    rigid_contact_k_start: float | None = None
+    """Legacy rigid-contact penalty seed [N/m], or ``None`` to use Newton's default."""
+
+    rigid_body_contact_buffer_size: int = 64
+    """Maximum number of body-body contacts stored per rigid body."""
 
     rigid_body_particle_contact_buffer_size: int = 256
     """Per-body capacity of the particle, edge, and face soft-contact list.
