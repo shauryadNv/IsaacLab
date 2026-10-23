@@ -145,13 +145,15 @@ class FrankaCubeStackVisuomotorCosmosEnvCfg(stack_ik_rel_visuomotor_env_cfg.Fran
             ),
         )
 
-        # Set settings for camera rendering
-        self.num_rerenders_on_reset = 1
+        # Set settings for camera rendering. Anti-aliasing must stay enabled: with "Off" the renderer skips its
+        # denoising/accumulation and the camera images and Kit viewport show heavy per-pixel noise. DLAA is temporal,
+        # so re-render on reset to let it settle.
+        self.num_rerenders_on_reset = 3
         for camera_cfg in (self.scene.table_cam, self.scene.wrist_cam):
             set_isaac_rtx_global_settings(
                 camera_cfg.renderer_cfg,
                 dome_light_upper_lower_strategy=4,
-                antialiasing_mode="Off",
+                antialiasing_mode="DLAA",
             )
 
         # List of image observations in policy observations

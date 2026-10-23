@@ -1,0 +1,1 @@
+* Fixed heavy rendering noise in the Cosmos Franka stack visuomotor task by using DLAA anti-aliasing instead of turning it off, and re-rendering three times on reset to match the other Franka visuomotor task.
