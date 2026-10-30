@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import warp as wp
@@ -30,6 +31,8 @@ class NewtonFeatherPGSManager(NewtonManager):
 
     _builder_attribute_solvers = (SolverFeatherPGS,)
     _ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS = 512
+    _row_watermark_capacities: dict[str, int] = {}
+    _row_watermark_enabled = False
     _row_watermark_log_step = 0
 
     @classmethod
@@ -50,10 +53,15 @@ class NewtonFeatherPGSManager(NewtonManager):
         NewtonManager._use_single_state = False
         NewtonManager._needs_collision_pipeline = True
         NewtonManager._supports_rigid_body_force_input = True
+        cls._row_watermark_enabled = bool(solver_cfg.row_watermark)
+        cls._row_watermark_capacities = {
+            "dense": int(solver_cfg.dense_max_constraints),
+            "mf": int(solver_cfg.mf_max_constraints),
+        }
         cls._row_watermark_log_step = 0
         cfg = PhysicsManager._cfg
-        if cfg is not None and cfg.debug_mode and getattr(cls._solver, "_row_watermark", False):
-            logger.info(
+        if cfg is not None and cfg.debug_mode and cls._row_watermark_enabled:
+            logger.warning(
                 "FeatherPGS constraint-row telemetry enabled: interval_manager_steps=%d, dense=%d, mf=%d, "
                 "cuda_graph=%s, double_buffer=%s, parallel_streams=%s",
                 cls._ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS,
@@ -88,7 +96,7 @@ class NewtonFeatherPGSManager(NewtonManager):
         """Report row watermarks every configured number of physics-manager steps."""
         cfg = PhysicsManager._cfg
         solver = NewtonManager._solver
-        if cfg is None or not cfg.debug_mode or solver is None or not getattr(solver, "_row_watermark", False):
+        if cfg is None or not cfg.debug_mode or solver is None or not cls._row_watermark_enabled:
             return
         cls._row_watermark_log_step += 1
         if cls._row_watermark_log_step % cls._ROW_WATERMARK_LOG_INTERVAL_MANAGER_STEPS == 0:
@@ -96,20 +104,52 @@ class NewtonFeatherPGSManager(NewtonManager):
 
     @classmethod
     def _log_constraint_row_watermarks(cls) -> None:
-        """Report opt-in constraint-row watermarks outside graph capture."""
+        """Report and validate opt-in constraint-row watermarks outside graph capture."""
         solver = NewtonManager._solver
-        if solver is None or not getattr(solver, "_row_watermark", False):
+        if solver is None or not cls._row_watermark_enabled:
             return
+        read_watermarks = getattr(solver, "constraint_row_watermarks", None)
+        if not callable(read_watermarks):
+            raise RuntimeError("The active FeatherPGS solver does not expose constraint-row watermark telemetry.")
         try:
-            logger.info("FeatherPGS constraint-row watermarks: %s", solver.constraint_row_watermarks())
-        except Exception:
+            watermarks = {str(name): int(value) for name, value in read_watermarks().items()}
+            logger.warning("FeatherPGS constraint-row watermarks: %s", json.dumps(watermarks, sort_keys=True))
+
+            invalid = {
+                name: value
+                for name, value in watermarks.items()
+                if value < 0
+                or (
+                    name.endswith(
+                        ("_dropped_contact_rows_high_water", "_overflow_excess_high_water", "_overflow_world_steps")
+                    )
+                    and value != 0
+                )
+            }
+            for prefix, capacity in cls._row_watermark_capacities.items():
+                raw_high_water = watermarks.get(f"{prefix}_raw_high_water")
+                if raw_high_water is not None and raw_high_water > capacity:
+                    invalid[f"{prefix}_capacity"] = capacity
+            if invalid:
+                raise RuntimeError(
+                    "FeatherPGS constraint-row telemetry exceeded its configured capacity: "
+                    f"{json.dumps(invalid, sort_keys=True)}"
+                )
+        except RuntimeError:
+            raise
+        except Exception as exc:
             # A preceding asynchronous CUDA failure can leave the context
             # unable to service telemetry readback. Preserve the original
             # failure while making the missing diagnostic explicit.
             logger.exception("Unable to read FeatherPGS constraint-row watermarks during shutdown")
+            raise RuntimeError("Unable to read FeatherPGS constraint-row watermarks.") from exc
 
     @classmethod
     def close(cls) -> None:
         """Report opt-in row watermarks before releasing solver resources."""
-        cls._log_constraint_row_watermarks()
-        super().close()
+        try:
+            cls._log_constraint_row_watermarks()
+        finally:
+            cls._row_watermark_enabled = False
+            cls._row_watermark_capacities = {}
+            super().close()

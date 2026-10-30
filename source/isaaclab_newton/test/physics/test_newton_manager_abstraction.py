@@ -25,6 +25,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import logging
 from inspect import signature
 from types import SimpleNamespace
@@ -325,6 +326,7 @@ def test_feather_pgs_build_reports_enabled_watermark_configuration(
         dense_max_constraints=256,
         mf_max_constraints=2048,
         double_buffer=True,
+        row_watermark=True,
         use_parallel_streams=True,
     )
     cfg = SimpleNamespace(debug_mode=True, use_cuda_graph=True)
@@ -375,11 +377,36 @@ def test_feather_pgs_logs_opt_in_constraint_row_watermarks(
             return expected
 
     monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_capacities", {}, raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_enabled", True, raising=False)
 
-    with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
+    with caplog.at_level(logging.WARNING, logger="isaaclab_newton.physics.feather_pgs_manager"):
         NewtonFeatherPGSManager._log_constraint_row_watermarks()
 
-    assert any(str(expected) in record.getMessage() for record in caplog.records)
+    assert any(json.dumps(expected, sort_keys=True) in record.getMessage() for record in caplog.records)
+
+
+def test_feather_pgs_watermark_telemetry_is_observable_without_private_solver_state(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Opt-in telemetry should be structured and visible at the default warning level."""
+    expected = {"dense_high_water": 196, "dense_raw_high_water": 196, "dense_overflow_world_steps": 0}
+
+    class RecordingSolver:
+        def constraint_row_watermarks(self):
+            return expected
+
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_capacities", {}, raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_enabled", True, raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="isaaclab_newton.physics.feather_pgs_manager"):
+        NewtonFeatherPGSManager._log_constraint_row_watermarks()
+
+    assert len(caplog.records) == 1
+    prefix, _, payload = caplog.records[0].getMessage().partition(": ")
+    assert prefix == "FeatherPGS constraint-row watermarks"
+    assert json.loads(payload) == expected
 
 
 def test_feather_pgs_skips_constraint_row_readback_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -392,8 +419,30 @@ def test_feather_pgs_skips_constraint_row_readback_when_disabled(monkeypatch: py
             raise AssertionError("watermark readback should stay disabled")
 
     monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_enabled", False, raising=False)
 
     NewtonFeatherPGSManager._log_constraint_row_watermarks()
+
+
+def test_feather_pgs_watermark_telemetry_fails_closed_on_capacity_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A diagnostic should fail when row demand exceeds its configured capacity."""
+
+    class RecordingSolver:
+        def constraint_row_watermarks(self):
+            return {
+                "dense_raw_high_water": 385,
+                "dense_overflow_excess_high_water": 1,
+                "dense_overflow_world_steps": 1,
+            }
+
+    monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_capacities", {"dense": 384}, raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_enabled", True, raising=False)
+
+    with pytest.raises(RuntimeError, match="exceeded its configured capacity"):
+        NewtonFeatherPGSManager._log_constraint_row_watermarks()
 
 
 def test_feather_pgs_debug_logs_watermarks_at_manager_step_interval(
@@ -410,6 +459,8 @@ def test_feather_pgs_debug_logs_watermarks_at_manager_step_interval(
 
     monkeypatch.setattr(PhysicsManager, "_cfg", SimpleNamespace(debug_mode=True), raising=False)
     monkeypatch.setattr(NewtonManager, "_solver", RecordingSolver(), raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_capacities", {}, raising=False)
+    monkeypatch.setattr(NewtonFeatherPGSManager, "_row_watermark_enabled", True, raising=False)
     monkeypatch.setattr(
         NewtonFeatherPGSManager,
         "_row_watermark_log_step",
@@ -417,13 +468,13 @@ def test_feather_pgs_debug_logs_watermarks_at_manager_step_interval(
         raising=False,
     )
 
-    with caplog.at_level(logging.INFO, logger="isaaclab_newton.physics.feather_pgs_manager"):
+    with caplog.at_level(logging.WARNING, logger="isaaclab_newton.physics.feather_pgs_manager"):
         NewtonFeatherPGSManager._log_solver_debug()
         assert not caplog.records
         NewtonFeatherPGSManager._log_solver_debug()
 
     assert len(caplog.records) == 1
-    assert str(expected) in caplog.records[0].getMessage()
+    assert json.dumps(expected, sort_keys=True) in caplog.records[0].getMessage()
 
 
 @pytest.mark.parametrize(
