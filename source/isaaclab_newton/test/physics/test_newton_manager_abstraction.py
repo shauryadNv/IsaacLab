@@ -237,12 +237,15 @@ def test_feather_pgs_cfg_matches_pinned_solver_signature() -> None:
     config_values = FeatherPGSSolverCfg().to_dict()
     config_values.pop("class_type")
     config_values.pop("solver_type")
+    deprecated_anchor_limit = config_values.pop("contact_friction_anchor_limit")
     solver_parameters = {
         name: parameter
         for name, parameter in signature(SolverFeatherPGS.__init__).parameters.items()
         if name not in {"self", "model"}
     }
 
+    assert deprecated_anchor_limit == 0
+    assert "contact_friction_anchor_limit" not in solver_parameters
     assert set(config_values) == set(solver_parameters)
     for name, parameter in solver_parameters.items():
         assert parameter.default is not parameter.empty

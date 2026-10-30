@@ -20,7 +20,7 @@ overrides = [
     { name = "coverage", specifier = ">=7.6.1" },
     { name = "mujoco", specifier = "~=3.12.0" },
     { name = "mujoco-warp", specifier = "~=3.12.0" },
-    { name = "newton", extras = ["sim"], git = "https://github.com/dylanturpin/newton-collab.git?rev=65ab4b7973fafa81f6e17615600d2aae708b94e6" },
+    { name = "newton", extras = ["sim"], git = "https://github.com/dylanturpin/newton-collab.git?rev=8d6cb39fb45d54d19758d5dfb67e92682144a92e" },
     { name = "newton-usd-schemas", specifier = ">=0.5.0" },
     { name = "numpy", specifier = ">=2" },
     { name = "packaging", specifier = ">=20,<27" },
@@ -2050,7 +2050,7 @@ requires-dist = [
     { name = "meshio", specifier = ">=5.3.5" },
     { name = "moviepy", marker = "extra == 'video'", specifier = ">=1.0.3,<2.0.0.dev0" },
     { name = "myst-parser", marker = "extra == 'dev'" },
-    { name = "newton", extras = ["sim"], git = "https://github.com/dylanturpin/newton-collab.git?rev=65ab4b7973fafa81f6e17615600d2aae708b94e6" },
+    { name = "newton", extras = ["sim"], git = "https://github.com/dylanturpin/newton-collab.git?rev=8d6cb39fb45d54d19758d5dfb67e92682144a92e" },
     { name = "newton-usd-schemas", specifier = ">=0.2.0" },
     { name = "numba", specifier = ">=0.63.1" },
     { name = "numpy", specifier = ">=2" },
@@ -3360,8 +3360,8 @@ wheels = [
 
 [[package]]
 name = "newton"
-version = "1.6.0.dev0"
-source = { git = "https://github.com/dylanturpin/newton-collab.git?rev=65ab4b7973fafa81f6e17615600d2aae708b94e6#65ab4b7973fafa81f6e17615600d2aae708b94e6" }
+version = "1.7.0.dev0"
+source = { git = "https://github.com/dylanturpin/newton-collab.git?rev=8d6cb39fb45d54d19758d5dfb67e92682144a92e#8d6cb39fb45d54d19758d5dfb67e92682144a92e" }
 dependencies = [
     { name = "warp-lang" },
 ]

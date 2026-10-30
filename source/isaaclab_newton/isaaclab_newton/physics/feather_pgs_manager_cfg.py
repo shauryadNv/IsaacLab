@@ -77,11 +77,17 @@ class FeatherPGSSolverCfg(NewtonSolverCfg):
     zero; unsupported configurations warn and use iterative bilateral rows.
     """
 
+    bilateral_preelimination_include_mimics: bool = True
+    """Whether bilateral pre-elimination includes mimic rows."""
+
     joint_limit_activation_gap: float = math.inf
     """Distance from a joint limit at which its row activates [m or rad, depending on joint type]."""
 
     enable_joint_velocity_limits: bool = False
     """Whether to enforce per-DOF joint velocity limits."""
+
+    enable_joint_friction: bool = False
+    """Whether to enforce dry joint friction configured in [N or N·m]."""
 
     velocity_limit_activation_fraction: float = 0.0
     """Fraction of each joint velocity limit at which its row activates [dimensionless]."""
@@ -238,9 +244,42 @@ class FeatherPGSSolverCfg(NewtonSolverCfg):
     contact_torsion_shape_patterns: tuple[str, ...] | None = None
     """Optional shape-label regular expressions selected for torsional friction."""
 
+    contact_torsion_device: bool = False
+    """Whether to prepare experimental torsional-friction rows on the device."""
+
+    enable_torsional_rolling_friction: bool = False
+    """Whether to solve experimental torsional and rolling friction."""
+
+    torsional_rolling_friction_cone: Literal["elliptic", "pyramidal"] = "elliptic"
+    """Cone used to couple sliding, torsional, and rolling friction."""
+
+    torsional_rolling_friction_creep_speed: float = 0.0
+    """Creep speed that softens torsional and rolling stiction [m/s]."""
+
     contact_compliance: bool = False
     """Whether to use experimental implicit material contact compliance.
 
     This mode has restricted matrix-free contact settings and does not support
     contact reduction or CUDA graph capture.
     """
+
+    parallel_tree: bool = False
+    """Whether eligible CUDA articulation trees use parallel branch traversal."""
+
+    enable_sleeping: bool = False
+    """Whether experimental passive-island sleeping is enabled."""
+
+    sleep_linear_threshold: float = 0.05
+    """Body center-of-mass speed threshold for sleeping [m/s]."""
+
+    sleep_angular_threshold: float = 0.15
+    """Body angular speed threshold for sleeping [rad/s]."""
+
+    sleep_quiet_time: float = 0.5
+    """Quiet interval required before an island sleeps [s]."""
+
+    sleep_skip_constraints: bool = True
+    """Whether sleeping islands skip supported constraints and dynamics work."""
+
+    deterministic: bool = False
+    """Whether constraint reservation and split-mode sums use deterministic ordering."""
